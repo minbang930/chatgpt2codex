@@ -31,7 +31,15 @@ if (Test-Path $out) {
     Remove-Item -Force $out
 }
 
-$sourceText = Get-Content -Raw $source
+# Windows PowerShell 5.1 treats UTF-8 files without a BOM as the active ANSI
+# code page when Get-Content is used without -Encoding. The launcher source
+# intentionally contains Korean/Japanese/Chinese/etc. UI strings, so that
+# behavior corrupts the C# source before Add-Type sees it and can turn a valid
+# quoted string into a compiler error. Read with a strict UTF-8 decoder on all
+# PowerShell versions instead of depending on shell-specific defaults.
+$utf8 = New-Object System.Text.UTF8Encoding($false, $true)
+$sourceText = [System.IO.File]::ReadAllText($source, $utf8)
+
 $refs = @("System.Windows.Forms.dll", "System.Drawing.dll")
 $addType = Get-Command Add-Type
 
