@@ -65,7 +65,6 @@ export async function resolveAxElement(appName: string, target: SemanticTarget):
     return {
       found: false,
       reason: "Windows semantic UIA targeting is not implemented yet; provide windowPoint for the M3.1 fallback path",
-      source: "windows-uia-unavailable",
     };
   }
   return { found: false, reason: `Semantic targeting is not supported on ${process.platform}` };
