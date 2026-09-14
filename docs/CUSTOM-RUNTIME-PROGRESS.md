@@ -49,16 +49,23 @@ Relevant commits:
 
 Target behavior:
 
-- [ ] Create one branch per worker.
-- [ ] Create one worktree per worker.
-- [ ] Keep worker worktrees under runtime-managed state, not inside the user's main checkout.
-- [ ] Persist worker branch/worktree assignment in the worker record.
-- [ ] Verify the worktree points at the intended repository and base commit.
-- [ ] Make creation safe/idempotent enough for retries.
-- [ ] Refuse arbitrary worker/worktree paths.
-- [ ] Add cleanup primitives without deleting work by default.
-- [ ] Add real-Git integration tests.
-- [ ] Pass CI.
+- [x] Create one branch per worker.
+- [x] Create one worktree per worker.
+- [x] Keep worker worktrees under runtime-managed state, not inside the user's main checkout.
+- [x] Persist worker branch/worktree assignment in the worker record.
+- [x] Verify the worktree points at the intended repository and base commit.
+- [x] Make creation safe/idempotent enough for retries.
+- [x] Refuse arbitrary worker/worktree paths.
+- [x] Add cleanup primitives without deleting work by default.
+- [x] Add real-Git integration tests.
+- [ ] Pass final CI verification.
+
+Implementation notes:
+
+- `6795635d6d70f4cc59216301b397954746110dae` added managed worker worktrees, persisted workspace metadata, safe cleanup, and real-Git tests.
+- The first macOS run exposed the `/var/...` vs `/private/var/...` alias returned by `realpath`/Git worktree metadata. The runtime correctly refused the mismatch rather than guessing.
+- `84d34d46fffdd657c6dc8b02ed1b15668b4a49d1` canonicalizes existing managed paths before comparison so the same physical worktree is recognized without weakening path confinement.
+- Cross-platform CI now runs the isolated `src/agents` tests on Ubuntu and Windows in addition to typecheck/build; macOS still runs the complete suite.
 
 ## Planned next
 
@@ -116,8 +123,8 @@ Target behavior:
 The original test suite contains desktop-control tests whose behavior is platform-specific. Running the complete suite on Ubuntu/Windows produces failures unrelated to custom-runtime changes, including macOS-only synthetic input/accessibility expectations. CI therefore uses:
 
 ```text
-Ubuntu:   typecheck + build
-Windows:  typecheck + build
+Ubuntu:   typecheck + agent tests + build
+Windows:  typecheck + agent tests + build
 macOS:    typecheck + full test + build
 ```
 
