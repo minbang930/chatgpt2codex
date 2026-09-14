@@ -32,11 +32,18 @@ export function registerWebAgentStopTool(server: McpServer, ctx: ToolContext, dr
         await revokeWorkerCapability(ctx.stateDir, input.workerId).catch(() => undefined);
 
         const browser = await getBrowserWorkerSession(ctx.stateDir, input.workerId);
-        let browserStopped = browser === null || browser.status === "stopped" || browser.status === "failed";
-        if (!browserStopped) {
+        let browserStopped = browser === null || browser.status === "stopped";
+        let browserError: string | undefined;
+        if (browser && browser.status !== "stopped" && browser.status !== "failed") {
           const controller = new BrowserWorkerController(ctx.stateDir, driver);
-          await controller.cancel(input.workerId).catch(() => undefined);
-          browserStopped = true;
+          try {
+            await controller.cancel(input.workerId);
+            browserStopped = true;
+          } catch (error) {
+            browserError = error instanceof Error ? error.message : String(error);
+          }
+        } else if (browser?.status === "failed") {
+          browserError = browser.lastError ?? "Browser worker was already in failed state";
         }
 
         const worker = await cancelAgent(ctx.stateDir, input.workerId, input.reason);
@@ -45,9 +52,12 @@ export function registerWebAgentStopTool(server: McpServer, ctx: ToolContext, dr
             workerId: worker.workerId,
             status: worker.status,
             browserStopped,
+            browserError,
             workspaceRemoved: worker.workspace?.removedAt !== undefined,
           },
-          `Worker ${worker.workerId} stopped and cancelled; its worktree was preserved.`,
+          browserError
+            ? `Worker ${worker.workerId} was cancelled and access revoked; browser shutdown reported a warning. The worktree was preserved.`
+            : `Worker ${worker.workerId} stopped and cancelled; its worktree was preserved.`,
         );
         return {
           ...result,
