@@ -18,6 +18,7 @@ The fork must preserve the original project's reliable Core path and add only th
 - Add one coherent capability at a time, with tests before moving to the next slice.
 - New worker/browser/plugin failures must not break the normal single-agent file/shell/git path.
 - A worker must never reuse or mutate the main ChatGPT session's global active-project/lease state.
+- Windows is the only active target for new Computer Use work. Existing macOS/Linux code may remain, but new M3 design/verification must not expand just to preserve cross-platform parity.
 
 ## Target architecture
 
@@ -63,6 +64,11 @@ chatgpt2codex Custom Runtime
     |   +-- fallback DOM completion detection only
     |
     +-- Windows Computer Use
+    |   +-- existing control lease/queue/policy/audit
+    |   +-- persistent native Windows helper
+    |   +-- screenshot + UIA observation
+    |   +-- semantic/coordinate action backend
+    |   +-- visible Computer Use activity border
     |
     +-- Hook Engine
     |
@@ -199,6 +205,36 @@ DOM inspection is fallback-only for cases where the model/browser terminates wit
 
 The browser controller may know a local CDP target id for launch/cancel/recovery, but correctness must not depend on discovering ChatGPT's private conversation or request identity.
 
+## Windows Computer Use
+
+M3 is Windows-only. Reuse the existing control plane (`lease -> policy -> approval queue -> kill switch -> audit`) and add only Windows observation/action/indicator backends.
+
+Detailed design and external-repository research are recorded in `docs/WINDOWS-COMPUTER-USE-DESIGN.md`.
+
+Primary direction:
+
+```text
+existing control plane
+    |
+    v
+persistent Windows helper
+    +-- Win32 window resolve/activation
+    +-- SendInput
+    +-- UI Automation observation/actions
+    +-- app-window screenshot capture
+    +-- click-through activity-border overlay
+```
+
+Borrow architecture and edge-case handling from mature implementations rather than reproducing their whole runtimes:
+
+- Microsoft UFO: Win32 + UIA inspection, bulk/cached semantic properties, layered screenshot fallback.
+- UI-TARS Desktop: small Operator boundary, compact action vocabulary, explicit DPI/coordinate normalization.
+- Microsoft PowerToys: native non-activating/topmost overlay patterns for the visible Computer Use indicator.
+
+Do not add Python/pywinauto, NutJS, or another desktop framework unless live Windows testing identifies a concrete reliability gap that justifies the added dependency.
+
+The visible activity border is UX only; it must never become part of authorization correctness. It should be topmost, no-activate, click-through, absent from screenshots supplied to the model, and cleared on idle/kill/cancel.
+
 ## Hooks
 
 Later, add a small lifecycle hook engine inspired by Codex-style hooks. Initial candidates:
@@ -235,7 +271,7 @@ This separation reduces the chance that plugin discovery/schema changes destabil
 - Fork created.
 - Development branch created.
 - Cross-platform typecheck/build CI.
-- Full test suite on macOS, where the existing desktop-control tests are intended to run.
+- Full test suite on macOS, where the existing desktop-control tests were originally intended to run.
 
 ### M1 - Local multi-agent runtime
 
@@ -287,8 +323,39 @@ No browser worker yet.
 
 ### M3 - Windows Computer Use
 
-- Native Windows desktop control suited to the VMware worker environment.
-- Keep it independent from Browser Worker completion/identity logic.
+#### M3.1 - Windows backend foundation
+
+- Stabilize persistent helper IPC/lifecycle.
+- Exact window resolve/activation.
+- Mouse, Unicode typing, hotkeys/keys.
+- Small platform backend/operator boundary.
+- Unit/CI checks without injecting input into a headless runner.
+
+#### M3.2 - Windows observation
+
+- App/window enumeration.
+- Allowlisted app-window screenshot pipeline.
+- Screenshot validation and privacy gates.
+- DPI/coordinate normalization.
+
+#### M3.3 - UIA semantic layer
+
+- Bounded/cached UIA snapshot.
+- Ephemeral semantic target ids scoped to an observation.
+- Semantic invoke/value/focus/selection where supported.
+- Coordinate fallback retained.
+
+#### M3.4 - Computer Use activity indicator
+
+- Thin click-through topmost border/label while Computer Use is active.
+- No focus stealing or taskbar/Alt-Tab presence.
+- Exclude or hide the overlay from screenshots.
+- Kill/cancel/idle always clears it.
+
+#### M3.5 - VMware live smoke validation
+
+- Validate screenshot -> target -> action loops on the actual interactive Windows VM.
+- Exercise Notepad/basic text app, Explorer, browser, multi-window focus, DPI scaling, kill/cancel, repeated sessions, and activity-border behavior.
 
 ### M4 - Hooks
 
@@ -313,6 +380,7 @@ No browser worker yet.
 - Letting workers push remotes by default.
 - Maintaining both a CDP driver and an extension/bridge path before real-world evidence justifies the extra browser integration.
 - Building a plugin marketplace before Core multi-agent behavior is stable.
+- Expanding M3 to macOS/Linux parity when Windows is the only required Computer Use target.
 
 ## Development rule
 
