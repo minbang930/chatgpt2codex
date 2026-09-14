@@ -8,7 +8,6 @@ import { assertScreenshotTargetAllowed, maskSensitiveRegions } from "./screensho
 import { captureControlAppScreenshot, captureControlScreenScreenshot } from "./capture.js";
 import { executeApprovedAction } from "./executor.js";
 import * as desktopInput from "./input-backend.js";
-import * as macInput from "./mac-input.js";
 import {
   approveAction,
   enqueue,
@@ -153,6 +152,35 @@ export async function handleComputerScreenshot(ctx: ToolContext, input: Computer
       : await captureControlScreenScreenshot(root, { label: input.label, waitMs: input.waitMs });
     const masked = await maskSensitiveRegions({ pngPath: result.path, appName: input.appName });
 
+    // Windows semantic observation is deliberately coupled to an already
+    // authorized, allowlisted app-window screenshot rather than exposed as a
+    // second privacy surface. UIA failure is best-effort: the screenshot and
+    // existing coordinate fallback remain usable even when a provider hangs,
+    // omits patterns, or the separate UIA helper is unavailable.
+    let semanticObservation: desktopInput.WindowsUiaObservation | undefined;
+    let semanticWarning: string | undefined;
+    if (process.platform === "win32" && input.appName) {
+      try {
+        semanticObservation = await desktopInput.snapshotSemanticElements(input.appName, { maxElements: 120, maxDepth: 8 });
+        await ctx.ledger.append({
+          type: "control.semantic.observed",
+          projectId,
+          appName: input.appName,
+          observationId: semanticObservation.observationId,
+          elementCount: semanticObservation.elements.length,
+          truncated: semanticObservation.truncated,
+        });
+      } catch (error) {
+        semanticWarning = redact(error instanceof Error ? error.message : String(error));
+        await ctx.ledger.append({
+          type: "control.semantic.unavailable",
+          projectId,
+          appName: input.appName,
+          error: semanticWarning,
+        });
+      }
+    }
+
     await ctx.ledger.append({
       type: "control.screenshot.captured",
       projectId,
@@ -163,6 +191,11 @@ export async function handleComputerScreenshot(ctx: ToolContext, input: Computer
     });
 
     const base64 = await fs.readFile(masked.pngPath).then((buf) => buf.toString("base64"));
+    const semanticText = semanticObservation
+      ? ` Windows UIA observation ${semanticObservation.observationId} contains ${semanticObservation.elements.length} element(s); pass an element.selector unchanged as computer_request_action.target.ax. Available semantic actions are listed per element; click uses invoke/select/focus and type uses setValue, with windowPoint fallback preserved.`
+      : semanticWarning
+        ? ` Windows UIA observation unavailable (${semanticWarning}); use windowPoint fallback.`
+        : "";
     return {
       structuredContent: {
         path: masked.pngPath,
@@ -170,9 +203,11 @@ export async function handleComputerScreenshot(ctx: ToolContext, input: Computer
         appName: input.appName ?? null,
         ...(result.captureMethod ? { captureMethod: result.captureMethod } : {}),
         ...(result.dpi ? { dpi: result.dpi, scaleFactor: result.scaleFactor } : {}),
+        ...(semanticObservation ? { semanticObservation } : {}),
+        ...(semanticWarning ? { semanticWarning } : {}),
       },
       content: [
-        { type: "text", text: `Captured control screenshot: ${masked.pngPath}` },
+        { type: "text", text: `Captured control screenshot: ${masked.pngPath}.${semanticText}` },
         { type: "image", data: base64, mimeType: "image/png" },
       ],
     } satisfies CallToolResultLike;
@@ -237,12 +272,13 @@ export async function handleComputerRequestAction(ctx: ToolContext, input: Compu
       throw err;
     }
 
-    // Dry-run preview: resolve the AX target read-only (no activate/click) so
-    // the local approver can see role/title/frame/app/window/matchCount
-    // before anything executes. Windows semantic targeting arrives in M3.3.
+    // Read-only semantic preview for the local/ChatGPT approver. macOS uses
+    // role/title AX matching; Windows requires the observation-scoped label
+    // emitted by the preceding app screenshot. Neither path activates or
+    // mutates the target at preview time.
     let resolved: ResolvedTargetPreview | undefined;
-    if (input.target.ax && process.platform === "darwin") {
-      resolved = await macInput.resolveAxElement(input.appName, input.target.ax).catch((err) => ({
+    if (input.target.ax && (process.platform === "darwin" || process.platform === "win32")) {
+      resolved = await desktopInput.resolveAxElement(input.appName, input.target.ax).catch((err) => ({
         found: false,
         reason: err instanceof Error ? err.message : String(err),
       }));
