@@ -2,11 +2,12 @@ import { promises as fs } from "node:fs";
 import { DomainError, ErrorCode, makeResult, type ToolContext, type ToolResult } from "../types.js";
 import { requireProjectLease } from "../workspace/lease-guard.js";
 import { resolveActiveProject } from "../workspace/active.js";
-import { captureE2eAppScreenshot, captureE2eScreenshot } from "../e2e/local-e2e.js";
 import { redact } from "../policy/secrets.js";
 import { assertAllowedTarget, controlAllowlist, isAppAllowed, isControlChatGptExposed } from "./policy.js";
 import { assertScreenshotTargetAllowed, maskSensitiveRegions } from "./screenshot-mask.js";
+import { captureControlAppScreenshot, captureControlScreenScreenshot } from "./capture.js";
 import { executeApprovedAction } from "./executor.js";
+import * as desktopInput from "./input-backend.js";
 import * as macInput from "./mac-input.js";
 import {
   approveAction,
@@ -114,21 +115,21 @@ export interface ComputerScreenshotInput {
 export async function handleComputerScreenshot(ctx: ToolContext, input: ComputerScreenshotInput): Promise<CallToolResultLike> {
   return withControlErrorMapping(ctx, "computer_screenshot", input, async () => {
     const { projectId, root } = await requireControlLease(ctx);
-    // Full-screen capture (no appName) shows whatever is frontmost, so the
-    // sensitive-app gate must check the *live* frontmost app in that case —
-    // an app-targeted capture is already covered by the appName check below.
+    // A full-screen capture shows whatever is visible, so the sensitive-app
+    // gate checks the live frontmost app where the platform can report it.
+    // Windows ChatGPT-exposed mode still refuses full-screen capture entirely
+    // below; M3 adds only explicit app-window capture there.
     const frontmostApp =
-      input.appName === undefined && process.platform === "darwin"
-        ? await macInput.resolveFrontmostApp().catch(() => undefined)
+      input.appName === undefined && (process.platform === "darwin" || process.platform === "win32")
+        ? await desktopInput.resolveFrontmostApp().catch(() => undefined)
         : undefined;
     assertScreenshotTargetAllowed(input.appName, frontmostApp);
 
     // Screenshot capture must pass the same allowlist gate as synthetic
     // input (click/type/key): the denylist check above only refuses known
     // sensitive apps, it does not require the target to be explicitly
-    // opted in. Without this, any non-denylisted, non-allowlisted app
-    // (Mail, Messages, a private editor, ...) could be captured even
-    // though it could never be clicked/typed into.
+    // opted in. Without this, any non-denylisted, non-allowlisted app could
+    // be captured even though it could never be clicked/typed into.
     const allowlist = controlAllowlist();
     if (input.appName !== undefined) {
       if (!isAppAllowed(input.appName, allowlist)) {
@@ -137,20 +138,9 @@ export async function handleComputerScreenshot(ctx: ToolContext, input: Computer
         });
       }
     } else if (isControlChatGptExposed()) {
-      // A full-screen capture (`screencapture -x`) captures every visible
-      // window on the display, not just the frontmost one — checking only
-      // the live frontmost app's denylist/allowlist status (as an earlier
-      // version of this branch did, by allowing capture whenever the
-      // frontmost app itself was allowlisted) cannot see a *background*
-      // sensitive-app window (e.g. a password manager open behind the
-      // frontmost app, or visible on a second display/Space) that would
-      // still be captured and returned to ChatGPT. Rather than enumerate
-      // every on-screen window's owning process, the ChatGPT-exposed
-      // (remotely reachable) mode simply refuses full-screen capture
-      // outright and requires an explicit, allowlisted appName instead —
-      // captureE2eAppScreenshot only ever captures that single app's own
-      // window region, so it cannot leak a background window by
-      // construction.
+      // Full-screen capture can include background sensitive windows. The
+      // remotely reachable mode therefore requires an explicit allowlisted
+      // appName and captures only that selected window.
       throw new DomainError(
         ErrorCode.SENSITIVE_TARGET_BLOCKED,
         "Full-screen capture is not available when exposed to ChatGPT (it can show background sensitive windows the allowlist can't see); pass an allowlisted appName to capture a specific window",
@@ -159,8 +149,8 @@ export async function handleComputerScreenshot(ctx: ToolContext, input: Computer
     }
 
     const result = input.appName
-      ? await captureE2eAppScreenshot(root, { appName: input.appName, label: input.label, waitMs: input.waitMs })
-      : await captureE2eScreenshot(root, { label: input.label, waitMs: input.waitMs });
+      ? await captureControlAppScreenshot(root, { appName: input.appName, label: input.label, waitMs: input.waitMs })
+      : await captureControlScreenScreenshot(root, { label: input.label, waitMs: input.waitMs });
     const masked = await maskSensitiveRegions({ pngPath: result.path, appName: input.appName });
 
     await ctx.ledger.append({
@@ -168,11 +158,19 @@ export async function handleComputerScreenshot(ctx: ToolContext, input: Computer
       projectId,
       appName: input.appName ?? "screen",
       masked: masked.masked,
+      captureMethod: result.captureMethod,
+      dpi: result.dpi,
     });
 
     const base64 = await fs.readFile(masked.pngPath).then((buf) => buf.toString("base64"));
     return {
-      structuredContent: { path: masked.pngPath, bytes: result.bytes, appName: input.appName ?? null },
+      structuredContent: {
+        path: masked.pngPath,
+        bytes: result.bytes,
+        appName: input.appName ?? null,
+        ...(result.captureMethod ? { captureMethod: result.captureMethod } : {}),
+        ...(result.dpi ? { dpi: result.dpi, scaleFactor: result.scaleFactor } : {}),
+      },
       content: [
         { type: "text", text: `Captured control screenshot: ${masked.pngPath}` },
         { type: "image", data: base64, mimeType: "image/png" },
@@ -197,11 +195,8 @@ export interface ComputerRequestActionInput {
 // bounds how many approvedVia:"chatgpt" actions can auto-execute inside a
 // rolling window; once the cap is hit, further requests fall back to the
 // normal queue+local-approval path below (never hard-fail the request), so a
-// runaway burst surfaces to the local operator (via `control status`/the
-// status bar) instead of continuing to run unattended. This does not replace
-// or weaken any existing gate (sensitive-app denylist, control allowlist,
-// kill switch, 2nd live-frontmost re-check) — it only caps how many actions
-// can skip the local-approval step in a given window.
+// runaway burst surfaces to the local operator instead of continuing to run
+// unattended.
 const CHATGPT_EXPOSED_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const CHATGPT_EXPOSED_RATE_LIMIT_MAX = 20;
 
@@ -225,7 +220,10 @@ export async function handleComputerRequestAction(ctx: ToolContext, input: Compu
       throw new DomainError(ErrorCode.CONTROL_KILLED, "Control session is killed; grant a new control lease to resume");
     }
 
-    const frontmostApp = process.platform === "darwin" ? await macInput.resolveFrontmostApp().catch(() => undefined) : undefined;
+    const frontmostApp =
+      process.platform === "darwin" || process.platform === "win32"
+        ? await desktopInput.resolveFrontmostApp().catch(() => undefined)
+        : undefined;
     try {
       assertAllowedTarget({ appName: input.appName, frontmostAppName: frontmostApp, allowlist: controlAllowlist() });
     } catch (err) {
@@ -241,10 +239,7 @@ export async function handleComputerRequestAction(ctx: ToolContext, input: Compu
 
     // Dry-run preview: resolve the AX target read-only (no activate/click) so
     // the local approver can see role/title/frame/app/window/matchCount
-    // before anything executes. Never blocks the request: a resolve failure
-    // (e.g. an Electron/Chromium app with an empty AX tree) is surfaced as
-    // resolved.found=false rather than an error, so the approver knows to
-    // expect an executor-time windowPoint fallback.
+    // before anything executes. Windows semantic targeting arrives in M3.3.
     let resolved: ResolvedTargetPreview | undefined;
     if (input.target.ax && process.platform === "darwin") {
       resolved = await macInput.resolveAxElement(input.appName, input.target.ax).catch((err) => ({
@@ -275,14 +270,8 @@ export async function handleComputerRequestAction(ctx: ToolContext, input: Compu
     });
 
     if (isControlChatGptExposed() && !(await isChatGptExposedRateLimited(ctx.stateDir))) {
-      // Reaching this call at all means the owner's ChatGPT client already
-      // showed its Confirm/Deny prompt (driven by this tool's non-read-only
-      // annotations) and the owner confirmed on their phone — that is the
-      // human approval gate in this mode. Approve and execute immediately
-      // through the exact same executor.ts path a local `control approve`
-      // would take (kill re-check, darwin preflight, 2nd live-frontmost
-      // sensitive-app/allowlist check, before/after evidence, audit), just
-      // tagged approvedVia:"chatgpt" for the trail.
+      // Reaching this call means the owner's client already showed its
+      // Confirm/Deny prompt. Execute through the same shared executor path.
       const approved = await approveAction(ctx.stateDir, record.actionId, { approvedVia: "chatgpt" });
       await executeApprovedAction(ctx, approved);
       const done = (await getAction(ctx.stateDir, record.actionId)) ?? approved;
