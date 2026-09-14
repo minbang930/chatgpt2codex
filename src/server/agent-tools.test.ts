@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer } from "./mcp-server.js";
 import type { Lease, ToolContext } from "../types.js";
+import { issueWorkerCapability } from "../agents/capability.js";
 
 const execFileAsync = promisify(execFile);
 const tempDirs: string[] = [];
@@ -147,7 +148,8 @@ describe("MCP agent tools", () => {
     const status = await tool.agent_status?.({ workerId });
     expect(status?.structuredContent?.status).toBe("pending");
 
-    const finished = await tool.worker_finish?.({ workerId, summary: "Worker task complete", checks: ["verified"] });
+    const capability = await issueWorkerCapability(ctx.stateDir, workerId);
+    const finished = await tool.worker_finish?.({ workerToken: capability.token, summary: "Worker task complete", checks: ["verified"] });
     expect(finished?.isError).not.toBe(true);
     expect(finished?.structuredContent?.status).toBe("completed");
     expect((finished?.structuredContent?.result as { summary?: string } | undefined)?.summary).toBe("Worker task complete");
