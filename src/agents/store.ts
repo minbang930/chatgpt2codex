@@ -8,6 +8,7 @@ const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 const WORKER_ID_RE = /^wrk_[0-9a-fA-F-]{36}$/;
 const EVENT_ID_RE = /^evt_[0-9a-fA-F-]{36}$/;
+const COMMIT_RE = /^[0-9a-fA-F]{40,64}$/;
 
 export type WorkerStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 export type WorkerFinalStatus = Extract<WorkerStatus, "completed" | "failed" | "cancelled">;
@@ -27,6 +28,14 @@ export interface WorkerNotification {
   notifiedAt?: number;
 }
 
+export interface WorkerWorkspace {
+  branch: string;
+  worktreePath: string;
+  baseCommit: string;
+  createdAt: number;
+  removedAt?: number;
+}
+
 export interface WorkerRecord {
   workerId: string;
   projectId: string;
@@ -36,6 +45,7 @@ export interface WorkerRecord {
   updatedAt: number;
   startedAt?: number;
   finishedAt?: number;
+  workspace?: WorkerWorkspace;
   result?: WorkerResult;
   error?: string;
   notification?: WorkerNotification;
@@ -56,6 +66,14 @@ const WorkerNotificationSchema = z.object({
   notifiedAt: z.number().int().nonnegative().optional(),
 });
 
+const WorkerWorkspaceSchema = z.object({
+  branch: z.string().min(1),
+  worktreePath: z.string().min(1),
+  baseCommit: z.string().regex(COMMIT_RE),
+  createdAt: z.number().int().nonnegative(),
+  removedAt: z.number().int().nonnegative().optional(),
+});
+
 const WorkerRecordSchema = z.object({
   workerId: z.string().regex(WORKER_ID_RE),
   projectId: z.string().min(1),
@@ -65,6 +83,7 @@ const WorkerRecordSchema = z.object({
   updatedAt: z.number().int().nonnegative(),
   startedAt: z.number().int().nonnegative().optional(),
   finishedAt: z.number().int().nonnegative().optional(),
+  workspace: WorkerWorkspaceSchema.optional(),
   result: WorkerResultSchema.optional(),
   error: z.string().optional(),
   notification: WorkerNotificationSchema.optional(),
@@ -131,6 +150,10 @@ async function requireWorker(stateDir: string, workerId: string): Promise<Worker
 
 function isFinalStatus(status: WorkerStatus): status is WorkerFinalStatus {
   return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+function sameWorkspace(a: WorkerWorkspace, b: WorkerWorkspace): boolean {
+  return a.branch === b.branch && a.worktreePath === b.worktreePath && a.baseCommit === b.baseCommit;
 }
 
 function makeNotification(status: WorkerFinalStatus, now: number): WorkerNotification {
@@ -222,6 +245,60 @@ export async function listWorkers(stateDir: string): Promise<WorkerRecord[]> {
     if (worker) workers.push(worker);
   }
   return workers.sort((a, b) => a.createdAt - b.createdAt);
+}
+
+export async function assignWorkerWorkspace(
+  stateDir: string,
+  workerId: string,
+  workspace: WorkerWorkspace,
+): Promise<WorkerRecord> {
+  const current = await requireWorker(stateDir, workerId);
+  const validated = WorkerWorkspaceSchema.parse(workspace);
+  if (current.workspace) {
+    if (sameWorkspace(current.workspace, validated)) return current;
+    throw new DomainError(
+      ErrorCode.WORKSPACE_NOT_READY,
+      `Worker ${workerId} already has a different workspace assignment`,
+    );
+  }
+  if (isFinalStatus(current.status)) {
+    throw new DomainError(
+      ErrorCode.WORKSPACE_NOT_READY,
+      `Worker ${workerId} is already ${current.status}; cannot assign a workspace`,
+    );
+  }
+
+  const now = Date.now();
+  const next: WorkerRecord = {
+    ...current,
+    workspace: validated,
+    updatedAt: Math.max(current.updatedAt, now),
+  };
+  await writeWorker(stateDir, next);
+  return next;
+}
+
+export async function markWorkerWorkspaceRemoved(
+  stateDir: string,
+  workerId: string,
+  removedAt = Date.now(),
+): Promise<WorkerRecord> {
+  const current = await requireWorker(stateDir, workerId);
+  if (!current.workspace) {
+    throw new DomainError(ErrorCode.WORKSPACE_NOT_READY, `Worker ${workerId} has no workspace assignment`);
+  }
+  if (current.workspace.removedAt !== undefined) return current;
+
+  const next: WorkerRecord = {
+    ...current,
+    updatedAt: Math.max(current.updatedAt, removedAt),
+    workspace: {
+      ...current.workspace,
+      removedAt,
+    },
+  };
+  await writeWorker(stateDir, next);
+  return next;
 }
 
 export async function markWorkerRunning(stateDir: string, workerId: string): Promise<WorkerRecord> {
