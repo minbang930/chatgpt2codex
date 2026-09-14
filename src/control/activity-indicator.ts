@@ -30,9 +30,9 @@ interface PendingRequest {
   timer: NodeJS.Timeout;
 }
 
-const STARTUP_TIMEOUT_MS = 30_000;
+const STARTUP_TIMEOUT_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 5_000;
-const DEFAULT_IDLE_HIDE_MS = 900;
+const DEFAULT_IDLE_HIDE_MS = 1_200;
 const MAX_STDERR = 6_000;
 
 /**
@@ -40,8 +40,10 @@ const MAX_STDERR = 6_000;
  * from win-native.ts is intentional: a cosmetic indicator can fail/restart
  * without disturbing the trusted SendInput helper or changing authorization.
  *
- * The overlay consists of thin topmost strips around every Windows display
- * plus a small "Computer Use" badge on the primary display. Every window is
+ * The overlay uses one shaped topmost window per Windows display. Its region
+ * contains an inset four-sided frame plus a small primary-display badge, so
+ * right/bottom edges stay inside the physical display instead of being clipped.
+ * Every window is
  * TOOLWINDOW + NOACTIVATE + TRANSPARENT, returns HTTRANSPARENT for hit-tests,
  * and requests WDA_EXCLUDEFROMCAPTURE. capture.ts additionally suppresses the
  * overlay around the actual pixel read as a fallback for capture APIs/drivers
@@ -62,6 +64,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
@@ -77,19 +80,37 @@ public sealed class ComputerUseOverlayForm : Form {
     static readonly IntPtr MA_NOACTIVATE = new IntPtr(3);
     const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
 
+    readonly bool showBadge;
+    int dpi = 96;
+
     [DllImport("user32.dll")]
     static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+    [DllImport("user32.dll")]
+    static extern uint GetDpiForWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")]
+    static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
 
-    public ComputerUseOverlayForm(Rectangle bounds, Color color, double opacity) {
+    public static void EnableProcessDpiAwareness() {
+        try {
+            if (SetProcessDpiAwarenessContext(new IntPtr(-4))) return;
+        } catch { }
+        try { SetProcessDPIAware(); } catch { }
+    }
+
+    public ComputerUseOverlayForm(Rectangle bounds, bool showPrimaryBadge) {
+        showBadge = showPrimaryBadge;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
-        BackColor = color;
-        Opacity = opacity;
+        BackColor = Color.Black;
+        Opacity = 0.90;
         Bounds = bounds;
         TabStop = false;
-        Enabled = false;
+        DoubleBuffered = true;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
     }
 
     protected override bool ShowWithoutActivation { get { return true; } }
@@ -102,9 +123,102 @@ public sealed class ComputerUseOverlayForm : Form {
         }
     }
 
+    int Scale(int logicalPixels) {
+        return Math.Max(1, (int)Math.Round(logicalPixels * Math.Max(96, dpi) / 96.0));
+    }
+
+    Rectangle[] BorderRects() {
+        int inset = Scale(2);
+        int thickness = Scale(4);
+        int width = Math.Max(1, ClientSize.Width);
+        int height = Math.Max(1, ClientSize.Height);
+        int horizontalWidth = Math.Max(1, width - (2 * inset));
+        int verticalHeight = Math.Max(1, height - (2 * inset));
+        return new Rectangle[] {
+            new Rectangle(inset, inset, horizontalWidth, thickness),
+            new Rectangle(inset, Math.Max(inset, height - inset - thickness), horizontalWidth, thickness),
+            new Rectangle(inset, inset, thickness, verticalHeight),
+            new Rectangle(Math.Max(inset, width - inset - thickness), inset, thickness, verticalHeight),
+        };
+    }
+
+    Rectangle BadgeRect() {
+        int width = Scale(132);
+        int height = Scale(28);
+        int top = Scale(12);
+        return new Rectangle(Math.Max(0, (ClientSize.Width - width) / 2), top, width, height);
+    }
+
+    static GraphicsPath RoundedRect(Rectangle rect, int radius) {
+        var path = new GraphicsPath();
+        int diameter = Math.Max(2, Math.Min(Math.Min(rect.Width, rect.Height), radius * 2));
+        var arc = new Rectangle(rect.X, rect.Y, diameter, diameter);
+        path.AddArc(arc, 180, 90);
+        arc.X = rect.Right - diameter;
+        path.AddArc(arc, 270, 90);
+        arc.Y = rect.Bottom - diameter;
+        path.AddArc(arc, 0, 90);
+        arc.X = rect.Left;
+        path.AddArc(arc, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+
+    void UpdateWindowRegion() {
+        if (ClientSize.Width <= 0 || ClientSize.Height <= 0) return;
+        var next = new Region();
+        next.MakeEmpty();
+        foreach (var rect in BorderRects()) next.Union(rect);
+        if (showBadge) {
+            using (var badgePath = RoundedRect(BadgeRect(), Scale(7))) next.Union(badgePath);
+        }
+        var previous = Region;
+        Region = next;
+        if (previous != null) previous.Dispose();
+    }
+
     protected override void OnHandleCreated(EventArgs e) {
         base.OnHandleCreated(e);
+        try {
+            var value = GetDpiForWindow(Handle);
+            if (value >= 96) dpi = (int)value;
+        } catch { dpi = 96; }
+        UpdateWindowRegion();
         try { SetWindowDisplayAffinity(Handle, WDA_EXCLUDEFROMCAPTURE); } catch { }
+    }
+
+    protected override void OnSizeChanged(EventArgs e) {
+        base.OnSizeChanged(e);
+        if (IsHandleCreated) UpdateWindowRegion();
+    }
+
+    protected override void OnPaintBackground(PaintEventArgs e) {
+    }
+
+    protected override void OnPaint(PaintEventArgs e) {
+        var accent = Color.FromArgb(0, 120, 212);
+        using (var accentBrush = new SolidBrush(accent)) {
+            foreach (var rect in BorderRects()) e.Graphics.FillRectangle(accentBrush, rect);
+        }
+
+        if (showBadge) {
+            var badge = BadgeRect();
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var badgePath = RoundedRect(badge, Scale(7)))
+            using (var badgeBrush = new SolidBrush(Color.FromArgb(28, 28, 30))) {
+                e.Graphics.FillPath(badgeBrush, badgePath);
+            }
+            using (var font = new Font("Segoe UI", 9.0f, FontStyle.Bold, GraphicsUnit.Point)) {
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    "Computer Use",
+                    font,
+                    badge,
+                    Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix
+                );
+            }
+        }
     }
 
     protected override void WndProc(ref Message m) {
@@ -124,10 +238,12 @@ public static class ComputerUseOverlayHost {
     static int parentPid;
 
     public static int Probe() {
+        ComputerUseOverlayForm.EnableProcessDpiAwareness();
         return Screen.AllScreens.Length;
     }
 
     public static void EnsureStarted(int ownerPid) {
+        ComputerUseOverlayForm.EnableProcessDpiAwareness();
         lock (Sync) {
             if (uiThread != null && uiThread.IsAlive && dispatcher != null && !dispatcher.IsDisposed) return;
             parentPid = ownerPid;
@@ -168,50 +284,14 @@ public static class ComputerUseOverlayHost {
         visible = false;
     }
 
-    static Rectangle ClampRect(Rectangle r) {
-        return new Rectangle(r.X, r.Y, Math.Max(1, r.Width), Math.Max(1, r.Height));
-    }
-
-    static void AddStrip(Rectangle bounds, Color color, double opacity) {
-        var form = new ComputerUseOverlayForm(ClampRect(bounds), color, opacity);
-        forms.Add(form);
-        form.Show();
-    }
-
     static void ShowCore() {
         if (visible) return;
         HideCore();
-        var accent = Color.FromArgb(0, 120, 212);
-        const int thickness = 3;
+        ComputerUseOverlayForm.EnableProcessDpiAwareness();
         foreach (var screen in Screen.AllScreens) {
-            var b = screen.Bounds;
-            AddStrip(new Rectangle(b.Left, b.Top, b.Width, thickness), accent, 0.58);
-            AddStrip(new Rectangle(b.Left, b.Bottom - thickness, b.Width, thickness), accent, 0.58);
-            AddStrip(new Rectangle(b.Left, b.Top, thickness, b.Height), accent, 0.58);
-            AddStrip(new Rectangle(b.Right - thickness, b.Top, thickness, b.Height), accent, 0.58);
-        }
-
-        var primary = Screen.PrimaryScreen;
-        if (primary != null) {
-            var b = primary.Bounds;
-            const int badgeWidth = 126;
-            const int badgeHeight = 26;
-            var badge = new ComputerUseOverlayForm(
-                new Rectangle(b.Left + (b.Width - badgeWidth) / 2, b.Top + 8, badgeWidth, badgeHeight),
-                Color.FromArgb(32, 32, 32),
-                0.86
-            );
-            var label = new Label();
-            label.Text = "Computer Use";
-            label.ForeColor = Color.White;
-            label.BackColor = Color.Transparent;
-            label.Dock = DockStyle.Fill;
-            label.TextAlign = ContentAlignment.MiddleCenter;
-            label.Font = new Font("Segoe UI", 9.0f, FontStyle.Bold);
-            label.Enabled = false;
-            badge.Controls.Add(label);
-            forms.Add(badge);
-            badge.Show();
+            var overlay = new ComputerUseOverlayForm(screen.Bounds, screen.Primary);
+            forms.Add(overlay);
+            overlay.Show();
         }
         visible = true;
     }
