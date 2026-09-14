@@ -4,9 +4,9 @@ Implementation status for `dev/custom-runtime`.
 
 ## Current status
 
-Overall phase: **M2 - ChatGPT Web workers**
+Overall phase: **M3 - Windows Computer Use**
 
-Active unit: **M2.4 - Worker completion/recovery**
+Active unit: **M3.1 - Windows native input backend foundation**
 
 ## Completed
 
@@ -104,8 +104,6 @@ Implementation notes:
 - The current launch contract is intentionally two-step: `agent_spawn` prepares the isolated durable worker/worktree; `agent_launch` opens/submits the Web worker. A normal parent agent should call them back-to-back. This keeps browser retry independent from workspace creation.
 - Real Windows/Chrome smoke testing still requires signing in once to the dedicated worker Chrome profile; automated CI uses the driver boundary rather than a live ChatGPT account.
 
-## In progress
-
 ### M2.4 - Worker completion/recovery
 
 - [x] Keep `worker_finish` as the primary completion handshake and durable result source of truth.
@@ -118,7 +116,10 @@ Implementation notes:
 - [x] Reuse `agent_launch` to recover a running worker in a fresh browser attempt with a new capability.
 - [x] Refuse recovery while an existing browser attempt is still live/non-final, preventing duplicate worker tabs.
 - [x] Add parallel-worker lifecycle/recovery tests and verify them on Ubuntu, Windows, and macOS.
-- [ ] Add DOM completion detection only as a fallback when the worker fails to call `worker_finish`.
+- [x] Add DOM completion fallback when ChatGPT becomes stably idle without calling `worker_finish`.
+- [x] Treat DOM text only as diagnostic recovery context; never fabricate a durable completed worker result from it.
+- [x] Revoke the stale capability and keep the durable worker/worktree recoverable when the DOM fallback fires.
+- [x] Ignore DOM probe/selector failures rather than failing a healthy worker.
 
 Implementation notes:
 
@@ -134,13 +135,26 @@ Implementation notes:
 - Initial recovery CI run `34816631482` exposed a real regression in the pre-existing cancellation race: the refactored launch helper no longer closed a tab if the durable worker was cancelled between browser submission and `pending -> running`. `1efec18f` restored cleanup around that transition instead of weakening the race test.
 - `afe55336` added a local CDP target-probe test that does not start Chrome. CI run `34816770765` passed Ubuntu, Windows, and macOS for the corrected recovery slice.
 - `08c206fb` added parallel-worker recovery coverage; CI run `34816999035` passed Ubuntu, Windows, and macOS.
+- `056be27c` added recoverable missing-`worker_finish` handling; `a2c2495d` added the stable two-sample ChatGPT DOM probe; `d5de1296` wired it into `agent_status`; `2c4ec1b7` added fallback/recovery regression coverage.
+- CI run `34871554912` passed Ubuntu, Windows, and macOS for the DOM completion fallback slice.
 - The legacy `agent_cancel` remains the durable-state cancellation primitive. `agent_stop` is currently the Web-worker-aware public path; consolidation can wait until the behavior is proven live rather than widening the older tool implementation now.
+
+## In progress
+
+### M3.1 - Windows native input backend foundation
+
+- [ ] Inspect and preserve the existing desktop-control queue, policy, lease, and MCP surface.
+- [ ] Add a Windows-native input backend behind the current platform boundary instead of duplicating control orchestration.
+- [ ] Keep macOS behavior unchanged.
+- [ ] Add Windows-safe tests that do not inject input into the CI runner desktop.
 
 ## Planned next
 
-### M3 - Windows Computer Use
+### M3.2+ - Windows Computer Use integration
 
-- [ ] Windows-native desktop control for the VMware environment.
+- [ ] Native window/app enumeration and activation where needed by the existing control surface.
+- [ ] Windows screenshot/evidence integration.
+- [ ] End-to-end native desktop-control smoke validation in the VMware Windows environment.
 
 ### M4 - Hooks
 
