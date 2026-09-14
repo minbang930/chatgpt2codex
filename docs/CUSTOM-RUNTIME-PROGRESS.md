@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **M3 - Windows Computer Use**
 
-Active unit: **M3.1 - Windows native input backend foundation**
+Active unit: **M3.2 - Windows observation**
 
 ## Completed
 
@@ -139,22 +139,60 @@ Implementation notes:
 - CI run `34871554912` passed Ubuntu, Windows, and macOS for the DOM completion fallback slice.
 - The legacy `agent_cancel` remains the durable-state cancellation primitive. `agent_stop` is currently the Web-worker-aware public path; consolidation can wait until the behavior is proven live rather than widening the older tool implementation now.
 
-## In progress
-
 ### M3.1 - Windows native input backend foundation
 
-- [ ] Inspect and preserve the existing desktop-control queue, policy, lease, and MCP surface.
-- [ ] Add a Windows-native input backend behind the current platform boundary instead of duplicating control orchestration.
-- [ ] Keep macOS behavior unchanged.
-- [ ] Add Windows-safe tests that do not inject input into the CI runner desktop.
+- [x] Preserved the existing desktop-control queue, control lease, allowlist/sensitive-target checks, kill switch, approval flow, MCP surface, and audit path.
+- [x] Added a persistent Windows-native helper behind `input-backend.ts` instead of creating a second control orchestration stack.
+- [x] Added exact app/window resolution and activation with a live foreground re-check before `SendInput`.
+- [x] Added coordinate click, Unicode typing without clipboard mutation, and legacy keyCode -> Win32 virtual-key translation.
+- [x] Replaced the earlier per-action PowerShell/C# compile path with one persistent JSON-lines helper; the old `win-input.ts` is now only a compatibility re-export.
+- [x] Added an explicit helper-ready handshake so slow cold `Add-Type` startup is separated from the normal per-request timeout.
+- [x] A wedged request discards the helper instead of reusing an uncertain process; helper handles are unref'd so they do not pin the parent process lifetime.
+- [x] Added a Windows CI probe that performs repeated read-only foreground queries and never injects input into the runner desktop.
+- [x] CI run `34883979535` passed Windows, Ubuntu, and macOS; Windows passed typecheck, 61 focused tests, and build, including the persistent-helper probe.
+
+Implementation notes:
+
+- `32c857d4` introduced the persistent Windows helper foundation.
+- `eac761b0` routed the Windows platform boundary to `win-native.ts`.
+- `73997d09` added persistent-helper/key-translation tests and `ac072650` wired them into CI.
+- `e6a774ec` retired the one-shot helper implementation behind a compatibility re-export.
+- CI run `34883661545` exposed that the first request timer incorrectly included cold PowerShell/C# startup and timed out after 30 seconds on the Windows runner.
+- `c34d207e` added the explicit startup-ready handshake plus separate startup/request timeouts; the corrected CI run `34883979535` passed.
+- New Computer Use work is Windows-focused. Existing upstream macOS/Linux code remains only where removing it would create needless churn.
+
+## In progress
+
+### M3.2 - Windows observation
+
+- [ ] Add read-only visible top-level window/app enumeration to the persistent helper.
+- [ ] Add allowlisted app-window screenshot capture with validation and explicit fallback order.
+- [ ] Add DPI/coordinate normalization metadata needed to align screenshots with later actions.
+- [ ] Wire Windows screenshot/evidence through the existing privacy/allowlist control path.
+- [ ] Add safe CI coverage without capturing unrelated runner desktop content.
 
 ## Planned next
 
-### M3.2+ - Windows Computer Use integration
+### M3.3 - Windows UIA semantic layer
 
-- [ ] Native window/app enumeration and activation where needed by the existing control surface.
-- [ ] Windows screenshot/evidence integration.
-- [ ] End-to-end native desktop-control smoke validation in the VMware Windows environment.
+- [ ] Bounded/cached UIA snapshot for the selected allowlisted app/window.
+- [ ] Ephemeral semantic element ids scoped to an observation.
+- [ ] Invoke/set-value/focus/selection where reliably exposed, with coordinate fallback preserved.
+
+### M3.4 - Computer Use activity indicator
+
+- [ ] Native click-through topmost activity border.
+- [ ] Keep the overlay out of model screenshots via capture exclusion or temporary hide fallback.
+- [ ] Bind visibility to Computer Use activity only; never use the border as authorization state.
+
+### M3.5 - VMware live smoke validation
+
+- [ ] Notepad/basic text target.
+- [ ] Explorer and browser targets.
+- [ ] Multi-window focus switching and DPI scaling.
+- [ ] Screenshot -> target -> action loop.
+- [ ] Activity border click-through and kill/cancel cleanup.
+- [ ] Repeated sessions without stale helper/overlay state.
 
 ### M4 - Hooks
 
