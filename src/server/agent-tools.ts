@@ -18,6 +18,7 @@ import {
   waitForAgentEvents,
 } from "../agents/manager.js";
 import { completeWorker, type WorkerRecord, type WorkerResult } from "../agents/store.js";
+import { revokeWorkerCapability, verifyWorkerCapability } from "../agents/capability.js";
 import { addToolCallProof } from "./tool-proof.js";
 import { redact } from "../policy/secrets.js";
 import { resolveActiveProject } from "../workspace/active.js";
@@ -162,7 +163,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
     {
       title: "Prepare isolated coding worker",
       description:
-        "Create a durable worker plus its isolated Git branch/worktree for the active full-write project. In M1 this prepares the worker only; ChatGPT Web worker launch is added in M2, so do not claim the task is running until the worker becomes running.",
+        "Create a durable worker plus its isolated Git branch/worktree for the active full-write project. Browser worker launch is a later step, so do not claim the task is running until the worker becomes running.",
       annotations: LOCAL_STATE_ANNOTATIONS,
       _meta: chatGptMeta("Preparing isolated worker...", "Isolated worker prepared"),
       inputSchema: {
@@ -287,11 +288,11 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
     {
       title: "Finish coding worker",
       description:
-        "Worker-side completion handshake. Persist the final summary/result in the durable inbox after verifying the worker still owns its managed worktree. If commitSha is supplied it must match the worker worktree HEAD.",
+        "Worker-side completion handshake. Requires the opaque worker capability, verifies the managed worktree, and stores the final result in the durable inbox. If commitSha is supplied it must match worker HEAD.",
       annotations: LOCAL_STATE_ANNOTATIONS,
       _meta: chatGptMeta("Recording worker completion...", "Worker completion recorded"),
       inputSchema: {
-        workerId: z.string().min(1),
+        workerToken: z.string().min(1),
         summary: z.string().min(1),
         commitSha: z.string().min(1).optional(),
         changedFiles: z.array(z.string()).optional(),
@@ -303,9 +304,10 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       withErrorMapping(
         ctx,
         "worker_finish",
-        { ...input, summary: "[summary redacted]" },
+        { ...input, workerToken: "[capability redacted]", summary: "[summary redacted]" },
         async () => {
-          const worker = await getAgentStatus(ctx.stateDir, input.workerId);
+          const capability = await verifyWorkerCapability(ctx.stateDir, input.workerToken);
+          const worker = await getAgentStatus(ctx.stateDir, capability.workerId);
           const project = await projectById(ctx, worker.projectId);
           const workspace = await getAgentWorkspace(ctx.stateDir, project.root, worker.workerId);
           if (input.commitSha && input.commitSha.toLowerCase() !== workspace.head.toLowerCase()) {
@@ -323,6 +325,9 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
             remainingIssues: input.remainingIssues,
           };
           const completed = await completeWorker(ctx.stateDir, worker.workerId, result);
+          // Final worker state already makes the token unusable; this best-effort
+          // revocation additionally records that the bearer credential is closed.
+          await revokeWorkerCapability(ctx.stateDir, worker.workerId).catch(() => undefined);
           return makeResult(
             {
               ...workerView(completed),
