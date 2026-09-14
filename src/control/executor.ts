@@ -6,14 +6,13 @@ import { assertAllowedTarget, controlAllowlist, isSensitiveApp } from "./policy.
 import { maskSensitiveRegions } from "./screenshot-mask.js";
 import { autoDecision, recordAutoUse } from "./auto.js";
 import { approveAction, getAction, isKilled, listActions, markDone, toSummary, type ControlActionRecord } from "./queue.js";
-import * as macInput from "./mac-input.js";
+import * as desktopInput from "./input-backend.js";
 
 /**
  * Session worker that turns an `approved` control action into a real
- * synthetic click/keystroke. Nothing but this module ever calls
- * src/control/mac-input.ts's synthetic-input functions, and it only ever
- * does so for actions a local human has already moved to `approved` (see
- * src/control/queue.ts / the `chatgpt2codex control approve` CLI path).
+ * synthetic click/keystroke. Platform-specific actuation is isolated behind
+ * src/control/input-backend.ts; every action still passes this shared queue,
+ * kill-switch, allowlist, evidence, and audit path before input is emitted.
  */
 
 function keySummary(keyCode: number | undefined): string | undefined {
@@ -30,21 +29,18 @@ function clampUnitInterval(value: number): number {
   return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
 }
 
-/** macOS virtual key codes are a small non-negative integer range; a
- * negative or out-of-range value (reachable the same way as the windowPoint
- * bypass above, since keyCode's zod min(0) can likewise be skipped) is
- * rejected here instead of being handed to AppleScript/CGEvent. */
+/** The public keyCode contract keeps the original macOS virtual-key-code
+ * namespace (0..127). Windows translates supported values to Win32 VK codes
+ * inside win-input.ts instead of reinterpreting the number. */
 function isValidKeyCode(value: number): boolean {
   return Number.isInteger(value) && value >= 0 && value <= 127;
 }
 
 /** Best-effort before/after screenshot evidence for an approved action.
- * Never throws and never blocks execution: darwin-only, skipped entirely
- * for a sensitive-app target (defense in depth; assertAllowedTarget already
- * refused those earlier), and skipped when there's no currently active
- * project to anchor the capture directory under. Any capture failure (e.g.
- * missing Screen Recording permission) is swallowed and reported as
- * `undefined` rather than surfacing as an execution error. */
+ * Never throws and never blocks execution: darwin-only for now, skipped
+ * entirely for a sensitive-app target, and skipped when there's no active
+ * project to anchor the capture directory under. Windows evidence capture is
+ * a later M3 slice and does not block the native input foundation. */
 async function captureActionEvidence(
   ctx: ToolContext,
   record: ControlActionRecord,
@@ -68,13 +64,9 @@ async function captureActionEvidence(
 
 /**
  * Turn one `approved` action into a real synthetic click/keystroke: re-checks
- * kill state, darwin Accessibility preflight, and the live-frontmost
- * sensitive-app/allowlist gate before doing anything, captures best-effort
- * before/after evidence, and always ends by marking the record `done` (never
- * throws). Exported so src/control/tools.ts can drive a single action
- * deterministically for the ChatGPT-confirmed immediate-execution path
- * (isControlChatGptExposed) without going through the polling
- * runExecutorOnce/startExecutor loop or touching any other queued action.
+ * kill state, macOS Accessibility preflight where applicable, and the live
+ * frontmost sensitive-app/allowlist gate before doing anything. It always
+ * ends by marking the record `done` and never throws to the executor loop.
  */
 export async function executeApprovedAction(ctx: ToolContext, record: ControlActionRecord): Promise<void> {
   if (await isKilled(ctx.stateDir)) {
@@ -88,14 +80,11 @@ export async function executeApprovedAction(ctx: ToolContext, record: ControlAct
     return;
   }
 
-  // Live permission preflight: a definitive (source === "ax-helper") answer
-  // that Accessibility isn't trusted blocks with a clear, reportable reason
-  // instead of letting the actual click/type/key attempt fail partway
-  // through with an opaque AppleScript/AX error. A dev/source run without
-  // the packaged helper (source === "unavailable") can't answer this
-  // definitively, so it fails open here rather than blocking every action.
+  // macOS has a definitive Accessibility preflight in the signed AX helper.
+  // Windows SendInput has no equivalent TCC grant, so the shared executor
+  // proceeds directly to the live target/allowlist check there.
   if (process.platform === "darwin") {
-    const preflight = await macInput.preflightPermissions().catch(() => undefined);
+    const preflight = await desktopInput.preflightPermissions().catch(() => undefined);
     if (preflight && preflight.source === "ax-helper" && !preflight.accessibilityTrusted) {
       await ctx.ledger.append({
         type: "control.action.blocked",
@@ -108,7 +97,7 @@ export async function executeApprovedAction(ctx: ToolContext, record: ControlAct
     }
   }
 
-  const frontmostApp = await macInput.resolveFrontmostApp().catch(() => undefined);
+  const frontmostApp = await desktopInput.resolveFrontmostApp().catch(() => undefined);
   try {
     assertAllowedTarget({ appName: record.appName, frontmostAppName: frontmostApp, allowlist: controlAllowlist() });
   } catch (err) {
@@ -130,32 +119,30 @@ export async function executeApprovedAction(ctx: ToolContext, record: ControlAct
 
     if (record.kind === "click") {
       if (record.target.ax) {
-        // AX targets are re-resolved by pressAxElement itself right before
-        // acting (never reusing the request-time dry-run preview frame), so
-        // an element that moved or vanished since approval fails cleanly
-        // instead of clicking the wrong thing. Only fall back to an
-        // explicit windowPoint (never an arbitrary absolute coordinate) when
-        // the record carries one.
+        // Semantic targets are re-resolved immediately before actuation on
+        // platforms that support them. M3.1 Windows deliberately reports
+        // semantic targeting unsupported and falls back only when the action
+        // also carries an explicit windowPoint.
         try {
-          await macInput.pressAxElement(record.appName, record.target.ax);
+          await desktopInput.pressAxElement(record.appName, record.target.ax);
           axSummary = { ...record.target.ax };
         } catch (err) {
           if (!record.target.windowPoint) throw err;
-          const resolved = await macInput.resolveWindowPoint(
+          const resolved = await desktopInput.resolveWindowPoint(
             record.appName,
             clampUnitInterval(record.target.windowPoint.xRel),
             clampUnitInterval(record.target.windowPoint.yRel),
           );
-          await macInput.clickAtPoint(record.appName, resolved.x, resolved.y);
+          await desktopInput.clickAtPoint(record.appName, resolved.x, resolved.y);
           windowPoint = resolved;
         }
       } else if (record.target.windowPoint) {
-        const resolved = await macInput.resolveWindowPoint(
+        const resolved = await desktopInput.resolveWindowPoint(
           record.appName,
           clampUnitInterval(record.target.windowPoint.xRel),
           clampUnitInterval(record.target.windowPoint.yRel),
         );
-        await macInput.clickAtPoint(record.appName, resolved.x, resolved.y);
+        await desktopInput.clickAtPoint(record.appName, resolved.x, resolved.y);
         windowPoint = resolved;
       } else {
         throw new Error("click action has neither an ax nor a windowPoint target");
@@ -163,28 +150,28 @@ export async function executeApprovedAction(ctx: ToolContext, record: ControlAct
     } else if (record.kind === "type") {
       if (record.target.ax) {
         try {
-          await macInput.setAxValue(record.appName, record.target.ax, record.text ?? "");
+          await desktopInput.setAxValue(record.appName, record.target.ax, record.text ?? "");
           axSummary = { ...record.target.ax };
         } catch (err) {
           if (!record.target.windowPoint) throw err;
-          const resolved = await macInput.resolveWindowPoint(
+          const resolved = await desktopInput.resolveWindowPoint(
             record.appName,
             clampUnitInterval(record.target.windowPoint.xRel),
             clampUnitInterval(record.target.windowPoint.yRel),
           );
-          await macInput.clickAtPoint(record.appName, resolved.x, resolved.y);
-          await macInput.typeText(record.appName, record.text ?? "");
+          await desktopInput.clickAtPoint(record.appName, resolved.x, resolved.y);
+          await desktopInput.typeText(record.appName, record.text ?? "");
           windowPoint = resolved;
         }
       } else {
-        await macInput.typeText(record.appName, record.text ?? "");
+        await desktopInput.typeText(record.appName, record.text ?? "");
       }
     } else if (record.kind === "key") {
       const keyCode = record.keyCode ?? 0;
       if (!isValidKeyCode(keyCode)) {
         throw new Error("key action has an out-of-range keyCode");
       }
-      await macInput.pressKey(record.appName, keyCode);
+      await desktopInput.pressKey(record.appName, keyCode);
     }
 
     const evidenceAfter = await captureActionEvidence(ctx, record, "after");
@@ -205,13 +192,9 @@ export async function executeApprovedAction(ctx: ToolContext, record: ControlAct
     await markDone(ctx.stateDir, record.actionId, { ok: true, evidence });
   } catch (err) {
     const rawMessage = err instanceof Error ? err.message : String(err);
-    // A "type"/setAxValue failure's underlying error can be an
-    // execFile "Command failed: <argv>" string; even with mac-input.ts no
-    // longer inlining raw text into the AppleScript argv, never persist or
-    // return the raw OS error message for a text-carrying action — use a
-    // fixed reason code instead. For other kinds, still redact() as
-    // defense in depth before it reaches the ledger (permanent, unredacted
-    // audit log) or the ChatGPT-exposed tool result.
+    // Text-carrying actions never persist raw OS/helper errors: even though
+    // text is sent to both native backends over stdin/environment rather than
+    // argv, keep the fixed reason code as defense in depth.
     const message = record.kind === "type" ? "type-failed" : redact(rawMessage);
     const evidenceAfter = await captureActionEvidence(ctx, record, "after");
     const evidence = { before: evidenceBefore?.path, after: evidenceAfter?.path };
