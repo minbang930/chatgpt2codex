@@ -78,12 +78,12 @@ function powershellPath(): string {
   return path.win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 }
 
-// Static script only. User/model-controlled values are sent as JSON on stdin,
-// never interpolated into the PowerShell argv, so typed text cannot become
-// PowerShell/C# source or leak through exec argv error messages.
+// Static script only. User/model-controlled values are sent as one JSON line
+// on stdin, never interpolated into the PowerShell argv, so typed text cannot
+// become PowerShell/C# source or leak through exec argv error messages.
 const WINDOWS_HELPER_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
-$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$payload = [Console]::In.ReadLine() | ConvertFrom-Json
 Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
