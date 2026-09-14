@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **M3 - Windows Computer Use**
 
-Active unit: **M3.2 - Windows observation**
+Active unit: **M3.3 - Windows UIA semantic layer**
 
 ## Completed
 
@@ -161,23 +161,41 @@ Implementation notes:
 - `c34d207e` added the explicit startup-ready handshake plus separate startup/request timeouts; the corrected CI run `34883979535` passed.
 - New Computer Use work is Windows-focused. Existing upstream macOS/Linux code remains only where removing it would create needless churn.
 
-## In progress
-
 ### M3.2 - Windows observation
 
-- [ ] Add read-only visible top-level window/app enumeration to the persistent helper.
-- [ ] Add allowlisted app-window screenshot capture with validation and explicit fallback order.
-- [ ] Add DPI/coordinate normalization metadata needed to align screenshots with later actions.
-- [ ] Wire Windows screenshot/evidence through the existing privacy/allowlist control path.
-- [ ] Add safe CI coverage without capturing unrelated runner desktop content.
+- [x] Added read-only visible top-level window enumeration to the persistent helper using Win32 `EnumWindows`/window metadata.
+- [x] Returned observation-scoped `window-N` ids only; native HWND values never leave the helper and are never accepted as later action authority.
+- [x] Bounded enumeration to 200 visible, titled, positive-size top-level windows and kept the hot path process-local to avoid expensive executable metadata lookup per window.
+- [x] Added per-window DPI and scale-factor metadata with a DPI-aware helper process.
+- [x] Added explicit allowlisted app-window screenshot capture for Windows.
+- [x] App capture prefers `PrintWindow(PW_RENDERFULLCONTENT)` and validates the frame; an invalid/solid capture falls back to an exact-target foreground + screen-region copy.
+- [x] Added a platform capture adapter so the existing `computer_screenshot` tool uses Windows app capture without creating a second privacy/control path.
+- [x] Windows unrestricted full-screen capture remains disabled; ChatGPT-exposed capture still requires an explicit allowlisted `appName`.
+- [x] Request-time Windows actions now include the same live frontmost-app allowlist/sensitive-target check as the executor-time gate.
+- [x] Added Windows before/after action evidence through the same app-window capture adapter; evidence remains best-effort and cannot block the action itself.
+- [x] Added CI-safe coverage for enumeration/DPI and capture IPC failure on a deliberately nonexistent target, without capturing unrelated runner desktop content.
+- [x] CI run `34886165392` passed Windows, Ubuntu, and macOS after the complete M3.2 integration; Windows passed typecheck, focused tests (including the persistent helper) and build.
 
-## Planned next
+Implementation notes:
+
+- `13c8cb31` added the first read-only Win32 window observation path; `cd34889e` exposed it at the platform boundary and `065d2a37` added enumeration tests.
+- CI run `34884963306` showed two real performance problems on hosted Windows: cold helper compilation exceeded the test budget and per-window executable-description lookup made `listWindows` exceed its request timeout.
+- `8077897d` gave the one-time helper compile its existing startup budget, while `eb83c2a3` removed expensive `MainModule.FileVersionInfo` lookup from the enumeration hot path; CI run `34885431082` then passed.
+- `54a4f7ba` added DPI-aware `PrintWindow`/screen-region app capture; `817133ea` added DPI and safe capture-wiring coverage.
+- `ce78688e` added the platform control capture adapter, `c5cc4fd1` wired it into `computer_screenshot` and the Windows request-time target gate, and `9785a1c9` enabled Windows before/after action evidence.
+- Actual image-content quality, GPU-heavy windows, multi-monitor behavior, and screenshot-to-action interaction remain intentionally deferred to M3.5 live VMware validation; CI validates the control/capture plumbing without reading the hosted runner desktop.
+
+## In progress
 
 ### M3.3 - Windows UIA semantic layer
 
 - [ ] Bounded/cached UIA snapshot for the selected allowlisted app/window.
 - [ ] Ephemeral semantic element ids scoped to an observation.
 - [ ] Invoke/set-value/focus/selection where reliably exposed, with coordinate fallback preserved.
+- [ ] Keep every semantic action inside the existing control lease/allowlist/kill/audit path and revalidate the target immediately before actuation.
+- [ ] Add CI-safe UIA coverage that does not interact with unrelated desktop content.
+
+## Planned next
 
 ### M3.4 - Computer Use activity indicator
 
