@@ -10,6 +10,8 @@ export interface SemanticTarget {
   description?: string;
 }
 
+export type VisibleAppWindow = winInput.VisibleAppWindow;
+
 export function supportsNativeDesktopInput(): boolean {
   return process.platform === "darwin" || process.platform === "win32";
 }
@@ -29,6 +31,13 @@ export async function resolveFrontmostApp(): Promise<string | undefined> {
   if (process.platform === "darwin") return macInput.resolveFrontmostApp();
   if (process.platform === "win32") return winInput.resolveFrontmostApp();
   return undefined;
+}
+
+/** Windows-only M3 observation primitive. Returned window ids are ephemeral
+ * observation labels; actions continue to re-resolve by allowlisted app. */
+export async function listVisibleWindows(): Promise<VisibleAppWindow[]> {
+  if (process.platform === "win32") return winInput.listVisibleWindows();
+  throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Read-only top-level window observation is currently supported on Windows");
 }
 
 export async function resolveWindowPoint(appName: string, xRel: number, yRel: number): Promise<{ x: number; y: number }> {
