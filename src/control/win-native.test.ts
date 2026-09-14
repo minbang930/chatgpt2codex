@@ -1,5 +1,9 @@
+import { existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  captureAppWindow,
   listVisibleWindows,
   resolveFrontmostApp,
   stopWindowsInputHelper,
@@ -60,12 +64,22 @@ if (process.platform === "win32") {
         expect(window.visible).toBe(true);
         expect(typeof window.minimized).toBe("boolean");
         expect(typeof window.foreground).toBe("boolean");
+        expect(window.dpi).toBeGreaterThan(0);
+        expect(window.scaleFactor).toBeGreaterThan(0);
         expect(Number.isFinite(window.bounds.x)).toBe(true);
         expect(Number.isFinite(window.bounds.y)).toBe(true);
         expect(window.bounds.width).toBeGreaterThan(0);
         expect(window.bounds.height).toBeGreaterThan(0);
         expect(Object.prototype.hasOwnProperty.call(window, "hwnd")).toBe(false);
       }
+    }, 15_000);
+
+    it("routes app capture through the helper without capturing the CI desktop for a missing target", async () => {
+      const file = path.join(os.tmpdir(), `chatgpt2codex-missing-${Date.now()}.png`);
+      await expect(captureAppWindow("chatgpt2codex-app-that-does-not-exist", file)).rejects.toThrow(
+        /target app window not found/i,
+      );
+      expect(existsSync(file)).toBe(false);
     }, 15_000);
   });
 }
