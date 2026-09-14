@@ -2,6 +2,7 @@ import { DomainError, ErrorCode } from "../types.js";
 import type { ResolvedTargetPreview } from "./queue.js";
 import * as macInput from "./mac-input.js";
 import * as winInput from "./win-native.js";
+import * as winUia from "./win-uia.js";
 
 export interface SemanticTarget {
   role: string;
@@ -11,13 +12,14 @@ export interface SemanticTarget {
 }
 
 export type VisibleAppWindow = winInput.VisibleAppWindow;
+export type WindowsUiaObservation = winUia.WindowsUiaObservation;
 
 export function supportsNativeDesktopInput(): boolean {
   return process.platform === "darwin" || process.platform === "win32";
 }
 
 export function supportsSemanticTargeting(): boolean {
-  return process.platform === "darwin";
+  return process.platform === "darwin" || process.platform === "win32";
 }
 
 function unsupported(): never {
@@ -38,6 +40,18 @@ export async function resolveFrontmostApp(): Promise<string | undefined> {
 export async function listVisibleWindows(): Promise<VisibleAppWindow[]> {
   if (process.platform === "win32") return winInput.listVisibleWindows();
   throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Read-only top-level window observation is currently supported on Windows");
+}
+
+/** Bounded Windows ControlView snapshot. Each returned element carries an
+ * opaque observation-scoped selector that can be passed unchanged through
+ * the existing target.ax contract; the UIA helper never exports HWNDs or
+ * runtime-id authority. */
+export async function snapshotSemanticElements(
+  appName: string,
+  options: { maxElements?: number; maxDepth?: number } = {},
+): Promise<WindowsUiaObservation> {
+  if (process.platform === "win32") return winUia.snapshotSemanticElements(appName, options);
+  throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Semantic UI snapshots are currently supported on Windows");
 }
 
 export async function resolveWindowPoint(appName: string, xRel: number, yRel: number): Promise<{ x: number; y: number }> {
@@ -68,31 +82,33 @@ export async function pressKey(appName: string, keyCode: number): Promise<void> 
   return unsupported();
 }
 
+/** Resolve a semantic target read-only at request/approval time. macOS keeps
+ * its AX role/title resolver. Windows accepts only an observation-scoped UIA
+ * selector emitted by snapshotSemanticElements and re-resolves it against
+ * the current target window. */
 export async function resolveAxElement(appName: string, target: SemanticTarget): Promise<ResolvedTargetPreview> {
   if (process.platform === "darwin") return macInput.resolveAxElement(appName, target);
-  if (process.platform === "win32") {
-    return {
-      found: false,
-      reason: "Windows semantic UIA targeting is not implemented yet; provide windowPoint for the M3.1 fallback path",
-    };
-  }
+  if (process.platform === "win32") return winUia.resolveSemanticElement(appName, target);
   return { found: false, reason: `Semantic targeting is not supported on ${process.platform}` };
 }
 
+/** Existing executor click path. On Windows the semantic press chooses the
+ * strongest reliable UIA operation exposed by the element: InvokePattern,
+ * SelectionItemPattern.Select, then SetFocus. executor.ts preserves the
+ * existing windowPoint fallback if that semantic operation cannot run. */
 export async function pressAxElement(appName: string, target: SemanticTarget): Promise<void> {
   if (process.platform === "darwin") return macInput.pressAxElement(appName, target);
-  throw new DomainError(
-    ErrorCode.NOT_IMPLEMENTED,
-    "Semantic accessibility press is not implemented on Windows yet; use a windowPoint fallback",
-  );
+  if (process.platform === "win32") return winUia.pressSemanticElement(appName, target);
+  throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Semantic accessibility press is not supported on this platform");
 }
 
+/** Existing executor type path. Windows focuses the re-resolved element and
+ * uses ValuePattern.SetValue when writable; executor.ts falls back to its
+ * coordinate click + Unicode typing path when ValuePattern is unavailable. */
 export async function setAxValue(appName: string, target: SemanticTarget, text: string): Promise<void> {
   if (process.platform === "darwin") return macInput.setAxValue(appName, target, text);
-  throw new DomainError(
-    ErrorCode.NOT_IMPLEMENTED,
-    "Semantic accessibility value setting is not implemented on Windows yet; use a windowPoint fallback",
-  );
+  if (process.platform === "win32") return winUia.setSemanticValue(appName, target, text);
+  throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Semantic accessibility value setting is not supported on this platform");
 }
 
 export function preflightPermissions(): ReturnType<typeof macInput.preflightPermissions> {
