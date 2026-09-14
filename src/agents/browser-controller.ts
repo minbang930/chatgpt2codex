@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { DomainError, ErrorCode } from "../types.js";
+import { getWorker } from "./store.js";
 
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
@@ -290,6 +291,14 @@ export async function prepareBrowserWorkerSession(
   input: { workerId: string; projectId: string },
 ): Promise<BrowserWorkerSession> {
   const projectId = normalizeProjectId(input.projectId);
+  const worker = await getWorker(stateDir, input.workerId);
+  if (!worker) {
+    throw new DomainError(ErrorCode.NOT_IMPLEMENTED, `Worker not found: ${input.workerId}`);
+  }
+  if (worker.projectId !== projectId) {
+    throw new DomainError(ErrorCode.PERMISSION_DENIED, `Browser worker ${input.workerId} is bound to project ${worker.projectId}`);
+  }
+
   const current = await getBrowserWorkerSession(stateDir, input.workerId);
   if (current && !isFinalBrowserStatus(current.status)) {
     if (current.projectId !== projectId) {
