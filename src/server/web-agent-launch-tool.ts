@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { DomainError, ErrorCode, makeResult, type ToolContext } from "../types.js";
 import type { BrowserWorkerDriver } from "../agents/browser-controller.js";
-import { launchPreparedBrowserWorker } from "../agents/browser-launch.js";
+import { launchPreparedBrowserWorker, recoverRunningBrowserWorker } from "../agents/browser-launch.js";
 import { getAgentStatus } from "../agents/manager.js";
 import { addToolCallProof } from "./tool-proof.js";
 import { resolveActiveProject } from "../workspace/active.js";
@@ -18,9 +18,9 @@ export function registerWebAgentLaunchTool(
   server.registerTool(
     "agent_launch",
     {
-      title: "Launch prepared ChatGPT worker",
+      title: "Launch or recover ChatGPT worker",
       description:
-        "Start a pending worker prepared by agent_spawn in a dedicated ChatGPT Web tab. Call this immediately after agent_spawn. The tool returns after bootstrap submission; the worker continues asynchronously.",
+        "Start a pending worker prepared by agent_spawn, or recover a running worker whose previous browser target was lost/stopped. Returns after bootstrap submission; the worker continues asynchronously.",
       annotations,
       _meta: {
         securitySchemes: [{ type: "oauth2", scopes: ["chatgpt2codex"] }],
@@ -43,7 +43,10 @@ export function registerWebAgentLaunchTool(
           throw new DomainError(ErrorCode.PERMISSION_DENIED, `Worker ${worker.workerId} belongs to another project`);
         }
 
-        const launched = await launchPreparedBrowserWorker(ctx.stateDir, driver, worker.workerId);
+        const recovery = worker.status === "running";
+        const launched = recovery
+          ? await recoverRunningBrowserWorker(ctx.stateDir, driver, worker.workerId)
+          : await launchPreparedBrowserWorker(ctx.stateDir, driver, worker.workerId);
         const result = makeResult(
           {
             workerId: launched.worker.workerId,
@@ -53,11 +56,14 @@ export function registerWebAgentLaunchTool(
             browserStatus: launched.browser.status,
             browserAttempt: launched.browser.attempt,
             browserRoute: launched.browser.route.mode,
+            recovered: recovery,
             projectUrl:
               launched.browser.route.mode === "project" ? launched.browser.route.projectRef.url : undefined,
             capabilityExpiresAt: launched.capabilityExpiresAt,
           },
-          `Worker ${launched.worker.workerId} is running asynchronously in a dedicated ChatGPT Web chat.`,
+          recovery
+            ? `Worker ${launched.worker.workerId} recovered in a fresh ChatGPT Web chat and remains running asynchronously.`
+            : `Worker ${launched.worker.workerId} is running asynchronously in a dedicated ChatGPT Web chat.`,
         );
         return {
           ...result,
