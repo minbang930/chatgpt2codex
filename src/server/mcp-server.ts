@@ -3,6 +3,7 @@ import type { ToolContext } from "../types.js";
 import { installAgentNotificationPiggyback } from "../agents/piggyback.js";
 import { registerAgentTools } from "./agent-tools.js";
 import { registerTools } from "./tools.js";
+import { registerWorkerTools } from "./worker-tools.js";
 
 /**
  * Construct and configure the MCP server (stdio transport) with all tools
@@ -17,6 +18,7 @@ export async function createServer(ctx: ToolContext): Promise<McpServer> {
   registerTools(server, ctx);
   installAgentNotificationPiggyback(server, ctx.stateDir);
   registerAgentTools(server, ctx);
+  registerWorkerTools(server, ctx);
 
   return server;
 }
