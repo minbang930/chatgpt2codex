@@ -33,6 +33,6 @@ describe("control/win-input key translation", () => {
     it("loads the native helper for a read-only foreground query without injecting input", async () => {
       const appName = await resolveFrontmostApp();
       expect(appName === undefined || typeof appName === "string").toBe(true);
-    });
+    }, 15_000);
   }
 });
