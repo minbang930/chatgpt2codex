@@ -41,6 +41,10 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Build Windows launcher
+        if: matrix.os == 'windows-latest'
+        run: npm run windows:exe
+
   macos-tests:
     runs-on: macos-latest
 
