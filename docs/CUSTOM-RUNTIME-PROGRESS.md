@@ -108,12 +108,24 @@ Implementation notes:
 
 ### M2.4 - Worker completion/recovery
 
-- [ ] Keep `worker_finish` as the primary completion handshake.
-- [ ] Close/retire the browser tab after durable completion without affecting result delivery.
-- [ ] Make `agent_cancel` stop the browser worker and revoke capability while preserving the worktree.
+- [x] Keep `worker_finish` as the primary completion handshake and durable result source of truth.
+- [x] Add `agent_stop` to revoke worker access, stop the Web-worker tab when possible, cancel the durable worker, and preserve its branch/worktree/partial edits.
+- [x] Browser shutdown failure cannot prevent durable cancellation; it is returned separately as a warning.
+- [x] After successful `worker_finish`, retire the browser tab best-effort without changing the already-stored completion result.
+- [x] Browser-retirement failure after `worker_finish` is recorded in browser state but cannot turn durable completion into an error.
 - [ ] Detect browser target loss and record a recoverable browser failure without corrupting the durable worker.
 - [ ] Add DOM completion detection only as a fallback when the worker fails to call `worker_finish`.
 - [ ] Add parallel-worker lifecycle/recovery tests.
+
+Implementation notes:
+
+- `32e74b45` added the Web-worker `agent_stop` path; `b667d6aa` corrected browser-stop failure reporting.
+- `62db0cbb` registered the stop tool and `5831ca83` added lifecycle/capability/worktree-preservation coverage.
+- CI run `34816004399` passed Ubuntu, Windows, and macOS for the stop/cancel slice.
+- `5feeb9ce` added the `worker_finish` browser cleanup wrapper; `8cfb7754` installs it after durable agent tools are registered.
+- `764b78d6` verifies both successful tab retirement and the invariant that a browser-close failure never loses a completed durable result.
+- CI run `34816248554` passed Ubuntu, Windows, and macOS for the completion-retirement slice.
+- The legacy `agent_cancel` remains the durable-state cancellation primitive. `agent_stop` is currently the Web-worker-aware public path; consolidation can wait until the behavior is proven live rather than widening the older tool implementation now.
 
 ## Planned next
 
