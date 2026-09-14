@@ -89,7 +89,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Text;
+using System.Threading;
 
 public static class ChatGpt2CodexWinInput {
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
@@ -120,7 +120,6 @@ public static class ChatGpt2CodexWinInput {
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int command);
@@ -134,12 +133,6 @@ public static class ChatGpt2CodexWinInput {
     const uint MOUSEEVENTF_LEFTUP = 0x0004;
     const uint KEYEVENTF_KEYUP = 0x0002;
     const uint KEYEVENTF_UNICODE = 0x0004;
-
-    static string WindowTitle(IntPtr hWnd) {
-        var buffer = new StringBuilder(1024);
-        GetWindowText(hWnd, buffer, buffer.Capacity);
-        return buffer.ToString();
-    }
 
     static Process WindowProcess(IntPtr hWnd) {
         uint pid;
@@ -159,15 +152,13 @@ public static class ChatGpt2CodexWinInput {
         return process.ProcessName;
     }
 
-    static bool Match(Process process, IntPtr hWnd, string requested) {
+    static bool Match(Process process, string requested) {
         if (process == null || String.IsNullOrWhiteSpace(requested)) return false;
         var needle = requested.Trim();
         if (needle.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) needle = needle.Substring(0, needle.Length - 4);
         if (String.Equals(process.ProcessName, needle, StringComparison.OrdinalIgnoreCase)) return true;
         var description = Description(process);
-        if (!String.IsNullOrWhiteSpace(description) && String.Equals(description, requested.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
-        var title = WindowTitle(hWnd);
-        return !String.IsNullOrWhiteSpace(title) && title.IndexOf(requested.Trim(), StringComparison.OrdinalIgnoreCase) >= 0;
+        return !String.IsNullOrWhiteSpace(description) && String.Equals(description, requested.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     public static string ForegroundAppName() {
@@ -176,11 +167,14 @@ public static class ChatGpt2CodexWinInput {
     }
 
     public static IntPtr FindWindow(string appName) {
+        var foreground = GetForegroundWindow();
+        if (foreground != IntPtr.Zero && IsWindowVisible(foreground) && Match(WindowProcess(foreground), appName)) return foreground;
+
         IntPtr found = IntPtr.Zero;
         EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) {
             if (!IsWindowVisible(hWnd)) return true;
             var process = WindowProcess(hWnd);
-            if (Match(process, hWnd, appName)) { found = hWnd; return false; }
+            if (Match(process, appName)) { found = hWnd; return false; }
             return true;
         }, IntPtr.Zero);
         return found;
@@ -189,8 +183,11 @@ public static class ChatGpt2CodexWinInput {
     public static IntPtr Activate(string appName) {
         var hWnd = FindWindow(appName);
         if (hWnd == IntPtr.Zero) throw new InvalidOperationException("target app window not found");
+        if (GetForegroundWindow() == hWnd) return hWnd;
         ShowWindowAsync(hWnd, SW_RESTORE);
-        SetForegroundWindow(hWnd);
+        if (!SetForegroundWindow(hWnd)) throw new InvalidOperationException("Windows refused to activate the target app window");
+        Thread.Sleep(75);
+        if (GetForegroundWindow() != hWnd) throw new InvalidOperationException("target app did not become foreground; synthetic input refused");
         return hWnd;
     }
 
