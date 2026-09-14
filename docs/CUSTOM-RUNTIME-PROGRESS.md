@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **M2 - ChatGPT Web workers**
 
-Active unit: **M2.1 - Browser worker controller foundation**
+Active unit: **M2.3 - ChatGPT worker launch/bootstrap**
 
 ## Completed
 
@@ -131,26 +131,67 @@ Implementation notes:
 - `83b6ee2a6cdbe83a31a66e8ab92ef17bfc8cec95` extends Ubuntu/Windows CI to run the piggyback tests too.
 - CI run `34808933047` passed all jobs on Ubuntu, Windows, and macOS.
 
+### M2.1 - Worker-scoped Core routing
+
+- [x] Issue/verify/revoke opaque worker capabilities without persisting raw tokens.
+- [x] Resolve every worker call to the durable worker assignment and managed worktree.
+- [x] Build a worker-specific in-memory `ToolContext` with a full-write lease rooted at that worktree.
+- [x] Reuse existing Core handlers through an explicit worker allowlist rather than duplicating file/shell/git safety logic.
+- [x] Keep worker tool calls from mutating the main ChatGPT `sessions.json` active project/lease.
+- [x] Expose explicit worker-scoped Core tools rather than one generic unrestricted dispatch tool.
+- [x] Require the worker capability for the `worker_finish` completion handshake.
+- [x] Add isolation/capability tests and pass CI on Ubuntu, Windows, and macOS.
+
+Implementation notes:
+
+- `0a47070e4b96ed06a9f113f427685789b2382f95` added worker capability lifecycle.
+- `3d5886a88d580704637d2ba3f82cfeed96c6063b` added the worker-scoped Core dispatcher.
+- `a75814070d07f5abb3b1191dfb5ec65b8aa1afaf` verifies worker Core calls do not mutate main session state.
+- `66159afac1769825e866d8a52b252018524eadc5` exposes the explicit worker Core tool surface.
+- `83166838aa034bce68d239ac34ddca977c833448` changes `worker_finish` to capability authorization.
+- `6b352ed7a4921f898639bffee719ae4591f03e54` registers worker-scoped tools with Core MCP construction.
+- `0140853b23a3b049457b4a3e6abaec03b7e874e3` completes capability-authorized finish coverage.
+- CI run `34809750569` passed on Ubuntu, Windows, and macOS.
+
+### M2.2 - Browser worker controller foundation
+
+- [x] Add optional local-project -> ChatGPT Project routing state.
+- [x] Restrict mapped destinations to HTTPS `chatgpt.com` URLs.
+- [x] Resolve unmapped repositories to a standalone-chat route.
+- [x] Define durable browser-worker state separately from ChatGPT private conversation/request identity.
+- [x] Define `BrowserWorkerDriver` launch/cancel boundary without choosing a browser automation implementation yet.
+- [x] Keep browser handles advisory/local only; they do not authorize worker tools.
+- [x] Never persist the raw worker capability or task in browser-session state.
+- [x] Record browser launch failure independently while leaving the durable coding worker pending for retry.
+- [x] Support a fresh browser attempt after failure.
+- [x] Keep browser cancellation separate from durable worker/worktree cancellation.
+- [x] Add cross-platform controller/routing tests before connecting to a real ChatGPT tab.
+- [x] Pass CI on Ubuntu, Windows, and macOS.
+
+Implementation notes:
+
+- `e4ee5b3934f437c22412cf91903b34a6bfb045eb` documents ChatGPT Project worker routing.
+- `2448e60c9b83725a8b011e37ece9ffe42fc187cc` adds browser session/routing/controller foundations.
+- `33ea1bff844e5390953e575c3d0dfcce0a9c4f89` binds browser sessions to an existing durable worker/project assignment.
+- `15fa47aafba6bce51b1e76cdd25b45a59203317d` adds routing, secret-nonpersistence, failure-isolation, retry, and cancel tests.
+- CI run `34812803678` passed on Ubuntu, Windows, and macOS.
+
 ## In progress
 
-### M2.1 - Browser worker controller foundation
+### M2.3 - ChatGPT worker launch/bootstrap
 
-- [ ] Inspect and reuse existing browser-opening/automation infrastructure where it is safe to do so.
-- [ ] Define a small local browser-worker session record separate from ChatGPT conversation identity.
-- [ ] Define launch/cancel/controller interfaces without coupling Core correctness to browser state.
-- [ ] Keep browser failures isolated from existing Core and M1 agent tools.
-- [ ] Add unit tests before connecting to a real ChatGPT tab.
+- [ ] Choose the smallest reliable browser automation path for the existing authenticated ChatGPT session.
+- [ ] Open a dedicated worker chat, preferably inside the mapped ChatGPT Project.
+- [ ] Fall back to a standalone worker chat when no mapping exists or mapped-Project navigation is unavailable.
+- [ ] Send worker bootstrap + task without persisting the raw capability in browser-session state.
+- [ ] Hand off the opaque worker capability to the worker chat.
+- [ ] Transition the durable coding worker `pending -> running` only after launch/bootstrap succeeds.
+- [ ] Keep browser launch failure retryable without damaging the worktree.
+- [ ] Add integration tests around the browser driver boundary before relying on live UI behavior.
 
 ## Planned next
 
-### M2.2 - ChatGPT worker launch/bootstrap
-
-- [ ] Open a dedicated ChatGPT worker tab.
-- [ ] Send worker bootstrap + task.
-- [ ] Hand off an opaque local worker identity/workspace capability.
-- [ ] Transition `pending -> running` only after launch/acceptance succeeds.
-
-### M2.3 - Worker completion/recovery
+### M2.4 - Worker completion/recovery
 
 - [ ] `worker_finish` remains the primary completion handshake.
 - [ ] DOM completion detection is fallback only.
@@ -185,7 +226,9 @@ Windows:  typecheck + agent/MCP-agent/piggyback tests + build
 macOS:    typecheck + full test + build
 ```
 
-This is a baseline characteristic, not a custom-runtime regression.
+All files under `src/agents` are included in the Ubuntu/Windows agent test step, so browser-controller foundation tests run cross-platform even before a real browser driver is connected.
+
+This baseline characteristic is not a custom-runtime regression.
 
 ## Update policy
 
