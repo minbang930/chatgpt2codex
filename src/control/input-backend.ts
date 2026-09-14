@@ -1,7 +1,7 @@
 import { DomainError, ErrorCode } from "../types.js";
 import type { ResolvedTargetPreview } from "./queue.js";
 import * as macInput from "./mac-input.js";
-import * as winInput from "./win-input.js";
+import * as winInput from "./win-native.js";
 
 export interface SemanticTarget {
   role: string;
