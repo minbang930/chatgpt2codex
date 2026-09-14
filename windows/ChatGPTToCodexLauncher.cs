@@ -1294,7 +1294,6 @@ internal sealed class LauncherForm : Form
         if (!string.IsNullOrEmpty(selectedProjectPath) && HasProjectMarker(selectedProjectPath))
         {
             process.StartInfo.EnvironmentVariables["CHATGPT2CODEX_ACTIVE_PROJECT_ROOT"] = selectedProjectPath;
-            process.StartInfo.EnvironmentVariables["CHATGPT2CODEX_ACTIVE_PROJECT_PRESET"] = "full-write";
         }
         process.EnableRaisingEvents = true;
         process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e)
