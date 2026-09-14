@@ -27,6 +27,7 @@ interface HelperRequest {
 interface HelperResponse {
   id: number;
   ok: boolean;
+  ready?: boolean;
   error?: string;
   appName?: string;
   x?: number;
@@ -41,7 +42,8 @@ interface PendingRequest {
   timer: NodeJS.Timeout;
 }
 
-const STARTUP_OR_REQUEST_TIMEOUT_MS = 30_000;
+const STARTUP_TIMEOUT_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_STDERR = 8_000;
 
 /** Preserve the existing macOS CG keyCode wire contract and translate it at
@@ -196,6 +198,9 @@ public static class ChatGpt2CodexWinInput {
 }
 '@
 
+[Console]::Out.WriteLine((@{ id=0; ok=$true; ready=$true } | ConvertTo-Json -Compress))
+[Console]::Out.Flush()
+
 while (($line = [Console]::In.ReadLine()) -ne $null) {
   if ([string]::IsNullOrWhiteSpace($line)) { continue }
   $id = 0
@@ -256,6 +261,13 @@ function failPending(error: Error): void {
   pending.clear();
 }
 
+function unrefHelperHandles(child: ChildProcessWithoutNullStreams): void {
+  child.unref();
+  (child.stdin as unknown as { unref?: () => void }).unref?.();
+  (child.stdout as unknown as { unref?: () => void }).unref?.();
+  (child.stderr as unknown as { unref?: () => void }).unref?.();
+}
+
 async function startHelper(): Promise<ChildProcessWithoutNullStreams> {
   assertWin32();
   if (helper && !helper.killed && helper.exitCode === null) return helper;
@@ -271,10 +283,43 @@ async function startHelper(): Promise<ChildProcessWithoutNullStreams> {
     child.stderr.on("data", (chunk) => {
       stderrTail = `${stderrTail}${String(chunk)}`.slice(-MAX_STDERR);
     });
+
+    let readySettled = false;
+    let resolveReady!: () => void;
+    let rejectReady!: (error: Error) => void;
+    const readyPromise = new Promise<void>((resolve, reject) => {
+      resolveReady = resolve;
+      rejectReady = reject;
+    });
+    const readyTimer = setTimeout(() => {
+      if (readySettled) return;
+      readySettled = true;
+      const error = new Error(
+        `Windows desktop helper startup timed out: ${stderrTail.trim() || "no stderr"}`,
+      );
+      rejectReady(error);
+      child.kill();
+    }, STARTUP_TIMEOUT_MS);
+
+    const settleReadyFailure = (error: Error) => {
+      if (readySettled) return;
+      readySettled = true;
+      clearTimeout(readyTimer);
+      rejectReady(error);
+    };
+
     const lines = readline.createInterface({ input: child.stdout });
     lines.on("line", (line) => {
       let response: HelperResponse;
       try { response = JSON.parse(line) as HelperResponse; } catch { return; }
+      if (response.id === 0 && response.ok && response.ready) {
+        if (!readySettled) {
+          readySettled = true;
+          clearTimeout(readyTimer);
+          resolveReady();
+        }
+        return;
+      }
       if (!Number.isInteger(response.id)) return;
       const request = pending.get(response.id);
       if (!request) return;
@@ -285,14 +330,26 @@ async function startHelper(): Promise<ChildProcessWithoutNullStreams> {
     });
     child.once("error", (error) => {
       if (helper === child) helper = undefined;
+      settleReadyFailure(error);
       failPending(error);
     });
     child.once("exit", (code) => {
       if (helper === child) helper = undefined;
-      failPending(new Error(`Windows desktop helper exited ${code ?? "unknown"}: ${stderrTail.trim() || "no stderr"}`));
+      const error = new Error(`Windows desktop helper exited ${code ?? "unknown"}: ${stderrTail.trim() || "no stderr"}`);
+      settleReadyFailure(error);
+      failPending(error);
     });
     helper = child;
-    return child;
+    unrefHelperHandles(child);
+
+    try {
+      await readyPromise;
+      return child;
+    } catch (error) {
+      if (helper === child) helper = undefined;
+      if (child.exitCode === null && !child.killed) child.kill();
+      throw error;
+    }
   })();
   try {
     return await helperStart;
@@ -307,8 +364,11 @@ async function requestHelper(payload: Omit<HelperRequest, "id">): Promise<Helper
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id);
-      reject(new Error("Windows desktop input helper timed out"));
-    }, STARTUP_OR_REQUEST_TIMEOUT_MS);
+      const error = new Error(`Windows desktop input helper request timed out (${payload.op})`);
+      reject(error);
+      if (helper === child) helper = undefined;
+      if (child.exitCode === null && !child.killed) child.kill();
+    }, REQUEST_TIMEOUT_MS);
     pending.set(id, { resolve, reject, timer });
     child.stdin.write(`${JSON.stringify({ id, ...payload })}\n`, (error) => {
       if (!error) return;
