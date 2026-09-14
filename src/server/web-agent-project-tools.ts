@@ -66,7 +66,7 @@ export function registerWebAgentProjectTools(server: McpServer, ctx: ToolContext
           "agent_project_route_set",
           makeResult(
             { projectId: active.projectId, projectUrl: mapping.projectRef.url, label: mapping.projectRef.label },
-            `Future workers for ${active.name} will prefer the configured ChatGPT Project.`,
+            `Future workers for ${active.projectId} will prefer the configured ChatGPT Project.`,
           ),
         );
       } catch (error) {
@@ -98,8 +98,8 @@ export function registerWebAgentProjectTools(server: McpServer, ctx: ToolContext
               label: mapping?.projectRef.label,
             },
             mapping
-              ? `Workers for ${active.name} are routed to the configured ChatGPT Project.`
-              : `Workers for ${active.name} use standalone ChatGPT chats.`,
+              ? `Workers for ${active.projectId} are routed to the configured ChatGPT Project.`
+              : `Workers for ${active.projectId} use standalone ChatGPT chats.`,
           ),
         );
       } catch (error) {
@@ -126,8 +126,8 @@ export function registerWebAgentProjectTools(server: McpServer, ctx: ToolContext
           makeResult(
             { projectId: active.projectId, cleared },
             cleared
-              ? `ChatGPT Project routing cleared for ${active.name}.`
-              : `No ChatGPT Project routing was configured for ${active.name}.`,
+              ? `ChatGPT Project routing cleared for ${active.projectId}.`
+              : `No ChatGPT Project routing was configured for ${active.projectId}.`,
           ),
         );
       } catch (error) {
