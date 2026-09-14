@@ -53,8 +53,17 @@ function comparisonPath(value: string): string {
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
-function samePath(a: string, b: string): boolean {
-  return comparisonPath(a) === comparisonPath(b);
+async function comparableExistingPath(value: string): Promise<string> {
+  try {
+    const real = await fs.realpath(value);
+    return comparisonPath(real);
+  } catch {
+    return comparisonPath(value);
+  }
+}
+
+async function sameManagedPath(a: string, b: string): Promise<boolean> {
+  return (await comparableExistingPath(a)) === (await comparableExistingPath(b));
 }
 
 async function canonicalExistingPath(value: string): Promise<string> {
@@ -72,7 +81,7 @@ async function assertRepositoryRoot(projectRoot: string): Promise<string> {
   const root = await canonicalExistingPath(projectRoot);
   const top = (await runGit(root, ["rev-parse", "--show-toplevel"])).stdout.trim();
   const canonicalTop = await canonicalExistingPath(top);
-  if (!samePath(root, canonicalTop)) {
+  if (!(await sameManagedPath(root, canonicalTop))) {
     throw new DomainError(
       ErrorCode.WORKSPACE_NOT_READY,
       `Worker project root must be the Git repository root: ${projectRoot}`,
@@ -135,6 +144,13 @@ async function listWorktrees(projectRoot: string): Promise<GitWorktreeEntry[]> {
   return parseWorktreeList(out.stdout);
 }
 
+async function findWorktreeByPath(entries: GitWorktreeEntry[], expectedPath: string): Promise<GitWorktreeEntry | undefined> {
+  for (const entry of entries) {
+    if (await sameManagedPath(entry.worktreePath, expectedPath)) return entry;
+  }
+  return undefined;
+}
+
 async function branchExists(projectRoot: string, branch: string): Promise<boolean> {
   try {
     await execFileAsync("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], {
@@ -157,7 +173,7 @@ async function verifyExpectedWorktree(
   expectedPath: string,
   expectedBranch: string,
 ): Promise<{ head: string }> {
-  const registered = (await listWorktrees(projectRoot)).find((entry) => samePath(entry.worktreePath, expectedPath));
+  const registered = await findWorktreeByPath(await listWorktrees(projectRoot), expectedPath);
   if (!registered) {
     throw new DomainError(
       ErrorCode.WORKSPACE_NOT_READY,
@@ -174,7 +190,7 @@ async function verifyExpectedWorktree(
   const canonicalWorktree = await canonicalExistingPath(expectedPath);
   const top = (await runGit(canonicalWorktree, ["rev-parse", "--show-toplevel"])).stdout.trim();
   const canonicalTop = await canonicalExistingPath(top);
-  if (!samePath(canonicalWorktree, canonicalTop)) {
+  if (!(await sameManagedPath(canonicalWorktree, canonicalTop))) {
     throw new DomainError(
       ErrorCode.WORKSPACE_NOT_READY,
       `Worker worktree top-level mismatch: ${expectedPath}`,
@@ -209,7 +225,7 @@ export async function verifyWorkerWorktree(
   const root = await assertRepositoryRoot(projectRoot);
   const expectedPath = workerWorktreePath(stateDir, worker.projectId, root, worker.workerId);
   const expectedBranch = workerBranch(worker.workerId);
-  if (!samePath(worker.workspace.worktreePath, expectedPath) || worker.workspace.branch !== expectedBranch) {
+  if (!(await sameManagedPath(worker.workspace.worktreePath, expectedPath)) || worker.workspace.branch !== expectedBranch) {
     throw new DomainError(
       ErrorCode.WORKSPACE_NOT_READY,
       `Worker ${worker.workerId} workspace assignment does not match the managed path/branch`,
@@ -242,7 +258,7 @@ export async function provisionWorkerWorktree(
   const worktreePath = workerWorktreePath(stateDir, worker.projectId, root, workerId);
   const baseCommit = (await runGit(root, ["rev-parse", "--verify", `${baseRef}^{commit}`])).stdout.trim();
 
-  const existing = (await listWorktrees(root)).find((entry) => samePath(entry.worktreePath, worktreePath));
+  const existing = await findWorktreeByPath(await listWorktrees(root), worktreePath);
   if (existing) {
     if (existing.branch !== branch) {
       throw new DomainError(
