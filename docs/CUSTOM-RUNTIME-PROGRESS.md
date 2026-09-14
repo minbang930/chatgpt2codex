@@ -117,8 +117,8 @@ Implementation notes:
 - [x] If the CDP target is lost, revoke its old capability and mark only the browser session failed; keep the durable worker/worktree running and recoverable.
 - [x] Reuse `agent_launch` to recover a running worker in a fresh browser attempt with a new capability.
 - [x] Refuse recovery while an existing browser attempt is still live/non-final, preventing duplicate worker tabs.
+- [x] Add parallel-worker lifecycle/recovery tests and verify them on Ubuntu, Windows, and macOS.
 - [ ] Add DOM completion detection only as a fallback when the worker fails to call `worker_finish`.
-- [ ] Add parallel-worker lifecycle/recovery tests.
 
 Implementation notes:
 
@@ -133,6 +133,7 @@ Implementation notes:
 - `393db8e5` attaches browser reconciliation to the existing `agent_status` tool; `b87ad8f0` covers target loss, token revocation, and attempt-2 recovery.
 - Initial recovery CI run `34816631482` exposed a real regression in the pre-existing cancellation race: the refactored launch helper no longer closed a tab if the durable worker was cancelled between browser submission and `pending -> running`. `1efec18f` restored cleanup around that transition instead of weakening the race test.
 - `afe55336` added a local CDP target-probe test that does not start Chrome. CI run `34816770765` passed Ubuntu, Windows, and macOS for the corrected recovery slice.
+- `08c206fb` added parallel-worker recovery coverage; CI run `34816999035` passed Ubuntu, Windows, and macOS.
 - The legacy `agent_cancel` remains the durable-state cancellation primitive. `agent_stop` is currently the Web-worker-aware public path; consolidation can wait until the behavior is proven live rather than widening the older tool implementation now.
 
 ## Planned next
