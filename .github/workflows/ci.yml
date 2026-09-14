@@ -36,7 +36,7 @@ jobs:
         run: npm run typecheck
 
       - name: Agent tests
-        run: npx vitest run src/agents src/server/agent-tools.test.ts src/server/agent-piggyback.test.ts
+        run: npx vitest run src/agents src/server/agent-tools.test.ts src/server/agent-piggyback.test.ts src/server/browser-bridge-routes.test.ts
 
       - name: Build
         run: npm run build
