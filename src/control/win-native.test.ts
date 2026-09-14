@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  listVisibleWindows,
   resolveFrontmostApp,
   stopWindowsInputHelper,
   supportsLegacyKeyCodeOnWindows,
@@ -43,5 +44,28 @@ if (process.platform === "win32") {
       expect(first === undefined || typeof first === "string").toBe(true);
       expect(second === undefined || typeof second === "string").toBe(true);
     }, 45_000);
+
+    it("enumerates visible top-level windows without exposing native HWND values", async () => {
+      const windows = await listVisibleWindows();
+      expect(windows.length).toBeLessThanOrEqual(200);
+      expect(new Set(windows.map((window) => window.windowId)).size).toBe(windows.length);
+
+      for (const window of windows) {
+        expect(window.windowId).toMatch(/^window-\d+$/);
+        expect(Number.isInteger(window.processId)).toBe(true);
+        expect(window.processId).toBeGreaterThan(0);
+        expect(window.processName.trim().length).toBeGreaterThan(0);
+        expect(window.appName.trim().length).toBeGreaterThan(0);
+        expect(window.title.trim().length).toBeGreaterThan(0);
+        expect(window.visible).toBe(true);
+        expect(typeof window.minimized).toBe("boolean");
+        expect(typeof window.foreground).toBe("boolean");
+        expect(Number.isFinite(window.bounds.x)).toBe(true);
+        expect(Number.isFinite(window.bounds.y)).toBe(true);
+        expect(window.bounds.width).toBeGreaterThan(0);
+        expect(window.bounds.height).toBeGreaterThan(0);
+        expect(Object.prototype.hasOwnProperty.call(window, "hwnd")).toBe(false);
+      }
+    }, 15_000);
   });
 }
