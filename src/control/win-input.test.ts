@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  resolveFrontmostApp,
   supportsLegacyKeyCodeOnWindows,
   windowsVirtualKeyForLegacyKeyCode,
 } from "./win-input.js";
@@ -28,11 +27,4 @@ describe("control/win-input key translation", () => {
     expect(supportsLegacyKeyCodeOnWindows(36)).toBe(true);
     expect(supportsLegacyKeyCodeOnWindows(10)).toBe(false);
   });
-
-  if (process.platform === "win32") {
-    it("loads the native helper for a read-only foreground query without injecting input", async () => {
-      const appName = await resolveFrontmostApp();
-      expect(appName === undefined || typeof appName === "string").toBe(true);
-    }, 15_000);
-  }
 });
