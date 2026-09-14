@@ -24,7 +24,20 @@ export interface VisibleAppWindow {
   visible: true;
   minimized: boolean;
   foreground: boolean;
+  dpi: number;
+  scaleFactor: number;
   bounds: AppWindowRegion;
+}
+
+export interface WindowsAppScreenshot {
+  path: string;
+  appName: string;
+  title?: string;
+  width: number;
+  height: number;
+  dpi: number;
+  scaleFactor: number;
+  captureMethod: "print-window" | "screen-region";
 }
 
 interface HelperWindow {
@@ -35,6 +48,7 @@ interface HelperWindow {
   visible?: boolean;
   minimized?: boolean;
   foreground?: boolean;
+  dpi?: number;
   x?: number;
   y?: number;
   width?: number;
@@ -43,8 +57,9 @@ interface HelperWindow {
 
 interface HelperRequest {
   id: number;
-  op: "frontmost" | "listWindows" | "windowRect" | "click" | "type" | "key";
+  op: "frontmost" | "listWindows" | "captureWindow" | "windowRect" | "click" | "type" | "key";
   appName?: string;
+  filePath?: string;
   x?: number;
   y?: number;
   text?: string;
@@ -57,11 +72,14 @@ interface HelperResponse {
   ready?: boolean;
   error?: string;
   appName?: string;
+  title?: string;
   windows?: HelperWindow[];
   x?: number;
   y?: number;
   width?: number;
   height?: number;
+  dpi?: number;
+  captureMethod?: "print-window" | "screen-region";
 }
 
 interface PendingRequest {
@@ -72,8 +90,10 @@ interface PendingRequest {
 
 const STARTUP_TIMEOUT_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 10_000;
+const CAPTURE_REQUEST_TIMEOUT_MS = 20_000;
 const MAX_STDERR = 8_000;
 const MAX_VISIBLE_WINDOWS = 200;
+const DEFAULT_DPI = 96;
 
 /** Preserve the existing macOS CG keyCode wire contract and translate it at
  * the Windows boundary instead of silently reinterpreting the integer as a
@@ -142,6 +162,7 @@ public static class ChatGpt2CodexWinInput {
         public bool visible { get; set; }
         public bool minimized { get; set; }
         public bool foreground { get; set; }
+        public uint dpi { get; set; }
         public int x { get; set; }
         public int y { get; set; }
         public int width { get; set; }
@@ -160,12 +181,28 @@ public static class ChatGpt2CodexWinInput {
     [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int command);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern uint SendInput(uint count, INPUT[] inputs, int size);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint flags);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
 
     const int SW_RESTORE = 9;
     const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
     const uint MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004;
     const uint KEYEVENTF_KEYUP = 0x0002, KEYEVENTF_UNICODE = 0x0004;
 
+    public static void EnableDpiAwareness() {
+        try {
+            if (SetProcessDpiAwarenessContext(new IntPtr(-4))) return;
+        } catch { }
+        try { SetProcessDPIAware(); } catch { }
+    }
+    public static uint DpiForWindow(IntPtr hWnd) {
+        try {
+            var dpi = GetDpiForWindow(hWnd);
+            return dpi == 0 ? 96u : dpi;
+        } catch { return 96u; }
+    }
     static Process WindowProcess(IntPtr hWnd) {
         uint pid; GetWindowThreadProcessId(hWnd, out pid);
         if (pid == 0) return null;
@@ -193,6 +230,7 @@ public static class ChatGpt2CodexWinInput {
         var title = buffer.ToString().Trim();
         return String.IsNullOrWhiteSpace(title) ? null : title;
     }
+    public static string TitleForWindow(IntPtr hWnd) { return WindowTitle(hWnd); }
     static bool Match(Process process, string requested) {
         if (process == null || String.IsNullOrWhiteSpace(requested)) return false;
         var needle = requested.Trim();
@@ -228,6 +266,7 @@ public static class ChatGpt2CodexWinInput {
                 visible = true,
                 minimized = IsIconic(hWnd),
                 foreground = hWnd == foreground,
+                dpi = DpiForWindow(hWnd),
                 x = rect.Left,
                 y = rect.Top,
                 width = width,
@@ -291,6 +330,86 @@ public static class ChatGpt2CodexWinInput {
 }
 '@
 
+function Test-BitmapHasContent($bitmap) {
+  if ($null -eq $bitmap -or $bitmap.Width -le 0 -or $bitmap.Height -le 0) { return $false }
+  $points = @(
+    @(0.08, 0.08), @(0.50, 0.08), @(0.92, 0.08),
+    @(0.08, 0.50), @(0.50, 0.50), @(0.92, 0.50),
+    @(0.08, 0.92), @(0.50, 0.92), @(0.92, 0.92)
+  )
+  $first = $null
+  foreach ($point in $points) {
+    $x = [Math]::Min($bitmap.Width - 1, [Math]::Max(0, [int](($bitmap.Width - 1) * [double]$point[0])))
+    $y = [Math]::Min($bitmap.Height - 1, [Math]::Max(0, [int](($bitmap.Height - 1) * [double]$point[1])))
+    $argb = $bitmap.GetPixel($x, $y).ToArgb()
+    if ($null -eq $first) { $first = $argb }
+    elseif ($argb -ne $first) { return $true }
+  }
+  return $false
+}
+
+function Capture-AppWindow([string]$appName, [string]$filePath) {
+  if ([string]::IsNullOrWhiteSpace($appName)) { throw 'appName is required' }
+  if ([string]::IsNullOrWhiteSpace($filePath) -or [IO.Path]::GetExtension($filePath) -ine '.png') { throw 'capture path must be a PNG file' }
+  Add-Type -AssemblyName System.Drawing
+
+  $hWnd = [ChatGpt2CodexWinInput]::FindWindow($appName)
+  if ($hWnd -eq [IntPtr]::Zero) { throw 'target app window not found' }
+  $rect = New-Object ChatGpt2CodexWinInput+RECT
+  if (-not [ChatGpt2CodexWinInput]::GetWindowRect($hWnd, [ref]$rect)) { throw 'could not read target app window bounds' }
+  $width = $rect.Right - $rect.Left
+  $height = $rect.Bottom - $rect.Top
+  if ($width -le 0 -or $height -le 0) { throw 'target app window has invalid bounds' }
+
+  $bitmap = $null
+  $method = 'print-window'
+  try {
+    $bitmap = [System.Drawing.Bitmap]::new($width, $height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $hdc = [IntPtr]::Zero
+    try {
+      $hdc = $graphics.GetHdc()
+      $printed = [ChatGpt2CodexWinInput]::PrintWindow($hWnd, $hdc, 2)
+    } finally {
+      if ($hdc -ne [IntPtr]::Zero) { $graphics.ReleaseHdc($hdc) }
+      $graphics.Dispose()
+    }
+
+    if (-not $printed -or -not (Test-BitmapHasContent $bitmap)) {
+      $bitmap.Dispose()
+      $bitmap = $null
+      $hWnd = [ChatGpt2CodexWinInput]::Activate($appName)
+      $rect = New-Object ChatGpt2CodexWinInput+RECT
+      if (-not [ChatGpt2CodexWinInput]::GetWindowRect($hWnd, [ref]$rect)) { throw 'could not read activated target window bounds' }
+      $width = $rect.Right - $rect.Left
+      $height = $rect.Bottom - $rect.Top
+      if ($width -le 0 -or $height -le 0) { throw 'activated target window has invalid bounds' }
+      $bitmap = [System.Drawing.Bitmap]::new($width, $height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+      $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+      try {
+        $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
+      } finally {
+        $graphics.Dispose()
+      }
+      $method = 'screen-region'
+    }
+
+    $bitmap.Save($filePath, [System.Drawing.Imaging.ImageFormat]::Png)
+    $dpi = [ChatGpt2CodexWinInput]::DpiForWindow($hWnd)
+    return @{
+      appName = $appName
+      title = [ChatGpt2CodexWinInput]::TitleForWindow($hWnd)
+      width = $width
+      height = $height
+      dpi = $dpi
+      captureMethod = $method
+    }
+  } finally {
+    if ($null -ne $bitmap) { $bitmap.Dispose() }
+  }
+}
+
+[ChatGpt2CodexWinInput]::EnableDpiAwareness()
 [Console]::Out.WriteLine((@{ id=0; ok=$true; ready=$true } | ConvertTo-Json -Compress))
 [Console]::Out.Flush()
 
@@ -303,6 +422,10 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
     switch ([string]$payload.op) {
       'frontmost' { $result = @{ id=$id; ok=$true; appName=[ChatGpt2CodexWinInput]::ForegroundAppName() } }
       'listWindows' { $result = @{ id=$id; ok=$true; windows=@([ChatGpt2CodexWinInput]::ListVisibleWindows(200)) } }
+      'captureWindow' {
+        $capture = Capture-AppWindow ([string]$payload.appName) ([string]$payload.filePath)
+        $result = @{ id=$id; ok=$true; appName=$capture.appName; title=$capture.title; width=$capture.width; height=$capture.height; dpi=$capture.dpi; captureMethod=$capture.captureMethod }
+      }
       'windowRect' {
         $r = [ChatGpt2CodexWinInput]::RectForApp([string]$payload.appName)
         $result = @{ id=$id; ok=$true; x=$r.Left; y=$r.Top; width=($r.Right-$r.Left); height=($r.Bottom-$r.Top) }
@@ -455,6 +578,7 @@ async function startHelper(): Promise<ChildProcessWithoutNullStreams> {
 async function requestHelper(payload: Omit<HelperRequest, "id">): Promise<HelperResponse> {
   const child = await startHelper();
   const id = nextRequestId++;
+  const timeoutMs = payload.op === "captureWindow" ? CAPTURE_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id);
@@ -462,7 +586,7 @@ async function requestHelper(payload: Omit<HelperRequest, "id">): Promise<Helper
       reject(error);
       if (helper === child) helper = undefined;
       if (child.exitCode === null && !child.killed) child.kill();
-    }, REQUEST_TIMEOUT_MS);
+    }, timeoutMs);
     pending.set(id, { resolve, reject, timer });
     child.stdin.write(`${JSON.stringify({ id, ...payload })}\n`, (error) => {
       if (!error) return;
@@ -473,6 +597,10 @@ async function requestHelper(payload: Omit<HelperRequest, "id">): Promise<Helper
       reject(error);
     });
   });
+}
+
+function validDpi(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : DEFAULT_DPI;
 }
 
 function normalizeVisibleWindow(window: HelperWindow, index: number): VisibleAppWindow | undefined {
@@ -487,6 +615,7 @@ function normalizeVisibleWindow(window: HelperWindow, index: number): VisibleApp
   if (!Number.isInteger(processId) || (processId as number) <= 0 || !processName || !appName || !title) return undefined;
   if (![x, y, width, height].every((value) => typeof value === "number" && Number.isFinite(value))) return undefined;
   if ((width as number) <= 0 || (height as number) <= 0) return undefined;
+  const dpi = validDpi(window.dpi);
   return {
     windowId: `window-${index + 1}`,
     processId: processId as number,
@@ -496,6 +625,8 @@ function normalizeVisibleWindow(window: HelperWindow, index: number): VisibleApp
     visible: true,
     minimized: window.minimized === true,
     foreground: window.foreground === true,
+    dpi,
+    scaleFactor: dpi / DEFAULT_DPI,
     bounds: {
       x: Math.round(x as number),
       y: Math.round(y as number),
@@ -523,6 +654,36 @@ export async function listVisibleWindows(): Promise<VisibleAppWindow[]> {
   return rows
     .map((window, index) => normalizeVisibleWindow(window, index))
     .filter((window): window is VisibleAppWindow => window !== undefined);
+}
+
+/** Capture only the resolved target app window to a caller-generated PNG path.
+ * PrintWindow is preferred because it avoids background-window leakage; if it
+ * returns an empty/solid frame, the helper foregrounds the exact target and
+ * falls back to a visible screen-region copy. */
+export async function captureAppWindow(appName: string, filePath: string): Promise<WindowsAppScreenshot> {
+  assertWin32();
+  if (!path.isAbsolute(filePath) || path.extname(filePath).toLowerCase() !== ".png") {
+    throw new Error("Windows app capture requires an absolute .png output path");
+  }
+  const result = await requestHelper({ op: "captureWindow", appName, filePath });
+  if (!result.captureMethod || (result.captureMethod !== "print-window" && result.captureMethod !== "screen-region")) {
+    throw new Error("Windows desktop helper returned an invalid capture method");
+  }
+  const values = [result.width, result.height];
+  if (!values.every((value) => typeof value === "number" && Number.isFinite(value) && value > 0)) {
+    throw new Error("Windows desktop helper returned invalid screenshot dimensions");
+  }
+  const dpi = validDpi(result.dpi);
+  return {
+    path: filePath,
+    appName: result.appName?.trim() || appName,
+    title: result.title?.trim() || undefined,
+    width: Math.round(result.width as number),
+    height: Math.round(result.height as number),
+    dpi,
+    scaleFactor: dpi / DEFAULT_DPI,
+    captureMethod: result.captureMethod,
+  };
 }
 
 export async function getAppWindowRegion(appName: string): Promise<AppWindowRegion> {
