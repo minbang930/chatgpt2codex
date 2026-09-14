@@ -14,9 +14,36 @@ export interface AppWindowRegion {
   height: number;
 }
 
+export interface VisibleAppWindow {
+  /** Ephemeral id scoped only to this observation result. Never accepted as authority for later input. */
+  windowId: string;
+  processId: number;
+  processName: string;
+  appName: string;
+  title: string;
+  visible: true;
+  minimized: boolean;
+  foreground: boolean;
+  bounds: AppWindowRegion;
+}
+
+interface HelperWindow {
+  processId?: number;
+  processName?: string;
+  appName?: string;
+  title?: string;
+  visible?: boolean;
+  minimized?: boolean;
+  foreground?: boolean;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+}
+
 interface HelperRequest {
   id: number;
-  op: "frontmost" | "windowRect" | "click" | "type" | "key";
+  op: "frontmost" | "listWindows" | "windowRect" | "click" | "type" | "key";
   appName?: string;
   x?: number;
   y?: number;
@@ -30,6 +57,7 @@ interface HelperResponse {
   ready?: boolean;
   error?: string;
   appName?: string;
+  windows?: HelperWindow[];
   x?: number;
   y?: number;
   width?: number;
@@ -45,6 +73,7 @@ interface PendingRequest {
 const STARTUP_TIMEOUT_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_STDERR = 8_000;
+const MAX_VISIBLE_WINDOWS = 200;
 
 /** Preserve the existing macOS CG keyCode wire contract and translate it at
  * the Windows boundary instead of silently reinterpreting the integer as a
@@ -88,6 +117,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 
 public static class ChatGpt2CodexWinInput {
@@ -104,11 +134,27 @@ public static class ChatGpt2CodexWinInput {
     [StructLayout(LayoutKind.Sequential)] public struct KEYBDINPUT {
         public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public UIntPtr dwExtraInfo;
     }
+    public sealed class WindowInfo {
+        public uint processId { get; set; }
+        public string processName { get; set; }
+        public string appName { get; set; }
+        public string title { get; set; }
+        public bool visible { get; set; }
+        public bool minimized { get; set; }
+        public bool foreground { get; set; }
+        public int x { get; set; }
+        public int y { get; set; }
+        public int width { get; set; }
+        public int height { get; set; }
+    }
 
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowTextLength(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int command);
@@ -125,6 +171,10 @@ public static class ChatGpt2CodexWinInput {
         if (pid == 0) return null;
         try { return Process.GetProcessById((int)pid); } catch { return null; }
     }
+    static string ProcessName(Process process) {
+        if (process == null) return null;
+        try { return process.ProcessName; } catch { return null; }
+    }
     static string Description(Process process) {
         if (process == null) return null;
         try {
@@ -133,17 +183,60 @@ public static class ChatGpt2CodexWinInput {
             var product = process.MainModule.FileVersionInfo.ProductName;
             if (!String.IsNullOrWhiteSpace(product)) return product.Trim();
         } catch { }
-        return process.ProcessName;
+        return ProcessName(process);
+    }
+    static string WindowTitle(IntPtr hWnd) {
+        var length = GetWindowTextLength(hWnd);
+        if (length <= 0) return null;
+        var buffer = new StringBuilder(length + 1);
+        if (GetWindowText(hWnd, buffer, buffer.Capacity) <= 0) return null;
+        var title = buffer.ToString().Trim();
+        return String.IsNullOrWhiteSpace(title) ? null : title;
     }
     static bool Match(Process process, string requested) {
         if (process == null || String.IsNullOrWhiteSpace(requested)) return false;
         var needle = requested.Trim();
         if (needle.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) needle = needle.Substring(0, needle.Length - 4);
-        if (String.Equals(process.ProcessName, needle, StringComparison.OrdinalIgnoreCase)) return true;
+        if (String.Equals(ProcessName(process), needle, StringComparison.OrdinalIgnoreCase)) return true;
         var description = Description(process);
         return !String.IsNullOrWhiteSpace(description) && String.Equals(description, requested.Trim(), StringComparison.OrdinalIgnoreCase);
     }
     public static string ForegroundAppName() { return Description(WindowProcess(GetForegroundWindow())); }
+    public static WindowInfo[] ListVisibleWindows(int maxCount) {
+        var results = new List<WindowInfo>();
+        var foreground = GetForegroundWindow();
+        EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) {
+            if (results.Count >= maxCount) return false;
+            if (!IsWindowVisible(hWnd)) return true;
+            var title = WindowTitle(hWnd);
+            if (String.IsNullOrWhiteSpace(title)) return true;
+            RECT rect;
+            if (!GetWindowRect(hWnd, out rect)) return true;
+            var width = rect.Right - rect.Left;
+            var height = rect.Bottom - rect.Top;
+            if (width <= 0 || height <= 0) return true;
+            uint pid;
+            GetWindowThreadProcessId(hWnd, out pid);
+            var process = WindowProcess(hWnd);
+            var processName = ProcessName(process);
+            if (process == null || String.IsNullOrWhiteSpace(processName)) return true;
+            results.Add(new WindowInfo {
+                processId = pid,
+                processName = processName,
+                appName = Description(process) ?? processName,
+                title = title,
+                visible = true,
+                minimized = IsIconic(hWnd),
+                foreground = hWnd == foreground,
+                x = rect.Left,
+                y = rect.Top,
+                width = width,
+                height = height
+            });
+            return true;
+        }, IntPtr.Zero);
+        return results.ToArray();
+    }
     public static IntPtr FindWindow(string appName) {
         var foreground = GetForegroundWindow();
         if (foreground != IntPtr.Zero && IsWindowVisible(foreground) && Match(WindowProcess(foreground), appName)) return foreground;
@@ -209,6 +302,7 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
     $id = [int]$payload.id
     switch ([string]$payload.op) {
       'frontmost' { $result = @{ id=$id; ok=$true; appName=[ChatGpt2CodexWinInput]::ForegroundAppName() } }
+      'listWindows' { $result = @{ id=$id; ok=$true; windows=@([ChatGpt2CodexWinInput]::ListVisibleWindows(200)) } }
       'windowRect' {
         $r = [ChatGpt2CodexWinInput]::RectForApp([string]$payload.appName)
         $result = @{ id=$id; ok=$true; x=$r.Left; y=$r.Top; width=($r.Right-$r.Left); height=($r.Bottom-$r.Top) }
@@ -221,7 +315,7 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
   } catch {
     $result = @{ id=$id; ok=$false; error=$_.Exception.Message }
   }
-  [Console]::Out.WriteLine(($result | ConvertTo-Json -Compress))
+  [Console]::Out.WriteLine(($result | ConvertTo-Json -Compress -Depth 6))
   [Console]::Out.Flush()
 }
 `;
@@ -381,10 +475,54 @@ async function requestHelper(payload: Omit<HelperRequest, "id">): Promise<Helper
   });
 }
 
+function normalizeVisibleWindow(window: HelperWindow, index: number): VisibleAppWindow | undefined {
+  const processId = window.processId;
+  const processName = window.processName?.trim();
+  const appName = window.appName?.trim() || processName;
+  const title = window.title?.trim();
+  const x = window.x;
+  const y = window.y;
+  const width = window.width;
+  const height = window.height;
+  if (!Number.isInteger(processId) || (processId as number) <= 0 || !processName || !appName || !title) return undefined;
+  if (![x, y, width, height].every((value) => typeof value === "number" && Number.isFinite(value))) return undefined;
+  if ((width as number) <= 0 || (height as number) <= 0) return undefined;
+  return {
+    windowId: `window-${index + 1}`,
+    processId: processId as number,
+    processName,
+    appName,
+    title,
+    visible: true,
+    minimized: window.minimized === true,
+    foreground: window.foreground === true,
+    bounds: {
+      x: Math.round(x as number),
+      y: Math.round(y as number),
+      width: Math.round(width as number),
+      height: Math.round(height as number),
+    },
+  };
+}
+
 export async function resolveFrontmostApp(): Promise<string | undefined> {
   const result = await requestHelper({ op: "frontmost" });
   const name = result.appName?.trim();
   return name || undefined;
+}
+
+/**
+ * Read-only top-level window observation. No HWND values leave the helper:
+ * callers receive observation-scoped ids that are deliberately useless as
+ * later authorization. Every real action still re-resolves the app/window
+ * immediately before emitting input.
+ */
+export async function listVisibleWindows(): Promise<VisibleAppWindow[]> {
+  const result = await requestHelper({ op: "listWindows" });
+  const rows = Array.isArray(result.windows) ? result.windows.slice(0, MAX_VISIBLE_WINDOWS) : [];
+  return rows
+    .map((window, index) => normalizeVisibleWindow(window, index))
+    .filter((window): window is VisibleAppWindow => window !== undefined);
 }
 
 export async function getAppWindowRegion(appName: string): Promise<AppWindowRegion> {
