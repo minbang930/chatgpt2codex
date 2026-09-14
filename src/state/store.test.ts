@@ -116,6 +116,24 @@ describe("Store", () => {
     expect(session.lease?.leaseId).toBe("lease-1");
   });
 
+  it("round-trips a control lease", async () => {
+    await store.setSession({
+      activeProjectId: "control-app",
+      mode: "read",
+      lease: {
+        projectId: "control-app",
+        leaseId: "lease-control",
+        projectRoot: "/workspace/control-app",
+        preset: "control",
+        issuedAt: 1000,
+        expiresAt: 2000,
+      },
+    });
+    const session = await store.getSession();
+    expect(session.activeProjectId).toBe("control-app");
+    expect(session.lease?.preset).toBe("control");
+  });
+
   it("stamps setSession's updatedAt with an integer epoch-ms value, ignoring caller input", async () => {
     await store.setSession({ updatedAt: 1 });
     const raw = JSON.parse(await readFile(join(dir, "sessions.json"), "utf8"));
