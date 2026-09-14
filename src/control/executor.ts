@@ -1,7 +1,7 @@
 import type { ToolContext } from "../types.js";
 import { resolveActiveProject } from "../workspace/active.js";
-import { captureE2eAppScreenshot, captureE2eScreenshot } from "../e2e/local-e2e.js";
 import { redact } from "../policy/secrets.js";
+import { captureControlAppScreenshot } from "./capture.js";
 import { assertAllowedTarget, controlAllowlist, isSensitiveApp } from "./policy.js";
 import { maskSensitiveRegions } from "./screenshot-mask.js";
 import { autoDecision, recordAutoUse } from "./auto.js";
@@ -36,25 +36,23 @@ function isValidKeyCode(value: number): boolean {
   return Number.isInteger(value) && value >= 0 && value <= 127;
 }
 
-/** Best-effort before/after screenshot evidence for an approved action.
- * Never throws and never blocks execution: darwin-only for now, skipped
- * entirely for a sensitive-app target, and skipped when there's no active
- * project to anchor the capture directory under. Windows evidence capture is
- * a later M3 slice and does not block the native input foundation. */
+/** Best-effort before/after app-window screenshot evidence for an approved
+ * action. Never throws and never blocks execution. Sensitive targets are
+ * skipped entirely and the capture remains anchored under the active project.
+ * Windows uses the same explicit app-window capture path as computer_screenshot;
+ * unrestricted full-screen fallback is intentionally not used there. */
 async function captureActionEvidence(
   ctx: ToolContext,
   record: ControlActionRecord,
   phase: "before" | "after",
 ): Promise<{ path: string; masked: boolean } | undefined> {
-  if (process.platform !== "darwin") return undefined;
+  if (process.platform !== "darwin" && process.platform !== "win32") return undefined;
   if (isSensitiveApp(record.appName)) return undefined;
   try {
     const active = await resolveActiveProject(ctx);
     if (!active) return undefined;
     const label = `control-${record.actionId}-${phase}`;
-    const captured = await captureE2eAppScreenshot(active.root, { appName: record.appName, label, waitMs: 0 }).catch(() =>
-      captureE2eScreenshot(active.root, { label }),
-    );
+    const captured = await captureControlAppScreenshot(active.root, { appName: record.appName, label, waitMs: 0 });
     const masked = await maskSensitiveRegions({ pngPath: captured.path, appName: record.appName });
     return { path: masked.pngPath, masked: masked.masked };
   } catch {
