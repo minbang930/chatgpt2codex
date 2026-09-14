@@ -36,7 +36,7 @@ jobs:
         run: npm run typecheck
 
       - name: Agent tests
-        run: npx vitest run src/agents
+        run: npx vitest run src/agents src/server/agent-tools.test.ts
 
       - name: Build
         run: npm run build
