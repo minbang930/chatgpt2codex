@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **M3 - Windows Computer Use**
 
-Active unit: **M3.3 - Windows UIA semantic layer**
+Active unit: **M3.4 - Computer Use activity indicator**
 
 ## Completed
 
@@ -185,23 +185,39 @@ Implementation notes:
 - `ce78688e` added the platform control capture adapter, `c5cc4fd1` wired it into `computer_screenshot` and the Windows request-time target gate, and `9785a1c9` enabled Windows before/after action evidence.
 - Actual image-content quality, GPU-heavy windows, multi-monitor behavior, and screenshot-to-action interaction remain intentionally deferred to M3.5 live VMware validation; CI validates the control/capture plumbing without reading the hosted runner desktop.
 
-## In progress
-
 ### M3.3 - Windows UIA semantic layer
 
-- [ ] Bounded/cached UIA snapshot for the selected allowlisted app/window.
-- [ ] Ephemeral semantic element ids scoped to an observation.
-- [ ] Invoke/set-value/focus/selection where reliably exposed, with coordinate fallback preserved.
-- [ ] Keep every semantic action inside the existing control lease/allowlist/kill/audit path and revalidate the target immediately before actuation.
-- [ ] Add CI-safe UIA coverage that does not interact with unrelated desktop content.
+- [x] Added a bounded Windows ControlView snapshot for the selected allowlisted app window: at most 120 returned elements, depth 8 by default (hard max 10), and at most 800 visited nodes.
+- [x] Added a separate persistent UIA helper with an eight-observation, two-minute cache so slow/broken UIA providers cannot wedge the M3.1 SendInput helper.
+- [x] Added ephemeral `uiaobs_*` observation ids and `uiael_*` element ids; no HWND or UIA runtime id is exported or accepted as later authority.
+- [x] Every returned element includes an opaque observation-scoped `selector` that reuses the existing `target.ax` wire shape, avoiding a second Windows-only MCP action schema.
+- [x] UIA snapshots expose only bounded metadata (name/AutomationId/class/control type/bounds/pattern availability); current ValuePattern contents are never read or returned.
+- [x] Semantic click chooses `InvokePattern`, then `SelectionItemPattern.Select`, then `SetFocus` where supported.
+- [x] Semantic type focuses and uses writable `ValuePattern.SetValue`; the existing executor preserves windowPoint click/type fallback when UIA is unavailable or stale.
+- [x] Semantic actions re-resolve the element against the current app window immediately before actuation using AutomationId/name + control type/class/bounds, and reject observations if the target process changed.
+- [x] Request-time semantic preview is read-only; actual semantic input still travels through the existing control lease, allowlist/sensitive-target gates, approval queue, kill switch, executor, evidence, and audit path.
+- [x] App-targeted Windows `computer_screenshot` now returns `semanticObservation` best-effort after the authorized screenshot; UIA failure never prevents coordinate-based Computer Use.
+- [x] Added CI-safe coverage that loads the Windows UIA stack and exercises a deliberately nonexistent target without observing or modifying unrelated runner desktop content.
+- [x] CI run `34887653677` passed Windows, Ubuntu, and macOS; Windows passed typecheck, focused tests including both Windows helpers, and build.
 
-## Planned next
+Implementation notes:
+
+- `b31ebc41` added the isolated persistent UIA helper, bounded traversal/cache, scoped selectors, re-resolution, Invoke/Selection/Focus, and ValuePattern support.
+- `79e31c86` routed Windows semantic resolution/press/value operations through the existing platform boundary while leaving macOS AX behavior unchanged.
+- `362804cf` coupled the semantic snapshot to the already-authorized Windows app screenshot and added Windows request-time semantic preview.
+- `5c2844a7` added opaque-selector and safe helper-start coverage; `c68f4e92` added that coverage to cross-platform CI.
+- Keeping UIA in its own helper is intentional failure isolation, not a second control orchestration stack: UIA provider hangs kill only the UIA helper, while the existing queue/executor/SendInput and coordinate fallback remain available.
+- Actual Notepad/Explorer/Chrome semantics, stale-element behavior under live UI changes, and screenshot-to-semantic-action quality remain intentionally deferred to M3.5 VMware validation.
+
+## In progress
 
 ### M3.4 - Computer Use activity indicator
 
 - [ ] Native click-through topmost activity border.
 - [ ] Keep the overlay out of model screenshots via capture exclusion or temporary hide fallback.
 - [ ] Bind visibility to Computer Use activity only; never use the border as authorization state.
+
+## Planned next
 
 ### M3.5 - VMware live smoke validation
 
