@@ -223,7 +223,7 @@ public static class ChatGpt2CodexWinInput {
             results.Add(new WindowInfo {
                 processId = pid,
                 processName = processName,
-                appName = Description(process) ?? processName,
+                appName = processName,
                 title = title,
                 visible = true,
                 minimized = IsIconic(hWnd),
