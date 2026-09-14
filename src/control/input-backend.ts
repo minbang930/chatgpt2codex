@@ -1,5 +1,6 @@
 import { DomainError, ErrorCode } from "../types.js";
 import type { ResolvedTargetPreview } from "./queue.js";
+import { withComputerUseActivity } from "./activity-indicator.js";
 import * as macInput from "./mac-input.js";
 import * as winInput from "./win-native.js";
 import * as winUia from "./win-uia.js";
@@ -62,13 +63,17 @@ export async function resolveWindowPoint(appName: string, xRel: number, yRel: nu
 
 export async function clickAtPoint(appName: string, x: number, y: number): Promise<void> {
   if (process.platform === "darwin") return macInput.clickAtPoint(appName, x, y);
-  if (process.platform === "win32") return winInput.clickAtPoint(appName, x, y);
+  if (process.platform === "win32") {
+    return withComputerUseActivity(() => winInput.clickAtPoint(appName, x, y));
+  }
   return unsupported();
 }
 
 export async function typeText(appName: string, text: string): Promise<void> {
   if (process.platform === "darwin") return macInput.typeText(appName, text);
-  if (process.platform === "win32") return winInput.typeText(appName, text);
+  if (process.platform === "win32") {
+    return withComputerUseActivity(() => winInput.typeText(appName, text));
+  }
   return unsupported();
 }
 
@@ -78,7 +83,9 @@ export async function typeText(appName: string, text: string): Promise<void> {
  */
 export async function pressKey(appName: string, keyCode: number): Promise<void> {
   if (process.platform === "darwin") return macInput.pressKey(appName, keyCode);
-  if (process.platform === "win32") return winInput.pressKey(appName, keyCode);
+  if (process.platform === "win32") {
+    return withComputerUseActivity(() => winInput.pressKey(appName, keyCode));
+  }
   return unsupported();
 }
 
@@ -98,7 +105,9 @@ export async function resolveAxElement(appName: string, target: SemanticTarget):
  * existing windowPoint fallback if that semantic operation cannot run. */
 export async function pressAxElement(appName: string, target: SemanticTarget): Promise<void> {
   if (process.platform === "darwin") return macInput.pressAxElement(appName, target);
-  if (process.platform === "win32") return winUia.pressSemanticElement(appName, target);
+  if (process.platform === "win32") {
+    return withComputerUseActivity(() => winUia.pressSemanticElement(appName, target));
+  }
   throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Semantic accessibility press is not supported on this platform");
 }
 
@@ -107,7 +116,9 @@ export async function pressAxElement(appName: string, target: SemanticTarget): P
  * coordinate click + Unicode typing path when ValuePattern is unavailable. */
 export async function setAxValue(appName: string, target: SemanticTarget, text: string): Promise<void> {
   if (process.platform === "darwin") return macInput.setAxValue(appName, target, text);
-  if (process.platform === "win32") return winUia.setSemanticValue(appName, target, text);
+  if (process.platform === "win32") {
+    return withComputerUseActivity(() => winUia.setSemanticValue(appName, target, text));
+  }
   throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Semantic accessibility value setting is not supported on this platform");
 }
 
