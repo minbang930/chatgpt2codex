@@ -38,8 +38,7 @@ $addType = Get-Command Add-Type
 # PowerShell 7 exposes -CompilerOptions, while Windows PowerShell 5.1 (the
 # shell used by the npm windows:exe script on a normal Windows 11 install)
 # exposes -CompilerParameters instead. Keep both paths so source builds work
-# from either shell. /target:winexe is already supplied by -OutputType; the
-# optional compiler argument here is only for the embedded application icon.
+# from either shell.
 if ($addType.Parameters.ContainsKey("CompilerOptions")) {
     $compilerOptions = @()
     if (Test-Path $iconIco) {
@@ -57,25 +56,26 @@ if ($addType.Parameters.ContainsKey("CompilerOptions")) {
     }
     Add-Type @params
 } elseif ($addType.Parameters.ContainsKey("CompilerParameters")) {
-    # Windows PowerShell 5.1 does not allow -CompilerParameters together with
-    # -ReferencedAssemblies, so place the references on CompilerParameters.
+    # Windows PowerShell 5.1 rejects -CompilerParameters when Add-Type is also
+    # given -OutputAssembly/-OutputType. Configure *all* output/compiler state
+    # directly on CompilerParameters and pass only that parameter set.
     $cp = New-Object System.CodeDom.Compiler.CompilerParameters
     $cp.GenerateExecutable = $true
     $cp.GenerateInMemory = $false
+    $cp.OutputAssembly = $out
     [void]$cp.ReferencedAssemblies.Add("System.dll")
     [void]$cp.ReferencedAssemblies.Add("System.Core.dll")
     foreach ($ref in $refs) {
         [void]$cp.ReferencedAssemblies.Add($ref)
     }
-    if (Test-Path $iconIco) {
-        $cp.CompilerOptions = "/win32icon:`"$iconIco`""
-    }
 
-    Add-Type `
-        -TypeDefinition $sourceText `
-        -CompilerParameters $cp `
-        -OutputAssembly $out `
-        -OutputType WindowsApplication
+    $compilerOptions = "/target:winexe"
+    if (Test-Path $iconIco) {
+        $compilerOptions = "$compilerOptions /win32icon:`"$iconIco`""
+    }
+    $cp.CompilerOptions = $compilerOptions
+
+    Add-Type -TypeDefinition $sourceText -CompilerParameters $cp
 } else {
     throw "This PowerShell Add-Type implementation exposes neither CompilerOptions nor CompilerParameters."
 }
