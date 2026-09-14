@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ToolContext } from "../types.js";
+import { installAgentNotificationPiggyback } from "../agents/piggyback.js";
 import { registerAgentTools } from "./agent-tools.js";
 import { registerTools } from "./tools.js";
 
@@ -14,6 +15,7 @@ export async function createServer(ctx: ToolContext): Promise<McpServer> {
   });
 
   registerTools(server, ctx);
+  installAgentNotificationPiggyback(server, ctx.stateDir);
   registerAgentTools(server, ctx);
 
   return server;
