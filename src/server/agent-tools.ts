@@ -163,7 +163,6 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       title: "Prepare isolated coding worker",
       description:
         "Create a durable worker plus its isolated Git branch/worktree for the active full-write project. In M1 this prepares the worker only; ChatGPT Web worker launch is added in M2, so do not claim the task is running until the worker becomes running.",
-      securitySchemes: SECURITY_SCHEMES,
       annotations: LOCAL_STATE_ANNOTATIONS,
       _meta: chatGptMeta("Preparing isolated worker...", "Isolated worker prepared"),
       inputSchema: {
@@ -198,7 +197,6 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
     {
       title: "Get worker status",
       description: "Read the durable status and workspace metadata for one local worker.",
-      securitySchemes: SECURITY_SCHEMES,
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: chatGptMeta("Checking worker status...", "Worker status loaded"),
       inputSchema: { workerId: z.string().min(1) },
@@ -215,7 +213,6 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
     {
       title: "Get worker result",
       description: "Read a worker's durable final result/error without deleting it from the local inbox.",
-      securitySchemes: SECURITY_SCHEMES,
       annotations: READ_ONLY_ANNOTATIONS,
       _meta: chatGptMeta("Loading worker result...", "Worker result loaded"),
       inputSchema: { workerId: z.string().min(1) },
@@ -238,7 +235,6 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       title: "Wait briefly for worker update",
       description:
         "Wait up to 60 seconds for one or more unnotified worker completion/failure/cancellation events. This is an event wait; use agent_result for the full durable result.",
-      securitySchemes: SECURITY_SCHEMES,
       annotations: LOCAL_STATE_ANNOTATIONS,
       _meta: chatGptMeta("Waiting for worker update...", "Worker update wait finished"),
       inputSchema: {
@@ -272,7 +268,6 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       title: "Cancel coding worker",
       description:
         "Mark a worker cancelled without deleting its branch, worktree, or partial edits. Browser/process interruption is added when Web workers are implemented.",
-      securitySchemes: SECURITY_SCHEMES,
       annotations: LOCAL_STATE_ANNOTATIONS,
       _meta: chatGptMeta("Cancelling worker...", "Worker cancelled"),
       inputSchema: {
@@ -293,7 +288,6 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
       title: "Finish coding worker",
       description:
         "Worker-side completion handshake. Persist the final summary/result in the durable inbox after verifying the worker still owns its managed worktree. If commitSha is supplied it must match the worker worktree HEAD.",
-      securitySchemes: SECURITY_SCHEMES,
       annotations: LOCAL_STATE_ANNOTATIONS,
       _meta: chatGptMeta("Recording worker completion...", "Worker completion recorded"),
       inputSchema: {
