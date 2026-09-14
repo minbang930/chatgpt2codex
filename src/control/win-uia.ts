@@ -158,15 +158,16 @@ public static class ChatGpt2CodexWinUiaWindow {
     }
     public static IntPtr FindWindow(string appName) {
         var foreground = GetForegroundWindow();
-        if (foreground != IntPtr.Zero && IsWindowVisible(foreground) && !IsIconic(foreground) && Match(WindowProcess(foreground), appName)) return foreground;
+        if (foreground != IntPtr.Zero && IsWindowVisible(foreground) && Match(WindowProcess(foreground), appName)) return foreground;
         IntPtr found = IntPtr.Zero;
         EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) {
-            if (!IsWindowVisible(hWnd) || IsIconic(hWnd)) return true;
+            if (!IsWindowVisible(hWnd)) return true;
             if (Match(WindowProcess(hWnd), appName)) { found = hWnd; return false; }
             return true;
         }, IntPtr.Zero);
         return found;
     }
+    public static bool IsMinimized(IntPtr hWnd) { return hWnd != IntPtr.Zero && IsIconic(hWnd); }
     public static IntPtr Activate(string appName) {
         var hWnd = FindWindow(appName);
         if (hWnd == IntPtr.Zero) throw new InvalidOperationException("target app window not found");
@@ -241,9 +242,9 @@ function Try-Pattern($element, $pattern) {
   return $null
 }
 
-function Describe-Element($element, [string]$elementId) {
+function Describe-Element($element, [string]$elementId, [bool]$includeOffscreen = $false) {
   try { $current = $element.Current } catch { return $null }
-  try { if ($current.IsOffscreen) { return $null } } catch { }
+  try { if ($current.IsOffscreen -and -not $includeOffscreen) { return $null } } catch { }
 
   $role = Get-Role $element
   $name = Short-Text $current.Name 160
@@ -317,6 +318,7 @@ function Get-UiaSnapshot([string]$appName, [int]$maxElements, [int]$maxDepth) {
 
   $hWnd = [ChatGpt2CodexWinUiaWindow]::FindWindow($appName)
   if ($hWnd -eq [IntPtr]::Zero) { throw 'target app window not found' }
+  $includeOffscreen = [ChatGpt2CodexWinUiaWindow]::IsMinimized($hWnd)
   $root = [System.Windows.Automation.AutomationElement]::FromHandle($hWnd)
   if ($null -eq $root) { throw 'UI Automation could not resolve the target window' }
 
@@ -343,7 +345,7 @@ function Get-UiaSnapshot([string]$appName, [int]$maxElements, [int]$maxDepth) {
     $depth = [int]$item.depth
 
     $elementId = 'uiael_' + ($publicElements.Count + 1)
-    $described = Describe-Element $element $elementId
+    $described = Describe-Element $element $elementId $includeOffscreen
     if ($null -ne $described) {
       [void]$publicElements.Add($described.public)
       $cachedElements[$elementId] = $described.cached
