@@ -6,6 +6,11 @@ import { findProject } from "../workspace/registry.js";
 import { verifyWorkerCapability } from "./capability.js";
 import { getAgentStatus, getAgentWorkspace } from "./manager.js";
 
+/**
+ * Small, explicit worker surface. Keep this narrower than normal Core so a
+ * worker can inspect/edit/test/commit its own branch but cannot rescan/switch
+ * projects, push remotes, control the desktop, or use unrelated media tools.
+ */
 export const WORKER_CORE_TOOL_NAMES = [
   "project_rules",
   "project_status",
@@ -15,11 +20,7 @@ export const WORKER_CORE_TOOL_NAMES = [
   "file_read_slice",
   "file_apply_patch",
   "file_create",
-  "command_list",
-  "command_run",
   "local_shell_run",
-  "git_status",
-  "git_diff_summary",
   "git_commit",
   "show_changes",
 ] as const;
