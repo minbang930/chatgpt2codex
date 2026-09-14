@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **M1 - Local multi-agent runtime**
 
-Active unit: **M1.3 - Agent Manager API**
+Active unit: **M1.4 - MCP agent tools**
 
 ## Completed
 
@@ -64,16 +64,31 @@ Implementation notes:
 - CI run `34807866538` passed all jobs: Ubuntu agent tests/typecheck/build, Windows agent tests/typecheck/build, and macOS full test/typecheck/build.
 - Worker cleanup intentionally omits `git worktree remove --force`, so dirty/untracked work is preserved and cleanup fails safely. The worker branch is preserved after a clean worktree removal.
 
-## In progress
-
 ### M1.3 - Agent Manager API
 
-- [ ] Spawn worker record + isolated workspace.
-- [ ] Status/result retrieval.
-- [ ] Cancellation.
-- [ ] Short event wait.
+- [x] Spawn a durable worker record and provision its isolated workspace.
+- [x] Keep newly provisioned workers `pending` until a real browser worker accepts the task.
+- [x] Status retrieval.
+- [x] Result retrieval for pending/running/completed/failed/cancelled workers.
+- [x] Cancellation without deleting partial worker work or removing the worktree.
+- [x] Verified worker-workspace lookup for future worker-scoped tool routing.
+- [x] Short event wait over the durable completion inbox.
+- [x] Event wait does not acknowledge delivery automatically.
+- [x] Explicit event acknowledgement after successful delivery.
+- [x] Bound event waits to 0-60 seconds.
+- [x] Integration tests across real Git repositories/worktrees.
+- [x] Pass CI verification on Ubuntu, Windows, and macOS.
 
-## Planned next
+Implementation notes:
+
+- `d680dca3da4016fd219ffbb49db85a938c36e1b3` added `src/agents/manager.ts` with spawn/status/result/cancel/workspace/wait/ack orchestration.
+- `b904a1450ceabb30ae39047357af2a1b8ad783bb` added lifecycle and event-wait integration tests.
+- Spawn intentionally leaves workers `pending`; M2 browser-worker startup will own the transition to `running`.
+- If workspace provisioning fails after the durable worker record is created, the record is preserved and the thrown domain error includes the `workerId`. This avoids deleting an uncertain worktree/branch and keeps recovery possible.
+- `agent_wait` semantics are prepared as a short inbox wait, while full worker output remains the responsibility of result retrieval.
+- CI run `34808287371` completed successfully across Ubuntu, Windows, and macOS.
+
+## In progress
 
 ### M1.4 - MCP agent tools
 
@@ -83,6 +98,8 @@ Implementation notes:
 - [ ] `agent_wait`
 - [ ] `agent_cancel`
 - [ ] `worker_finish`
+
+## Planned next
 
 ### M1.5 - Completion notification piggyback
 
