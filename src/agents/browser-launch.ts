@@ -40,6 +40,19 @@ async function launchWorkerBrowser(
   }
 }
 
+async function discardLaunchedBrowser(
+  stateDir: string,
+  driver: BrowserWorkerDriver,
+  workerId: string,
+  browser: BrowserWorkerSession,
+): Promise<void> {
+  await revokeWorkerCapability(stateDir, workerId).catch(() => undefined);
+  if (browser.status === "running") {
+    const controller = new BrowserWorkerController(stateDir, driver);
+    await controller.cancel(workerId).catch(() => undefined);
+  }
+}
+
 /**
  * Launch one already-prepared durable worker into ChatGPT Web. The capability
  * is issued immediately before launch and is never returned to the parent
@@ -68,12 +81,17 @@ export async function launchPreparedBrowserWorker(
   }
 
   const launched = await launchWorkerBrowser(stateDir, driver, worker, capabilityTtlMs);
-  const running = await markWorkerRunning(stateDir, workerId);
-  return {
-    worker: running,
-    browser: launched.browser,
-    capabilityExpiresAt: launched.capabilityExpiresAt,
-  };
+  try {
+    const running = await markWorkerRunning(stateDir, workerId);
+    return {
+      worker: running,
+      browser: launched.browser,
+      capabilityExpiresAt: launched.capabilityExpiresAt,
+    };
+  } catch (error) {
+    await discardLaunchedBrowser(stateDir, driver, workerId, launched.browser);
+    throw error;
+  }
 }
 
 /**
