@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **M1 - Local multi-agent runtime**
 
-Active unit: **M1.4 - MCP agent tools**
+Active unit: **M1.5 - Completion notification piggyback**
 
 ## Completed
 
@@ -88,24 +88,40 @@ Implementation notes:
 - `agent_wait` semantics are prepared as a short inbox wait, while full worker output remains the responsibility of result retrieval.
 - CI run `34808287371` completed successfully across Ubuntu, Windows, and macOS.
 
-## In progress
-
 ### M1.4 - MCP agent tools
 
-- [ ] `agent_spawn`
-- [ ] `agent_status`
-- [ ] `agent_result`
-- [ ] `agent_wait`
-- [ ] `agent_cancel`
-- [ ] `worker_finish`
+- [x] `agent_spawn`
+- [x] `agent_status`
+- [x] `agent_result`
+- [x] `agent_wait`
+- [x] `agent_cancel`
+- [x] `worker_finish`
+- [x] Agent tool metadata is visible through the existing ChatGPT MCP `tools/list` path.
+- [x] `agent_spawn` requires an active full-write-capable project lease.
+- [x] `agent_spawn` currently reports `prepared` rather than pretending a browser worker is already running.
+- [x] `worker_finish` verifies the managed worktree and validates an optional commit SHA against worker HEAD.
+- [x] `agent_wait` consumes only concise completion events; full output remains durable behind `agent_result`.
+- [x] Cross-platform CI explicitly runs the agent MCP test surface on Ubuntu and Windows; macOS runs the full suite.
 
-## Planned next
+Implementation notes:
+
+- `88b981cbfe89deeb79dd72c33ccc20b75e3a981f` added the separate `src/server/agent-tools.ts` MCP surface so the large existing Core tool implementation did not need invasive edits.
+- `99a61874284d726edfeef9bf12c477f92aa63d67` registered the custom-runtime agent tools for both stdio and HTTP MCP server construction.
+- `3052774e908df62cbacff463c31be8d1d98d8479` added MCP lifecycle, tools/list, lease, finish/wait/result, and cancellation coverage.
+- Initial CI caught unsupported top-level `securitySchemes` in the SDK's typed `registerTool` config. `dfdf9d3b06358e76cde528f1be1b9404dd2be4dd` aligned the registration with the existing runtime pattern by keeping the OAuth declaration in ChatGPT metadata; the existing `tools/list` adapter still supplies the public top-level security scheme.
+- `02b846ee0d0bc528aecfc35c5db1567ad5c7ed81` extended Ubuntu/Windows CI to run `src/server/agent-tools.test.ts` together with `src/agents` tests.
+- CI run `34808660734` passed on Ubuntu, Windows, and macOS.
+
+## In progress
 
 ### M1.5 - Completion notification piggyback
 
 - [ ] Attach concise worker completion notices to subsequent normal Core MCP results.
 - [ ] Deliver each event once while retaining full result in durable storage.
 - [ ] Keep piggyback payload small and non-blocking.
+- [ ] Keep notification failures isolated from normal Core tool execution.
+
+## Planned next
 
 ### M2 - ChatGPT Web workers
 
@@ -139,8 +155,8 @@ Implementation notes:
 The original test suite contains desktop-control tests whose behavior is platform-specific. Running the complete suite on Ubuntu/Windows produces failures unrelated to custom-runtime changes, including macOS-only synthetic input/accessibility expectations. CI therefore uses:
 
 ```text
-Ubuntu:   typecheck + agent tests + build
-Windows:  typecheck + agent tests + build
+Ubuntu:   typecheck + agent/MCP-agent tests + build
+Windows:  typecheck + agent/MCP-agent tests + build
 macOS:    typecheck + full test + build
 ```
 
