@@ -113,7 +113,10 @@ Implementation notes:
 - [x] Browser shutdown failure cannot prevent durable cancellation; it is returned separately as a warning.
 - [x] After successful `worker_finish`, retire the browser tab best-effort without changing the already-stored completion result.
 - [x] Browser-retirement failure after `worker_finish` is recorded in browser state but cannot turn durable completion into an error.
-- [ ] Detect browser target loss and record a recoverable browser failure without corrupting the durable worker.
+- [x] Reconcile browser target liveness on `agent_status` without a background browser poller.
+- [x] If the CDP target is lost, revoke its old capability and mark only the browser session failed; keep the durable worker/worktree running and recoverable.
+- [x] Reuse `agent_launch` to recover a running worker in a fresh browser attempt with a new capability.
+- [x] Refuse recovery while an existing browser attempt is still live/non-final, preventing duplicate worker tabs.
 - [ ] Add DOM completion detection only as a fallback when the worker fails to call `worker_finish`.
 - [ ] Add parallel-worker lifecycle/recovery tests.
 
@@ -125,6 +128,11 @@ Implementation notes:
 - `5feeb9ce` added the `worker_finish` browser cleanup wrapper; `8cfb7754` installs it after durable agent tools are registered.
 - `764b78d6` verifies both successful tab retirement and the invariant that a browser-close failure never loses a completed durable result.
 - CI run `34816248554` passed Ubuntu, Windows, and macOS for the completion-retirement slice.
+- `a73fa36d` added generic browser-target reconciliation and capability revocation; `2266225a` added the no-side-effect dedicated-Chrome target probe.
+- `bed891fb` added fresh-tab recovery for a durable running worker; `04f7707c` made `agent_launch` select initial launch versus recovery.
+- `393db8e5` attaches browser reconciliation to the existing `agent_status` tool; `b87ad8f0` covers target loss, token revocation, and attempt-2 recovery.
+- Initial recovery CI run `34816631482` exposed a real regression in the pre-existing cancellation race: the refactored launch helper no longer closed a tab if the durable worker was cancelled between browser submission and `pending -> running`. `1efec18f` restored cleanup around that transition instead of weakening the race test.
+- `afe55336` added a local CDP target-probe test that does not start Chrome. CI run `34816770765` passed Ubuntu, Windows, and macOS for the corrected recovery slice.
 - The legacy `agent_cancel` remains the durable-state cancellation primitive. `agent_stop` is currently the Web-worker-aware public path; consolidation can wait until the behavior is proven live rather than widening the older tool implementation now.
 
 ## Planned next
