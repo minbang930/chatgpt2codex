@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **M3 - Windows Computer Use**
 
-Active unit: **M3.4 - Computer Use activity indicator**
+Active unit: **M3.5 - VMware live smoke validation**
 
 ## Completed
 
@@ -209,15 +209,26 @@ Implementation notes:
 - Keeping UIA in its own helper is intentional failure isolation, not a second control orchestration stack: UIA provider hangs kill only the UIA helper, while the existing queue/executor/SendInput and coordinate fallback remain available.
 - Actual Notepad/Explorer/Chrome semantics, stale-element behavior under live UI changes, and screenshot-to-semantic-action quality remain intentionally deferred to M3.5 VMware validation.
 
-## In progress
-
 ### M3.4 - Computer Use activity indicator
 
-- [ ] Native click-through topmost activity border.
-- [ ] Keep the overlay out of model screenshots via capture exclusion or temporary hide fallback.
-- [ ] Bind visibility to Computer Use activity only; never use the border as authorization state.
+- [x] Added a Windows-native topmost activity border around every display plus a small primary-display `Computer Use` badge.
+- [x] Overlay windows are `TOOLWINDOW + NOACTIVATE + TRANSPARENT`, return `HTTRANSPARENT`, stay out of Alt+Tab/taskbar, and never take keyboard focus or pointer input.
+- [x] Added `WDA_EXCLUDEFROMCAPTURE` on every overlay window and a capture-time hide/restore fallback so model screenshots do not contain the activity UI even when a VM/capture path ignores display affinity.
+- [x] Bound the indicator only to actual Windows screenshot/input/UIA actuation scopes; read-only observation, target resolution, approval state, and permission remain independent.
+- [x] Added overlapping-scope reference counting and a short idle debounce so screenshot/evidence/input sub-steps share one stable indicator instead of flickering.
+- [x] Kept the visual helper failure-isolated from SendInput/UIA: overlay startup/render failure is cosmetic and cannot authorize, block, or fail a Computer Use action.
+- [x] Added a parent-process watchdog so an orphaned overlay helper exits if the runtime disappears.
+- [x] Added CI-safe lifecycle/suppression tests plus a Windows compile-only native helper probe that never shows an overlay on the hosted runner.
+- [x] CI run `34888805540` passed Windows, Ubuntu, and macOS; Windows passed typecheck, focused tests including the native activity-helper probe, and build.
 
-## Planned next
+Implementation notes:
+
+- `22e0773f` added the persistent Windows activity helper and reference-counted activity manager.
+- `14cdef8d` bound coordinate, key, and UIA actuation to the indicator; `bdedb955` added screenshot activity plus capture-time suppression.
+- `e68b7eaa` added lifecycle/suppression/native-probe tests and `a9481377` added them to cross-platform CI.
+- The border is intentionally cosmetic: it never represents control permission or approval. Live click-through, visual appearance, multi-monitor behavior, and kill/cancel cleanup remain part of M3.5 VMware validation.
+
+## In progress
 
 ### M3.5 - VMware live smoke validation
 
@@ -227,6 +238,8 @@ Implementation notes:
 - [ ] Screenshot -> target -> action loop.
 - [ ] Activity border click-through and kill/cancel cleanup.
 - [ ] Repeated sessions without stale helper/overlay state.
+
+## Planned next
 
 ### M4 - Hooks
 
