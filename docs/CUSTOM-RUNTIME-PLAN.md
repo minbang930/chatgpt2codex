@@ -55,9 +55,11 @@ chatgpt2codex Custom Runtime
     |   +-- no mutation of global sessions.json
     |
     +-- Browser Worker Controller
-    |   +-- open ChatGPT worker tab
-    |   +-- send bootstrap + task
-    |   +-- hand off worker capability
+    |   +-- dedicated Chrome worker profile
+    |   +-- Chrome DevTools Protocol (CDP) local tab control
+    |   +-- mapped ChatGPT Project preferred, standalone chat fallback
+    |   +-- send bootstrap + task + worker capability
+    |   +-- local CDP target id only for cancel/recovery
     |   +-- fallback DOM completion detection only
     |
     +-- Windows Computer Use
@@ -88,7 +90,7 @@ Each worker eventually owns:
 - isolated worktree path
 - worker branch
 - a scoped local worker capability (raw token is not stored persistently)
-- browser tab/session handle (when Web workers are added)
+- browser tab/session handle (local CDP target id, not ChatGPT conversation identity)
 - state/result/error
 - optional commit SHA / changed files / checks
 - durable completion notification
@@ -165,6 +167,24 @@ Remote push, workspace scanning/switching, desktop control, image intake, and ot
 
 Browser automation starts only after worker-scoped tool routing is proven.
 
+The primary browser path is a dedicated Google Chrome profile under runtime-managed state, controlled locally through Chrome DevTools Protocol (CDP). Chrome is started with a non-default `--user-data-dir` and a loopback remote-debugging endpoint. The user signs into ChatGPT in this dedicated profile once; later workers reuse that authenticated profile.
+
+This was chosen over a custom browser extension/local launch bridge because CDP provides the smaller ownership surface: no extension lifecycle, no bridge HTTP endpoint, and no ChatGPT private request/conversation attribution. If CDP proves insufficient in real-world testing, an extension can be reconsidered as a fallback rather than maintained in parallel from the start.
+
+Worker launch flow:
+
+```text
+prepared durable worker
+ -> issue scoped worker capability
+ -> ensure dedicated Chrome profile / CDP endpoint
+ -> open mapped ChatGPT Project URL, or chatgpt.com when unmapped
+ -> wait for the normal ChatGPT composer
+ -> inject + submit worker bootstrap/task/capability
+ -> only then mark durable worker running
+```
+
+If a mapped ChatGPT Project does not present a usable composer, the launch may fall back to a standalone ChatGPT chat. If the dedicated profile is not signed in, leave the browser available for login and keep the durable worker retryable instead of damaging its worktree.
+
 Primary completion path:
 
 ```text
@@ -177,7 +197,7 @@ worker does work
 
 DOM inspection is fallback-only for cases where the model/browser terminates without calling `worker_finish`.
 
-The browser controller may know a tab handle for launch/cancel/recovery, but correctness must not depend on discovering ChatGPT's private conversation or request identity.
+The browser controller may know a local CDP target id for launch/cancel/recovery, but correctness must not depend on discovering ChatGPT's private conversation or request identity.
 
 ## Hooks
 
@@ -243,15 +263,20 @@ No browser worker yet.
 #### M2.2 - Browser worker controller foundation
 
 - Local browser-worker session record separate from ChatGPT conversation identity.
+- Local project -> optional ChatGPT Project routing.
 - Launch/cancel/controller interfaces.
 - Browser failures isolated from Core and M1 agent tools.
 
 #### M2.3 - ChatGPT worker launch/bootstrap
 
+- Dedicated Chrome profile with local CDP endpoint.
 - Open a dedicated ChatGPT worker tab.
+- Prefer the mapped ChatGPT Project; standalone fallback when unavailable.
 - Send worker bootstrap/task.
-- Hand off the opaque worker capability.
-- Transition `pending -> running` only after worker launch/acceptance succeeds.
+- Hand off the opaque worker capability without persisting the raw token locally.
+- Transition `pending -> running` only after worker bootstrap submission succeeds.
+- Revoke the launch capability and leave the worker retryable when browser bootstrap fails.
+- Wire the launch path into `agent_spawn` without blocking the main chat.
 
 #### M2.4 - Completion/recovery
 
@@ -286,7 +311,7 @@ No browser worker yet.
 - Automatically merging every worker branch into main.
 - Letting workers call normal `project_select` against the global Core session.
 - Letting workers push remotes by default.
-- Building browser automation before local worker state/worktree/scoped-routing behavior is tested.
+- Maintaining both a CDP driver and an extension/bridge path before real-world evidence justifies the extra browser integration.
 - Building a plugin marketplace before Core multi-agent behavior is stable.
 
 ## Development rule
