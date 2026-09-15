@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { installSkill, readSkillProvenance, removeSkill, updateSkill } from "./install.js";
-import { globalSkillsDir } from "./registry.js";
+import { globalSkillsDir, projectSkillsDir } from "./registry.js";
 
 const tempDirs: string[] = [];
 
@@ -64,6 +64,27 @@ describe("skills/install", () => {
     });
   });
 
+  it("installs a managed snapshot into project scope", async () => {
+    const workspace = await temp("chatgpt2codex-skill-project-workspace-");
+    const stateDir = await temp("chatgpt2codex-skill-project-state-");
+    const projectRoot = path.join(workspace, "project");
+    const source = path.join(workspace, "source");
+    await mkdir(projectRoot, { recursive: true });
+    await writeSkill(source, "project-helper", "Project-local helper", "project only");
+
+    const installed = await installSkill({
+      stateDir,
+      workspaceRoot: workspace,
+      projectRoot,
+      scope: "project",
+      source,
+    });
+
+    expect(installed.skill.scope).toBe("project");
+    expect(installed.targetDir).toBe(path.join(projectSkillsDir(projectRoot), "project-helper"));
+    expect(await readFile(path.join(installed.targetDir, "SKILL.md"), "utf8")).toContain("project only");
+  });
+
   it("requires skillName when a source contains multiple skills", async () => {
     const workspace = await temp("chatgpt2codex-skill-multi-workspace-");
     const stateDir = await temp("chatgpt2codex-skill-multi-state-");
@@ -100,6 +121,17 @@ describe("skills/install", () => {
       scope: "global",
       source: outside,
     })).rejects.toThrow(/inside the configured workspace root/i);
+  });
+
+  it("rejects credentials embedded in HTTPS git sources before cloning", async () => {
+    const workspace = await temp("chatgpt2codex-skill-git-workspace-");
+    const stateDir = await temp("chatgpt2codex-skill-git-state-");
+    await expect(installSkill({
+      stateDir,
+      workspaceRoot: workspace,
+      scope: "global",
+      source: "https://user:secret@example.com/owner/repo.git",
+    })).rejects.toThrow(/must not embed credentials/i);
   });
 
   it("never overwrites or removes an unmanaged skill directory", async () => {
