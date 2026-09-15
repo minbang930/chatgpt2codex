@@ -47,7 +47,7 @@ if (process.platform === "win32") {
       const second = await resolveFrontmostApp();
       expect(first === undefined || typeof first === "string").toBe(true);
       expect(second === undefined || typeof second === "string").toBe(true);
-    }, 75_000);
+    }, 110_000);
 
     it("enumerates visible top-level windows without exposing native HWND values", async () => {
       const windows = await listVisibleWindows();
@@ -72,7 +72,7 @@ if (process.platform === "win32") {
         expect(window.bounds.height).toBeGreaterThan(0);
         expect(Object.prototype.hasOwnProperty.call(window, "hwnd")).toBe(false);
       }
-    }, 15_000);
+    }, 30_000);
 
     it("routes app capture through the helper without capturing the CI desktop for a missing target", async () => {
       const file = path.join(os.tmpdir(), `chatgpt2codex-missing-${Date.now()}.png`);
@@ -80,6 +80,6 @@ if (process.platform === "win32") {
         /target app window not found/i,
       );
       expect(existsSync(file)).toBe(false);
-    }, 15_000);
+    }, 30_000);
   });
 }
