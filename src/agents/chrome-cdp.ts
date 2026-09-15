@@ -11,10 +11,13 @@ import type {
 } from "./browser-controller.js";
 
 const DEFAULT_CHATGPT_URL = "https://chatgpt.com/";
+const DEFAULT_WORKER_APP_NAME = "ChatGPT To Codex Worker";
 const DEVTOOLS_ACTIVE_PORT_FILE = "DevToolsActivePort";
 const DEFAULT_START_TIMEOUT_MS = 15_000;
 const DEFAULT_COMPOSER_ATTEMPTS = 40;
 const DEFAULT_COMPOSER_POLL_MS = 250;
+const DEFAULT_APP_MENTION_ATTEMPTS = 20;
+const DEFAULT_APP_MENTION_POLL_MS = 100;
 
 export interface ChromeDevToolsEndpoint {
   port: number;
@@ -40,6 +43,9 @@ export interface ChromeCdpDriverDeps {
   sleepMs?: (ms: number) => Promise<void>;
   composerAttempts?: number;
   composerPollMs?: number;
+  workerAppName?: string;
+  appMentionAttempts?: number;
+  appMentionPollMs?: number;
 }
 
 export interface ChromeEndpointManagerOptions {
@@ -68,33 +74,55 @@ function pageReadyExpression(): string {
   })()`;
 }
 
-function insertPromptExpression(prompt: string): string {
-  const encoded = JSON.stringify(prompt);
+function focusComposerExpression(): string {
   return `(() => {
     const composer = document.querySelector('#prompt-textarea');
-    if (!composer) return { ok: false, reason: 'composer-not-found' };
-    const text = ${encoded};
+    if (!(composer instanceof HTMLElement)) return false;
+    composer.focus();
+    return true;
+  })()`;
+}
+
+function focusComposerEndExpression(): string {
+  return `(() => {
+    const composer = document.querySelector('#prompt-textarea');
+    if (!(composer instanceof HTMLElement)) return false;
     composer.focus();
     if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) {
-      const proto = composer instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-      if (setter) setter.call(composer, text); else composer.value = text;
-      composer.dispatchEvent(new Event('input', { bubbles: true }));
-    } else {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(composer);
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-      if (!document.execCommand('insertText', false, text)) {
-        composer.textContent = text;
-        composer.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
-      }
+      const end = composer.value.length;
+      composer.setSelectionRange(end, end);
+      return true;
     }
-    const current = composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement
-      ? composer.value
-      : (composer.textContent || '');
-    return { ok: current.trim().length > 0, length: current.length };
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(composer);
+    range.collapse(false);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return true;
+  })()`;
+}
+
+function appSuggestionExpression(appName: string): string {
+  const encoded = JSON.stringify(appName);
+  return `(() => {
+    const expected = ${encoded};
+    const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLocaleLowerCase();
+    const visible = (element) => {
+      if (!(element instanceof HTMLElement)) return false;
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const roots = Array.from(document.querySelectorAll(
+      '[role="listbox"], [role="menu"], [role="dialog"], [data-radix-popper-content-wrapper], [data-floating-ui-portal]'
+    )).filter(visible);
+    const selector = '[role="option"], [role="menuitem"], [role="menuitemradio"], [data-radix-collection-item], button';
+    const candidates = roots.flatMap((root) => Array.from(root.querySelectorAll(selector)));
+    const candidate = candidates.find((element) => visible(element) && normalize(element.textContent) === normalize(expected));
+    if (!(candidate instanceof HTMLElement)) return { ok: false };
+    candidate.click();
+    return { ok: true, text: String(candidate.textContent || '').trim() };
   })()`;
 }
 
@@ -109,11 +137,23 @@ function submittedExpression(): string {
   })()`;
 }
 
+function normalizeWorkerAppName(value: string | undefined): string {
+  const normalized = (value ?? DEFAULT_WORKER_APP_NAME).trim().replace(/^@+/, '').trim();
+  if (!normalized || normalized.length > 120 || /[\r\n]/u.test(normalized)) {
+    throw new DomainError(
+      ErrorCode.WORKSPACE_NOT_READY,
+      "CHATGPT2CODEX_WORKER_APP_NAME must be a single non-empty ChatGPT app name (120 characters max)",
+    );
+  }
+  return normalized;
+}
+
 export function buildWorkerBootstrap(input: BrowserWorkerLaunchInput): string {
   return [
     "You are an isolated coding worker launched by chatgpt2codex.",
     "Complete the assigned coding task directly. Do not only review or describe the solution.",
-    "Use only the worker_* ChatGPT To Codex tools for repository access. Do not call project_select or the normal non-worker file/shell/git tools.",
+    "The dedicated ChatGPT To Codex Worker app is attached to this message. Use only its worker_* repository tools.",
+    "Do not call project_select, normal non-worker file/shell/git tools, Computer Use, Agent Manager, Skills, or plugin proxies.",
     `Worker capability: ${input.workerToken}`,
     "Pass that capability as workerToken on every worker_* tool call. It is scoped to your isolated worktree and becomes invalid when the worker ends.",
     "Start with worker_project_rules and narrow inspection. Modify files in the worker worktree, run focused checks, and commit the completed change when appropriate.",
@@ -142,15 +182,59 @@ async function waitForComposer(
   return false;
 }
 
-async function submitWorkerPrompt(connection: CdpConnection, prompt: string): Promise<void> {
-  const inserted = await connection.send("Runtime.evaluate", {
-    expression: insertPromptExpression(prompt),
+async function selectWorkerApp(
+  connection: CdpConnection,
+  appName: string,
+  attempts: number,
+  pollMs: number,
+  sleepMs: (ms: number) => Promise<void>,
+): Promise<void> {
+  const focused = await connection.send("Runtime.evaluate", {
+    expression: focusComposerExpression(),
     returnByValue: true,
   });
-  const insertedValue = resultValue(inserted) as { ok?: boolean } | undefined;
-  if (insertedValue?.ok !== true) {
-    throw new DomainError(ErrorCode.WORKSPACE_NOT_READY, "ChatGPT composer did not accept the worker bootstrap prompt");
+  if (resultValue(focused) !== true) {
+    throw new DomainError(ErrorCode.WORKSPACE_NOT_READY, "ChatGPT worker composer could not be focused");
   }
+
+  await connection.send("Input.insertText", { text: `@${appName}` });
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const selected = await connection.send("Runtime.evaluate", {
+      expression: appSuggestionExpression(appName),
+      returnByValue: true,
+    });
+    const selectedValue = resultValue(selected) as { ok?: boolean } | undefined;
+    if (selectedValue?.ok === true) {
+      await sleepMs(50);
+      return;
+    }
+    await sleepMs(pollMs);
+  }
+
+  throw new DomainError(
+    ErrorCode.WORKSPACE_NOT_READY,
+    `ChatGPT worker app "${appName}" was not available in the @ mention menu. Create/connect a custom app with that name pointing to /mcp/worker, or set CHATGPT2CODEX_WORKER_APP_NAME to the installed worker app name.`,
+  );
+}
+
+async function submitWorkerPrompt(
+  connection: CdpConnection,
+  appName: string,
+  prompt: string,
+  appMentionAttempts: number,
+  appMentionPollMs: number,
+  sleepMs: (ms: number) => Promise<void>,
+): Promise<void> {
+  await selectWorkerApp(connection, appName, appMentionAttempts, appMentionPollMs, sleepMs);
+
+  const focused = await connection.send("Runtime.evaluate", {
+    expression: focusComposerEndExpression(),
+    returnByValue: true,
+  });
+  if (resultValue(focused) !== true) {
+    throw new DomainError(ErrorCode.WORKSPACE_NOT_READY, "ChatGPT worker composer lost focus after app selection");
+  }
+  await connection.send("Input.insertText", { text: `\n${prompt}` });
 
   await connection.send("Input.dispatchKeyEvent", {
     type: "keyDown",
@@ -179,23 +263,33 @@ async function promptWasSubmitted(connection: CdpConnection): Promise<boolean> {
 /**
  * Minimal ChatGPT worker driver over Chrome DevTools Protocol. It never tracks
  * ChatGPT private conversation/request ids: the CDP target id is only a local
- * browser handle used for cancellation/recovery.
+ * browser handle used for cancellation/recovery. Before the bootstrap is sent,
+ * the driver explicitly selects the dedicated worker MCP app through ChatGPT's
+ * @ mention UI so that the message receives the /mcp/worker tool catalog rather
+ * than relying on prompt text to avoid the main-agent app.
  */
 export class ChromeCdpBrowserWorkerDriver implements BrowserWorkerDriver {
   private readonly sleepMs: (ms: number) => Promise<void>;
   private readonly composerAttempts: number;
   private readonly composerPollMs: number;
+  private readonly workerAppName: string | undefined;
+  private readonly appMentionAttempts: number;
+  private readonly appMentionPollMs: number;
 
   constructor(private readonly deps: ChromeCdpDriverDeps) {
     this.sleepMs = deps.sleepMs ?? ((ms) => delay(ms));
     this.composerAttempts = Math.max(1, deps.composerAttempts ?? DEFAULT_COMPOSER_ATTEMPTS);
     this.composerPollMs = Math.max(0, deps.composerPollMs ?? DEFAULT_COMPOSER_POLL_MS);
+    this.workerAppName = deps.workerAppName;
+    this.appMentionAttempts = Math.max(1, deps.appMentionAttempts ?? DEFAULT_APP_MENTION_ATTEMPTS);
+    this.appMentionPollMs = Math.max(0, deps.appMentionPollMs ?? DEFAULT_APP_MENTION_POLL_MS);
   }
 
   async launch(input: BrowserWorkerLaunchInput): Promise<BrowserWorkerLaunchResult> {
     const endpoint = await this.deps.ensureEndpoint();
     const preferredUrl = input.route.mode === "project" ? input.route.projectRef.url : DEFAULT_CHATGPT_URL;
     const prompt = buildWorkerBootstrap(input);
+    const workerAppName = normalizeWorkerAppName(this.workerAppName);
 
     let target = await this.deps.openTarget(endpoint, preferredUrl);
     let connection = await this.deps.connect(target.webSocketDebuggerUrl);
@@ -232,7 +326,14 @@ export class ChromeCdpBrowserWorkerDriver implements BrowserWorkerDriver {
         );
       }
 
-      await submitWorkerPrompt(connection, prompt);
+      await submitWorkerPrompt(
+        connection,
+        workerAppName,
+        prompt,
+        this.appMentionAttempts,
+        this.appMentionPollMs,
+        this.sleepMs,
+      );
       await this.sleepMs(150);
       if (!(await promptWasSubmitted(connection))) {
         throw new DomainError(ErrorCode.WORKSPACE_NOT_READY, "ChatGPT worker bootstrap was not submitted");
@@ -490,5 +591,6 @@ export function createChromeCdpBrowserWorkerDriver(
     openTarget: openChromeTarget,
     closeTarget: closeChromeTarget,
     connect: (url) => WebSocketCdpConnection.connect(url),
+    workerAppName: process.env.CHATGPT2CODEX_WORKER_APP_NAME,
   });
 }
