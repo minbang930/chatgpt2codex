@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **M5 - Extensions**
 
-Active unit: **M5.2 - Skill management tools (next)**
+Active unit: **M5.3 - Skill activation (next)**
 
 Detailed design documents:
 
@@ -210,33 +210,52 @@ Final M4 CI: `34984722276`.
 
 #### M5.1 - Agent Skills foundation
 
-- [x] Added a dependency-free `SKILL.md` parser for the top-level Agent Skills metadata required by discovery (`name`, `description`, inline lists, quoted/folded scalars).
-- [x] Added global `<stateDir>/skills/` and project `<project>/.agents/skills/` roots with project-over-global precedence.
-- [x] Added bounded recursive discovery (depth 4, 256 directories per root) and deterministic collision diagnostics.
-- [x] Discovery stops below a valid skill root, so `references/`, `templates/`, `assets/`, and `scripts/` do not become accidental standalone skills.
-- [x] Added safe full-skill loading with canonical root checks; skill roots/directories and `SKILL.md` symlinks are rejected.
-- [x] `SKILL.md` is capped at 256 KiB and common VCS/dependency/cache directories are skipped.
-- [x] Registry metadata excludes the full skill body; full `SKILL.md` content is loaded only on demand.
-- [x] No discovery/install path executes skill scripts or package-manager instructions.
-- [x] Added parser, precedence, nested-discovery, on-demand-load, outside-root, and size-limit tests.
-- [x] Added `docs/SKILLS-DESIGN.md` and revised the main roadmap from "Plugins" to the broader M5 "Extensions" phase based on Hermes/OpenClaw research.
+- [x] Dependency-free `SKILL.md` metadata parser.
+- [x] Global `<stateDir>/skills/` and project `<project>/.agents/skills/` roots with project-over-global precedence.
+- [x] Bounded recursive discovery (depth 4, 256 directories per root) and deterministic collision diagnostics.
+- [x] Discovery stops below a valid skill root so support directories do not become accidental skills.
+- [x] Canonical root checks and symlink rejection for skill roots/directories/`SKILL.md`.
+- [x] `SKILL.md` capped at 256 KiB; common VCS/dependency/cache directories skipped.
+- [x] Registry stores metadata only; full skill content loads on demand.
+- [x] Discovery never executes skill scripts or package-manager instructions.
 
 Implementation commits: `3126c177`, `e9abe262`, `7a85f7f2`, `925804a9`, `1536944e`, `2cfe3377`, `1b0784dc`, `1465cca5`.
 
+Final M5.1 CI: `34993848469`.
+
+#### M5.2 - Skill management tools
+
+- [x] Added fixed MCP tools: `skill_list`, `skill_view`, `skill_install`, `skill_update`, `skill_remove`.
+- [x] `skill_list` exposes lightweight metadata only; `skill_view` loads one full `SKILL.md` on demand.
+- [x] Added managed local-directory installs restricted to canonical paths inside the configured workspace.
+- [x] Added HTTPS Git installs staged in a temporary clone with terminal prompts disabled and optional explicit ref checkout.
+- [x] Git installs record the resolved commit before exporting a snapshot into managed skill storage.
+- [x] Multi-skill repositories require an explicit `skillName`; direct single-skill roots are supported.
+- [x] Added project/global target scopes; project-scoped mutation reuses the existing active-project write lease.
+- [x] Managed provenance is stored under `<skill>/.chatgpt2codex/source.json` with source/ref/commit/install/update metadata.
+- [x] Updates/removals operate only on runtime-managed installs; manual/project-authored skills are never overwritten or deleted.
+- [x] Snapshot copying rejects symlinks/special entries, omits VCS metadata, and is bounded to 2048 files / 32 MiB.
+- [x] No install/list/view/update path executes skill scripts or package-manager instructions.
+- [x] Added local lifecycle, project-scope, multiple-skill, outside-workspace, credential-URL, unmanaged-skill, and MCP progressive-disclosure coverage.
+- [x] Agent Skills tests are included in the Ubuntu/Windows focused CI set; macOS continues to run the full suite.
+
+Representative implementation commits: `ab7183a0`, `ddf742ea`, `5df8f883`, `46bdfb71`, `f5d46268`, `167081ab`, `9fa2510d`, `5567e71b`, `bdcf1b00`.
+
+Final M5.2 code CI: `34995875346` (Ubuntu, macOS, Windows all passed).
+
 ## Planned next
 
-### M5.2 - Skill management tools
+### M5.3 - Skill activation
 
-- [ ] Add `skill_list` and `skill_view` as progressive-disclosure MCP tools.
-- [ ] Add local/Git install, remove, and update lifecycle.
-- [ ] Support project/global install target scope.
-- [ ] Record source/ref/resolved-commit/install-time provenance.
-- [ ] Stage Git sources in a temporary location and export validated content into managed skill storage rather than using a mutable checkout live.
-- [ ] Keep executable skill content disabled by default.
+- [ ] Expose a bounded installed-skill catalog to the main ChatGPT agent without injecting every `SKILL.md` body.
+- [ ] Define explicit skill selection/activation semantics for the main agent.
+- [ ] Add selected skills to the existing browser-worker bootstrap path.
+- [ ] Preserve the original durable worker task; activated skill instructions remain launch-time context only.
+- [ ] Apply deterministic context/catalog count and character budgets.
+- [ ] Keep worker plugin/tool capabilities unchanged; skills are instructions/resources, not new authorization.
 
 Later M5 units:
 
-- M5.3: main-agent/worker skill activation with bounded catalogs.
 - M5.4: support resources + external-skill security/trust checks.
 - M5.5: separate external MCP Plugins connector and optional plugin-provided skills.
 
