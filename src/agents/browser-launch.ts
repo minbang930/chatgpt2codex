@@ -6,6 +6,7 @@ import {
   type BrowserWorkerDriver,
   type BrowserWorkerSession,
 } from "./browser-controller.js";
+import { applyPonytailToWorkerTask } from "./ponytail.js";
 import { getWorker, markWorkerRunning, type WorkerRecord } from "./store.js";
 
 export interface BrowserWorkerLaunchOutcome {
@@ -27,7 +28,7 @@ async function launchWorkerBrowser(
     browser = await controller.launch({
       workerId: worker.workerId,
       projectId: worker.projectId,
-      task: worker.task,
+      task: applyPonytailToWorkerTask(worker.task),
       workerToken: capability.token,
     });
     return { browser, capabilityExpiresAt: capability.expiresAt };
