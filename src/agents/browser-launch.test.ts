@@ -15,8 +15,8 @@ async function stateDir(): Promise<string> {
   return dir;
 }
 
-async function preparedWorker(dir: string) {
-  const worker = await createWorker(dir, { projectId: "project-1", task: "Implement the worker task" });
+async function preparedWorker(dir: string, task = "Implement the worker task") {
+  const worker = await createWorker(dir, { projectId: "project-1", task });
   return assignWorkerWorkspace(dir, worker.workerId, {
     branch: `agent/${worker.workerId}`,
     worktreePath: path.join(dir, "worktree"),
@@ -30,7 +30,7 @@ afterEach(async () => {
 });
 
 describe("agents/browser-launch", () => {
-  it("issues the raw capability only to the driver and marks the worker running after bootstrap success", async () => {
+  it("issues the raw capability only to the driver and applies default FULL Ponytail policy after bootstrap success", async () => {
     const dir = await stateDir();
     const worker = await preparedWorker(dir);
     let launchInput: BrowserWorkerLaunchInput | undefined;
@@ -50,12 +50,31 @@ describe("agents/browser-launch", () => {
     expect(launchInput).toMatchObject({
       workerId: worker.workerId,
       projectId: "project-1",
-      task: "Implement the worker task",
     });
+    expect(launchInput?.task).toContain("Ponytail coding policy (FULL)");
+    expect(launchInput?.task).toContain("Implement the worker task");
     expect(launchInput?.workerToken).toMatch(/^wcap\./);
     await expect(verifyWorkerCapability(dir, String(launchInput?.workerToken))).resolves.toMatchObject({
       workerId: worker.workerId,
     });
+  });
+
+  it("honors a task-local Ponytail OFF directive without persisting a rewritten durable task", async () => {
+    const dir = await stateDir();
+    const rawTask = "/ponytail off\nImplement exactly the requested compatibility shim";
+    const worker = await preparedWorker(dir, rawTask);
+    let launchInput: BrowserWorkerLaunchInput | undefined;
+    const driver: BrowserWorkerDriver = {
+      launch: async (input) => {
+        launchInput = input;
+        return { browserHandle: "cdp:target-off" };
+      },
+      cancel: async () => undefined,
+    };
+
+    await launchPreparedBrowserWorker(dir, driver, worker.workerId);
+    expect(launchInput?.task).toBe("Implement exactly the requested compatibility shim");
+    expect((await getWorker(dir, worker.workerId))?.task).toBe(rawTask);
   });
 
   it("keeps the durable worker pending and revokes the capability when browser bootstrap fails", async () => {
