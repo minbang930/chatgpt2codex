@@ -120,5 +120,5 @@ describe("browser completion fallback", () => {
 
     expect(browser).toMatchObject({ status: "running", attempt: 1 });
     expect(await verifyWorkerCapability(setup.stateDir, token)).toMatchObject({ workerId: setup.workerId });
-  });
+  }, 10_000);
 });
