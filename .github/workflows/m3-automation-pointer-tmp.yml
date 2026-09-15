@@ -1,0 +1,28 @@
+name: M3.5.6 automation pointer temporary
+
+on:
+  push:
+    branches: [dev/custom-runtime]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/custom-runtime
+          fetch-depth: 0
+      - name: Apply M3.5.6 patch
+        run: python scripts/m3_automation_pointer_patch.py
+      - name: Commit M3.5.6
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/m3-automation-pointer-tmp.yml scripts/m3_automation_pointer_patch.py
+          git add src/control/activity-indicator.ts src/control/win-native.ts src/control/input-backend.ts
+          git commit -m "feat: visualize Windows Computer Use pointer motion"
+          git push origin HEAD:dev/custom-runtime
