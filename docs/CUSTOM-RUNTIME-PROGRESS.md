@@ -15,6 +15,7 @@ Detailed design documents:
 - `docs/HOOKS-DESIGN.md`
 - `docs/SKILLS-DESIGN.md`
 - `docs/PLUGINS-DESIGN.md`
+- `docs/CHATGPT-WORKER-APP-SETUP.md` - dedicated worker custom-app setup and live-smoke procedure.
 
 ## Completed
 
@@ -324,11 +325,19 @@ Post-roadmap work should therefore be stabilization and real integration validat
   - The existing opaque worker capability remains the authority for each worker operation; the worker endpoint only narrows catalog exposure.
   - Real OAuth authorization-code + PKCE and Streamable HTTP MCP clients verify main plugin availability, worker plugin denial, worker protected-resource metadata, and cross-audience rejection in `src/server/worker-mcp-isolation.test.ts`.
   - Implementation/test HEAD `87f497f0`; CI `35017393064` passed on Ubuntu, macOS, and Windows.
-- [ ] Route and live-validate actual browser-worker ChatGPT conversations through `/mcp/worker` while the parent/main-agent connection remains on `/mcp`.
-  - The Chrome/CDP bootstrap cannot securely choose a different installed ChatGPT connector merely through prompt text.
-  - Prefer an explicit separately configured worker connector/Project/app context if ChatGPT does not expose programmatic per-conversation connector selection.
-  - Initial launch and recovery must follow the same worker routing rule, and the worker context must not also expose the main `/mcp` connector in a way that defeats the boundary.
-  - Do not use timing heuristics, "next connection is worker" state, first-call role inference, or prompt compliance as worker identity.
+- [x] Route browser-worker task messages through a dedicated ChatGPT worker custom app backed by `/mcp/worker`.
+  - ChatGPT app selection is message-scoped, so the Chrome/CDP driver now types `@ChatGPT To Codex Worker`, selects the exact app from ChatGPT's app picker, and only then inserts/submits the task bootstrap.
+  - The worker app name defaults to `ChatGPT To Codex Worker` and can be overridden with `CHATGPT2CODEX_WORKER_APP_NAME` when the installed custom app uses another exact display name.
+  - If the worker app cannot be found, launch fails closed before task submission; it never silently falls back to the main `/mcp` app.
+  - Initial launch and recovery share the same `BrowserWorkerDriver`, so both use the same worker-app routing rule.
+  - Focused coverage verifies default/custom app selection, fail-closed behavior, Project-to-standalone fallback, sign-in failure, and completion bootstrap behavior.
+  - Implementation/test commits `236994e7`, `8b0b8b07`, `1a50605f`; CI `35022343381` passed on Ubuntu, macOS, and Windows.
+  - Setup/live-smoke procedure is documented in `docs/CHATGPT-WORKER-APP-SETUP.md`.
+- [ ] Live-validate the real connected ChatGPT worker custom app in the user's dedicated worker Chrome profile.
+  - Create/connect `ChatGPT To Codex Worker` against the same public origin at `/mcp/worker` and complete its OAuth flow.
+  - Run a representative `agent_spawn` / `agent_launch` worker and verify the `@` app selection succeeds in the live ChatGPT UI.
+  - Verify the worker can use `worker_project_rules` / allowed `worker_*` calls with its scoped token, completes through `worker_finish`, and does not receive main plugin/file/shell/git/Computer Use/Skill/Agent Manager tools.
+  - Keep the parent/main app on `/mcp` and verify its normal configured plugin surface remains available.
 - [ ] Keep CI green and fix integration defects discovered by stabilization before defining any new milestone.
 
 ## Update policy
