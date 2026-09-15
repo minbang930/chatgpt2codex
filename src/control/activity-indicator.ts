@@ -36,7 +36,7 @@ interface PendingRequest {
 
 const STARTUP_TIMEOUT_MS = 120_000;
 const REQUEST_TIMEOUT_MS = 5_000;
-const DEFAULT_IDLE_HIDE_MS = 1_200;
+const DEFAULT_IDLE_HIDE_MS = 2_200;
 const MAX_STDERR = 6_000;
 
 /**
@@ -157,7 +157,7 @@ public sealed class ComputerUseGlowRingForm : Form {
         // Geometry stays fixed. Only a very small luminance/opacity breath is
         // applied so the edge reads as ambient light rather than a moving line.
         double bounded = Math.Max(0.0, Math.Min(1.0, pulse));
-        double multiplier = 0.84 + (0.24 * bounded);
+        double multiplier = 0.82 + (0.36 * bounded);
         Opacity = Math.Max(0.005, Math.Min(0.32, baseOpacity * multiplier));
     }
 
@@ -187,7 +187,7 @@ public sealed class ComputerUseOverlayForm : Form {
     long rippleStartedAt;
     long pointerVisibleUntil;
     const double ActivityPeriodSeconds = 1.6;
-    const double RippleDurationSeconds = 0.62;
+    const double RippleDurationSeconds = 1.25;
 
     [DllImport("user32.dll")]
     static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
@@ -273,7 +273,7 @@ public sealed class ComputerUseOverlayForm : Form {
 
     Rectangle RippleRect(double progress) {
         int startRadius = Scale(7);
-        int travel = Scale(25);
+        int travel = Scale(32);
         int radius = startRadius + (int)Math.Round(travel * progress);
         return new Rectangle(ripplePoint.X - radius, ripplePoint.Y - radius, radius * 2, radius * 2);
     }
@@ -321,7 +321,7 @@ public sealed class ComputerUseOverlayForm : Form {
 
     Rectangle PointerHaloRect() {
         var point = PointerClientPoint();
-        int radius = Scale(18);
+        int radius = Scale(22);
         return new Rectangle(point.X - radius, point.Y - radius, radius * 2, radius * 2);
     }
 
@@ -343,7 +343,7 @@ public sealed class ComputerUseOverlayForm : Form {
     }
 
     public void ShowAutomationPointer(int durationMs) {
-        int bounded = Math.Max(120, Math.Min(1500, durationMs));
+        int bounded = Math.Max(180, Math.Min(2800, durationMs));
         long ticks = (long)Math.Round((bounded / 1000.0) * Stopwatch.Frequency);
         pointerVisibleUntil = Stopwatch.GetTimestamp() + ticks;
         UpdateWindowRegion();
@@ -450,7 +450,7 @@ public sealed class ComputerUseOverlayForm : Form {
             double progress = RippleProgress();
             int alpha = Math.Max(0, Math.Min(255, (int)Math.Round(230.0 * (1.0 - progress))));
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var pen = new Pen(Color.FromArgb(alpha, 75, 180, 255), Math.Max(1, Scale(2)))) {
+            using (var pen = new Pen(Color.FromArgb(alpha, 75, 180, 255), Math.Max(1, Scale(3)))) {
                 e.Graphics.DrawEllipse(pen, RippleRect(progress));
             }
         }
@@ -458,8 +458,8 @@ public sealed class ComputerUseOverlayForm : Form {
         if (PointerOnThisScreen()) {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             var halo = PointerHaloRect();
-            using (var outer = new Pen(Color.FromArgb(210, 70, 175, 255), Math.Max(1, Scale(3))))
-            using (var inner = new Pen(Color.FromArgb(150, 205, 235, 255), Math.Max(1, Scale(1)))) {
+            using (var outer = new Pen(Color.FromArgb(235, 70, 175, 255), Math.Max(1, Scale(3))))
+            using (var inner = new Pen(Color.FromArgb(185, 205, 235, 255), Math.Max(1, Scale(1)))) {
                 e.Graphics.DrawEllipse(outer, halo);
                 var innerRect = Rectangle.Inflate(halo, -Scale(4), -Scale(4));
                 if (innerRect.Width > 1 && innerRect.Height > 1) e.Graphics.DrawEllipse(inner, innerRect);
@@ -608,8 +608,8 @@ public static class ComputerUseOverlayHost {
         // ring adds body, and the tiny core highlight remains deliberately dim.
         // Because every layer is one ring rather than four edge windows, the
         // left/top and right/bottom geometry cannot diverge or clip differently.
-        int[] thicknesses = new int[] { 36, 18, 3 };
-        double[] opacities = new double[] { 0.035, 0.060, 0.075 };
+        int[] thicknesses = new int[] { 42, 22, 4 };
+        double[] opacities = new double[] { 0.055, 0.085, 0.105 };
         for (int i = 0; i < thicknesses.Length; i++) {
             var glow = new ComputerUseGlowRingForm(bounds, thicknesses[i], opacities[i]);
             forms.Add(glow);
@@ -1034,9 +1034,9 @@ export async function showComputerUseClickPulse(x: number, y: number): Promise<v
   await requestHelper("pulse", { x: Math.round(x), y: Math.round(y) }).catch(() => undefined);
 }
 
-export async function showComputerUseAutomationPointer(durationMs = 650): Promise<void> {
+export async function showComputerUseAutomationPointer(durationMs = 1_800): Promise<void> {
   if (process.platform !== "win32" || testDriver !== undefined) return;
-  const bounded = Math.max(120, Math.min(1500, Math.round(durationMs)));
+  const bounded = Math.max(180, Math.min(2800, Math.round(durationMs)));
   await requestHelper("pointer", { durationMs: bounded }).catch(() => undefined);
 }
 
