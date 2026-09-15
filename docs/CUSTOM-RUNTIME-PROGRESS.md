@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **Implementation roadmap complete through M5**
 
-Active unit: **Post-M5 stabilization / plugin-config main-agent + browser-worker isolation validation**
+Active unit: **Post-M5 stabilization / hard browser-worker MCP catalog isolation gap**
 
 Detailed design documents:
 
@@ -290,7 +290,7 @@ Final M5.4 code CI: `35002217812` (Ubuntu, macOS, Windows all passed, including 
 - [x] Added bounded on-demand `plugin_discover` using the MCP Streamable HTTP client with enabled-only connections, timeouts, schema/catalog limits, and per-plugin error isolation.
 - [x] Added fixed `plugin_call` proxy instead of dynamically registering external schemas into Core; calls require an explicit plugin id and exact remote tool name.
 - [x] Plugin call arguments/results are bounded and plugin failures remain local to the invocation.
-- [x] Worker plugin inheritance remains disabled: worker mirrors still come only from `WORKER_CORE_TOOL_NAMES`, and no worker plugin proxy is registered.
+- [x] Worker-prefixed plugin inheritance remains disabled: worker mirrors still come only from `WORKER_CORE_TOOL_NAMES`, and no `worker_plugin_*` proxy is registered.
 - [x] Added optional explicit plugin `skillSources` declarations for HTTPS Git sources; declarations are inert and never install/activate automatically.
 - [x] Plugin-associated skills continue through the normal `skill_install` path and therefore reuse M5.1-M5.4 provenance, scanning, activation, resource, and script-disable boundaries.
 - [x] Added cross-platform plugin registry, discovery, invocation, failure-isolation, and skill-source regression coverage.
@@ -312,8 +312,16 @@ Post-roadmap work should therefore be stabilization and real integration validat
   - The test registers an inert plugin `skillSources` declaration, confirms no install/activation occurs automatically, then explicitly routes the returned declaration through the normal `skill_install` path.
   - A test-only Git URL rewrite maps the declared HTTPS source to a temporary local repository, so the production Git clone/install path, resolved-commit provenance, `external-git` trust classification, static security scan, and `skill_activate` are all exercised deterministically without depending on a public Git service.
   - A marker script inside the fixture remains unexecuted across registration, install, security inspection, and activation.
-- [ ] Re-run representative main-agent + browser-worker flows after plugin configuration exists and verify workers still do not receive plugin tools.
-- [ ] Keep CI green and fix integration defects discovered by those smoke tests before defining any new milestone.
+- [x] Validate plugin configuration against the browser-worker capability/tool-registration path.
+  - Verified in `f849dff0`; CI `35014499804` passed on Ubuntu, macOS, and Windows.
+  - Configuring/enabling a plugin does not add any `worker_plugin_*` tool. Worker mirrors remain exactly derived from `WORKER_CORE_TOOL_NAMES`.
+  - `dispatchWorkerCoreTool()` rejects `plugin_list`, `plugin_discover`, and `plugin_call` before worker capability use, so the worker capability itself cannot authorize plugin access.
+  - The same validation exposed a separate transport/catalog gap: a browser-worker ChatGPT session currently connects to the same remote `/mcp` catalog as the main agent, and that shared `tools/list` still exposes the unprefixed main-agent `plugin_list`, `plugin_discover`, and `plugin_call` proxies.
+- [ ] Add a hard browser-worker MCP identity/catalog boundary so a worker ChatGPT session cannot invoke the shared unprefixed plugin proxies.
+  - Do not solve this by globally disabling plugin tools while a worker exists; main-agent plugin access must continue to work.
+  - Prefer a dedicated worker MCP endpoint/credential or equivalent authenticated worker-session role that reuses the existing durable worker capability model and generates a worker-only catalog.
+  - Until this is implemented, the browser bootstrap's `worker_*` restriction is an instruction-layer defense for the shared unprefixed proxies, not a server-side authorization boundary.
+- [ ] Keep CI green and fix integration defects discovered by stabilization before defining any new milestone.
 
 ## Update policy
 
