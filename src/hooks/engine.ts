@@ -186,8 +186,8 @@ async function runCommandHook(
   return await new Promise((resolve) => {
     let settled = false;
     let timedOut = false;
-    let stdout = Buffer.alloc(0);
-    let stderr = Buffer.alloc(0);
+    let stdout: Buffer = Buffer.alloc(0);
+    let stderr: Buffer = Buffer.alloc(0);
     let outputTruncated = false;
     let timeoutHandle: NodeJS.Timeout | undefined;
 
