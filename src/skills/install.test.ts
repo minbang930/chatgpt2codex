@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -81,7 +81,7 @@ describe("skills/install", () => {
     });
 
     expect(installed.skill.scope).toBe("project");
-    expect(installed.targetDir).toBe(path.join(projectSkillsDir(projectRoot), "project-helper"));
+    expect(await realpath(installed.targetDir)).toBe(await realpath(path.join(projectSkillsDir(projectRoot), "project-helper")));
     expect(await readFile(path.join(installed.targetDir, "SKILL.md"), "utf8")).toContain("project only");
   });
 
