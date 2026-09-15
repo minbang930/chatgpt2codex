@@ -4,9 +4,9 @@ Implementation status for `dev/custom-runtime`.
 
 ## Current status
 
-Overall phase: **M3 - Windows Computer Use**
+Overall phase: **M4 - Hooks**
 
-Active unit: **M3.5 - VMware live smoke validation**
+Active unit: **M4.2 - SessionStart integration**
 
 ## Completed
 
@@ -228,26 +228,72 @@ Implementation notes:
 - `e68b7eaa` added lifecycle/suppression/native-probe tests and `a9481377` added them to cross-platform CI.
 - The border is intentionally cosmetic: it never represents control permission or approval. Live click-through, visual appearance, multi-monitor behavior, and kill/cancel cleanup remain part of M3.5 VMware validation.
 
-## In progress
-
 ### M3.5 - VMware live smoke validation
 
-- [ ] Notepad/basic text target.
-- [ ] Explorer and browser targets.
-- [ ] Multi-window focus switching and DPI scaling.
-- [ ] Screenshot -> target -> action loop.
-- [ ] Activity border click-through and kill/cancel cleanup.
-- [ ] Repeated sessions without stale helper/overlay state.
+- [x] Notepad/basic text target: semantic observation, semantic input, and coordinate fallback validated on the interactive Windows VM.
+- [x] Explorer and browser targets: Explorer selection and Chrome address-bar/UIA interaction validated without widening the allowlist/control model.
+- [x] Multi-window focus switching and DPI scaling validated at 125% (`dpi=120`, `scaleFactor=1.25`) and 150% (`dpi=144`, `scaleFactor=1.5`).
+- [x] Screenshot -> target -> action loop validated, including minimized Notepad observation and a final live `windowPoint` click after the native activation fixes.
+- [x] Activity glow/click-through, screenshot exclusion, and local Esc cancellation validated; Esc cancels only the active Computer Use operation and does not trip the kill switch.
+- [x] Repeated runtime/session restart behavior validated without stale helper/overlay state.
+
+Implementation notes:
+
+- Minimized Notepad returned a live `semanticObservation` with 29 elements and no `semanticWarning` after aligning minimized-window handling between the native and UIA helpers.
+- The activity indicator was iterated from a hard border prototype to a subtle multi-band edge glow; pointer/halo/ripple experiments were later removed from the final indicator path.
+- Screenshot captures were verified not to contain the visible Computer Use glow/indicator.
+- `2111ca6` made the Windows launcher/runtime re-read persisted Cloudflare tunnel settings from Process/User/Machine scope so the fixed `c2c.minbang.email` Named Tunnel does not silently fall back to the wrong hostname path.
+- `308d5aa` corrected `GetCurrentThreadId` to import from `kernel32.dll`; the previously failing coordinate-click path then succeeded in the live VM.
+- CI run `34925521385` passed Windows, Ubuntu, and macOS for the final M3 tunnel/native-input fixes.
+
+### M4.1 - Hook engine foundation
+
+- [x] Added a versioned hook configuration at runtime-owned `<stateDir>/hooks.json`.
+- [x] Defined the initial lifecycle vocabulary: `SessionStart`, `PreToolUse`, `PostToolUse`, `SubagentStart`, and `SubagentStop`.
+- [x] Added a direct-argv command hook driver with `shell:false`, the existing restricted child environment, and a JSON event envelope delivered on stdin.
+- [x] Added bounded working-directory modes (`project`, `workspace`, `state`) instead of arbitrary configured cwd paths.
+- [x] Added sequential deterministic execution, per-hook timeout/process-tree termination, bounded stdout/stderr capture, and config/output limits.
+- [x] Hook/config/spawn/exit/timeout failures are reported but never throw through a healthy Core caller; one failed hook does not prevent later hooks from running.
+- [x] Repository-controlled hook files are not auto-loaded or auto-executed.
+- [x] Added cross-platform tests for missing/invalid config, stdin envelope/cwd, failure isolation, timeout, and repository-config non-execution.
+- [x] Added `docs/HOOKS-DESIGN.md` defining the generic M4 contract before Ponytail-specific behavior is introduced.
+- [x] CI run `34927688256` passed Ubuntu, Windows, and macOS, including Windows native/UIA/activity helper regression coverage and the Windows launcher build.
+
+Implementation notes:
+
+- `src/hooks/engine.ts` contains the M4.1 engine; `src/hooks/engine.test.ts` covers the foundation contract.
+- `57afd780` corrected a TypeScript Buffer-generic mismatch exposed by CI without changing runtime semantics.
+- `dd1925a` made the hook cwd test compare real paths so macOS `/var` versus `/private/var` aliases do not create a false failure.
+- `a9099de` gave one pre-existing Windows DOM-recovery test a 10-second budget after hosted Windows setup exceeded its old 5-second test timeout; this was test-only and did not change browser-worker production behavior.
+- M4.1 intentionally defines the event names but does not yet emit them from runtime lifecycle points. Event wiring begins in M4.2.
+
+## In progress
+
+### M4.2 - SessionStart integration
+
+- [ ] Emit `SessionStart` once for each newly created MCP session/server instance.
+- [ ] Keep the event payload bounded and free of secrets/tool arguments.
+- [ ] Resolve the current active project only for hook context/cwd and minimal event metadata.
+- [ ] Hook failure or malformed configuration must never prevent stdio/HTTP MCP session startup.
+- [ ] Add stdio/HTTP-safe unit coverage and cross-platform CI verification.
 
 ## Planned next
 
-### M4 - Hooks
+### M4.3 - Tool lifecycle hooks
 
-- [ ] Hook engine.
-- [ ] `SessionStart`.
-- [ ] `PreToolUse` / `PostToolUse`.
-- [ ] `SubagentStart` / `SubagentStop`.
-- [ ] Ponytail-style integration after hook semantics stabilize.
+- [ ] Add `PreToolUse` / `PostToolUse` at the shared MCP tool boundary rather than duplicating wiring inside every handler.
+- [ ] Keep payloads bounded to tool name/project/success/duration metadata by default.
+- [ ] Preserve the M4.1 best-effort/non-veto contract.
+
+### M4.4 - Subagent lifecycle hooks
+
+- [ ] Add `SubagentStart` when a durable Web worker actually enters its accepted/running lifecycle.
+- [ ] Add `SubagentStop` once when the worker reaches or is forced into a final/retired lifecycle state.
+- [ ] Keep durable worker state as the source of truth; hooks are notifications only.
+
+### M4.5 - Ponytail-style integration
+
+- [ ] Add Ponytail-compatible behavior only after generic hook timing/payload/failure semantics are stable.
 
 ### M5 - Plugins
 
