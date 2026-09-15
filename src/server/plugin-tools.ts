@@ -16,9 +16,16 @@ const destructive = { readOnlyHint: false, destructiveHint: true, openWorldHint:
 const securitySchemes = [{ type: "oauth2", scopes: ["chatgpt2codex"] }] as const;
 
 const pluginIdSchema = z.string().trim().min(1).max(80).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
+const skillNameSchema = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 const headerSchema = z.object({
   name: z.string().trim().min(1).max(128),
   valueEnv: z.string().trim().min(1).max(128),
+}).strict();
+const skillSourceSchema = z.object({
+  id: pluginIdSchema,
+  source: z.string().trim().min(1).max(2048),
+  ref: z.string().trim().min(1).max(200).refine((value) => !value.startsWith("-"), "ref must not start with '-'").optional(),
+  skillName: skillNameSchema.optional(),
 }).strict();
 
 function meta(invoking: string, invoked: string) {
@@ -56,7 +63,7 @@ export function registerPluginTools(server: McpServer, ctx: ToolContext): void {
     "plugin_list",
     {
       title: "List External MCP Plugins",
-      description: "List configured external MCP plugins and whether their environment-backed headers are available. This does not connect to the plugins.",
+      description: "List configured external MCP plugins, environment-backed header availability, and explicitly declared skill sources. This does not connect to plugins or install skills.",
       annotations: readOnly,
       _meta: meta("Listing external MCP plugins...", "External MCP plugins listed"),
       inputSchema: {},
@@ -82,7 +89,7 @@ export function registerPluginTools(server: McpServer, ctx: ToolContext): void {
     "plugin_register",
     {
       title: "Register External MCP Plugin",
-      description: "Locally register one Streamable HTTP MCP endpoint. Registration is disabled by default unless enabled is explicitly true. Header values are referenced by environment-variable name and are never stored in plugins.json.",
+      description: "Locally register one Streamable HTTP MCP endpoint. Registration is disabled by default unless enabled is explicitly true. Header values use environment-variable references. Optional skillSources are HTTPS Git declarations only and are never installed automatically.",
       annotations: localWrite,
       _meta: meta("Registering external MCP plugin...", "External MCP plugin registered"),
       inputSchema: {
@@ -90,6 +97,7 @@ export function registerPluginTools(server: McpServer, ctx: ToolContext): void {
         name: z.string().trim().min(1).max(120),
         url: z.string().trim().min(1).max(2048),
         headers: z.array(headerSchema).max(8).optional(),
+        skillSources: z.array(skillSourceSchema).max(8).optional(),
         enabled: z.boolean().optional(),
       },
     },
@@ -102,6 +110,7 @@ export function registerPluginTools(server: McpServer, ctx: ToolContext): void {
           name: input.name,
           url: input.url,
           headers: input.headers,
+          skillSources: input.skillSources,
           enabled: input.enabled,
         });
         return ok(
