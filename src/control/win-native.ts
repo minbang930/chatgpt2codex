@@ -144,6 +144,10 @@ public static class ChatGpt2CodexWinInput {
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
+    [StructLayout(LayoutKind.Sequential)] public struct MSG {
+        public IntPtr hwnd; public uint message; public UIntPtr wParam; public IntPtr lParam;
+        public uint time; public POINT pt; public uint lPrivate;
+    }
     [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public InputUnion U; }
     [StructLayout(LayoutKind.Explicit)] public struct InputUnion {
         [FieldOffset(0)] public MOUSEINPUT mi;
@@ -180,9 +184,12 @@ public static class ChatGpt2CodexWinInput {
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern IntPtr SetActiveWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern uint GetCurrentThreadId();
     [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
+    [DllImport("user32.dll")] public static extern bool PeekMessage(out MSG msg, IntPtr hWnd, uint min, uint max, uint remove);
+    [DllImport("user32.dll", EntryPoint="SwitchToThisWindow")] public static extern void SwitchToThisWindow(IntPtr hWnd, bool altTab);
     [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int command);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
@@ -302,6 +309,13 @@ public static class ChatGpt2CodexWinInput {
         return GetForegroundWindow() == hWnd;
     }
 
+    static void EnsureMessageQueue() {
+        // AttachThreadInput is substantially more reliable when the helper
+        // thread owns a Win32 message queue. PeekMessage creates it lazily.
+        MSG ignored;
+        PeekMessage(out ignored, IntPtr.Zero, 0, 0, 0);
+    }
+
     static void NudgeForegroundPermission() {
         // Windows can reject SetForegroundWindow for a background helper even
         // after the user has authorized control. A tiny Alt down/up is the
@@ -314,12 +328,10 @@ public static class ChatGpt2CodexWinInput {
         SendInput(2, inputs, Marshal.SizeOf(typeof(INPUT)));
     }
 
-    public static IntPtr Activate(string appName) {
-        var hWnd = FindWindow(appName);
-        if (hWnd == IntPtr.Zero) throw new InvalidOperationException("target app window not found");
-        if (GetForegroundWindow() == hWnd) return hWnd;
-
+    static bool TryActivateWithAttachedQueues(IntPtr hWnd, int waitMs) {
+        EnsureMessageQueue();
         ShowWindowAsync(hWnd, SW_RESTORE);
+        Thread.Sleep(40);
 
         uint ignoredPid;
         uint currentThread = GetCurrentThreadId();
@@ -328,31 +340,69 @@ public static class ChatGpt2CodexWinInput {
         uint targetThread = GetWindowThreadProcessId(hWnd, out ignoredPid);
         bool attachedForeground = false;
         bool attachedTarget = false;
+        bool attachedForegroundTarget = false;
 
         try {
             if (foregroundThread != 0 && foregroundThread != currentThread)
                 attachedForeground = AttachThreadInput(currentThread, foregroundThread, true);
-            if (targetThread != 0 && targetThread != currentThread && targetThread != foregroundThread)
+            if (targetThread != 0 && targetThread != currentThread)
                 attachedTarget = AttachThreadInput(currentThread, targetThread, true);
+            if (foregroundThread != 0 && targetThread != 0 && foregroundThread != targetThread)
+                attachedForegroundTarget = AttachThreadInput(foregroundThread, targetThread, true);
 
             BringWindowToTop(hWnd);
+            SetActiveWindow(hWnd);
             SetForegroundWindow(hWnd);
             SetFocus(hWnd);
         } finally {
+            if (attachedForegroundTarget) AttachThreadInput(foregroundThread, targetThread, false);
             if (attachedTarget) AttachThreadInput(currentThread, targetThread, false);
             if (attachedForeground) AttachThreadInput(currentThread, foregroundThread, false);
         }
 
-        if (!WaitForForeground(hWnd, 350)) {
-            NudgeForegroundPermission();
-            ShowWindowAsync(hWnd, SW_RESTORE);
-            BringWindowToTop(hWnd);
-            SetForegroundWindow(hWnd);
-        }
+        return WaitForForeground(hWnd, waitMs);
+    }
 
-        if (!WaitForForeground(hWnd, 700))
-            throw new InvalidOperationException("target app did not become foreground; synthetic input refused");
-        return hWnd;
+    static string ForegroundDiagnostic() {
+        var hWnd = GetForegroundWindow();
+        if (hWnd == IntPtr.Zero) return "none";
+        var process = WindowProcess(hWnd);
+        var processName = ProcessName(process) ?? "unknown";
+        var title = WindowTitle(hWnd) ?? "untitled";
+        return processName + " / " + title;
+    }
+
+    public static IntPtr Activate(string appName) {
+        var hWnd = FindWindow(appName);
+        if (hWnd == IntPtr.Zero) throw new InvalidOperationException("target app window not found");
+        if (GetForegroundWindow() == hWnd) return hWnd;
+
+        // First try the least invasive, queue-attached foreground path.
+        if (TryActivateWithAttachedQueues(hWnd, 350)) return hWnd;
+
+        // Give Windows' foreground-lock policy one explicit user-input nudge,
+        // then repeat the exact-window activation attempt.
+        NudgeForegroundPermission();
+        if (TryActivateWithAttachedQueues(hWnd, 500)) return hWnd;
+
+        // SwitchToThisWindow is the same task-switch primitive used by desktop
+        // shells/task managers. It is reserved as a last activation fallback;
+        // the resolved allowlisted HWND is still verified afterward before any
+        // mouse/keyboard input is emitted.
+        try {
+            ShowWindowAsync(hWnd, SW_RESTORE);
+            SwitchToThisWindow(hWnd, true);
+        } catch { }
+        if (WaitForForeground(hWnd, 700)) return hWnd;
+
+        // One final attached-queue verification attempt handles apps that
+        // recreate/settle their input queue during restore/task switching.
+        if (TryActivateWithAttachedQueues(hWnd, 500)) return hWnd;
+
+        throw new InvalidOperationException(
+            "target app did not become foreground after verified activation attempts; synthetic input refused (foreground="
+            + ForegroundDiagnostic() + ")"
+        );
     }
     public static RECT RectForApp(string appName) {
         var hWnd = Activate(appName); RECT rect;
