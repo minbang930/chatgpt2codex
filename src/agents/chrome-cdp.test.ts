@@ -34,11 +34,11 @@ class FakeConnection implements CdpConnection {
     if (method !== "Runtime.evaluate") return {};
 
     const expression = String(params?.expression ?? "");
-    if (expression.includes("rect.width > 0")) {
-      return { result: { value: this.composerReady } };
-    }
     if (expression.includes("candidate.click();")) {
       return { result: { value: { ok: this.appAvailable, text: this.appAvailable ? "ChatGPT To Codex Worker" : undefined } } };
+    }
+    if (expression.includes("rect.width > 0")) {
+      return { result: { value: this.composerReady } };
     }
     if (expression.includes("composer.focus();")) {
       return { result: { value: true } };
