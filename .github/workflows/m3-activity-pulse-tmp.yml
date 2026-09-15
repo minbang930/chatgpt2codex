@@ -1,0 +1,29 @@
+name: M3.5.5 activity pulse temporary
+
+on:
+  push:
+    branches: [dev/custom-runtime]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/custom-runtime
+          fetch-depth: 0
+      - name: Apply M3.5.5 patch
+        run: python scripts/m3_activity_pulse_patch.py
+      - name: Commit M3.5.5
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/m3-activity-pulse-tmp.yml scripts/m3_activity_pulse_patch.py
+          git add src/control/activity-indicator.ts src/control/input-backend.ts
+          if [ -e docs/.m3-5-4-ci-trigger ]; then git rm docs/.m3-5-4-ci-trigger; fi
+          git commit -m "feat: animate Windows Computer Use activity feedback"
+          git push origin HEAD:dev/custom-runtime
