@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -104,7 +104,7 @@ describe("hooks/engine", () => {
     };
     expect(output.event).toBe("PreToolUse");
     expect(output.tool).toBe("file_read_slice");
-    expect(path.resolve(output.cwd ?? "")).toBe(path.resolve(fixture.projectRoot));
+    expect(await realpath(output.cwd ?? "")).toBe(await realpath(fixture.projectRoot));
   });
 
   it("isolates a failed hook and continues with later hooks", async () => {
