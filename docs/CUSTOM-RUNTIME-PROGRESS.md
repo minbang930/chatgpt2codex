@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **M5 - Extensions**
 
-Active unit: **M5.4 - Skill resources and security (next)**
+Active unit: **M5.5 - External MCP plugins**
 
 Detailed design documents:
 
@@ -261,20 +261,33 @@ Representative implementation commits: `5de3de2e`, `208e8bc5`, `aa435211`, `dfa4
 
 Final M5.3 code CI: `34998597354` (Ubuntu, macOS, Windows all passed).
 
+#### M5.4 - Skill resources and security
+
+- [x] Added `skill_resource_read` for bounded non-executable reads from `references/`, `templates/`, and `assets/` only.
+- [x] Resource paths reject absolute/traversal paths and symlink escapes; text reads are bounded and binary resources are returned only as bounded base64.
+- [x] `scripts/` remains outside the resource-read allowlist and no skill script runner was introduced.
+- [x] Added `skill_security_status` with provenance, trust classification (`unmanaged`, `managed-local`, `external-git`), and static-scan metadata without returning the instruction body.
+- [x] External Git skill install/update staging is scanned before the prepared snapshot is placed into managed storage.
+- [x] External skill activation is blocked before activation state is persisted when the static scan reports blocking findings.
+- [x] Existing activated external skills are re-checked at browser-worker launch/recovery and skipped rather than injected when validation fails.
+- [x] `skill_list`, `skill_view`, and activation flows surface trust/provenance metadata; unsafe external `skill_view` content is not exposed for instruction use.
+- [x] Static checks cover obvious higher-priority instruction override, persistence/agent-config modification, broad destructive commands, destructive Git warnings, package-script execution instructions, and explicit data-exfiltration language.
+- [x] Added focused resource/security/MCP/external-activation regressions and included them in cross-platform CI.
+
+Representative implementation commits: `88ac2517`, `e2fbed65`, `54cd0ac1`, `b01815ef`, `6b7801f7`, `79c17833`, `43953177`, `7587094e`, `1300813d`, `58595ae8`, `ef60f445`, `d640350a`, `61113ab6`.
+
+Final M5.4 code CI: `35002217812` (Ubuntu, macOS, Windows all passed, including Windows native/UIA/activity-indicator and launcher build coverage).
+
 ## Planned next
 
-### M5.4 - Skill resources and security
+### M5.5 - External MCP plugins
 
-- [ ] Add bounded reads for non-executable `references/`, `templates/`, and `assets/` resources.
-- [ ] Keep `scripts/` non-executable by default; do not add a script runner in this unit.
-- [ ] Surface external-source provenance/trust status to discovery/view/activation flows.
-- [ ] Add conservative static checks for obvious secret-exfiltration, persistence/prompt-injection, destructive, and agent-config modification patterns before external-skill activation.
-- [ ] Define explicit blocking/warning semantics without allowing scanner failures to grant capability or execute content.
-- [ ] Keep external MCP/plugin authorization deferred to M5.5.
-
-Later M5 unit:
-
-- M5.5: separate external MCP Plugins connector and optional plugin-provided skills.
+- [ ] Add a separate optional Plugins connector/configuration surface rather than merging external servers into Core registration.
+- [ ] Support bounded external MCP server discovery/configuration with explicit enabled/disabled state.
+- [ ] Keep plugin connection/startup/runtime failure isolated from the Core MCP server and coding tools.
+- [ ] Keep browser workers from inheriting external plugin tools automatically; any worker plugin access requires an explicit allowlist/capability contract.
+- [ ] Allow optional plugin-provided skill roots only through explicit manifest/configuration and the existing Skill safety boundaries.
+- [ ] Add cross-platform lifecycle/error-isolation coverage before marking M5 complete.
 
 ## Update policy
 
