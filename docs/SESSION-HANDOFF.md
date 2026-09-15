@@ -111,30 +111,34 @@ See `docs/PLUGINS-DESIGN.md`.
 
 ## Current operational state
 
-State verified before this handoff was created:
+Latest substantive code/test baseline verified before this handoff update:
 
-- Branch HEAD: `846216ab3aa81e1d0eca7a2fd31e2799a1218de6`
-- HEAD commit: `test: add live loopback MCP plugin smoke`
-- Latest green CI: GitHub Actions run `35008469368` (Ubuntu, macOS, Windows all passed)
+- Code/test commit: `5fbc010b7e16039debfc123a484283f1c2715ee0` (`test: cover full MCP plugin lifecycle smoke`)
+- Green CI: GitHub Actions run `35011189776` (Ubuntu, macOS, Windows all passed)
+- Immediately following progress-doc commit: `a821d60377fcc3fe6602590108c3b0610365c677`
 - Phase: **Post-M5 stabilization / live integration validation**
 
-The current HEAD adds a real loopback Streamable HTTP MCP server integration test and proves plugin registration in enabled state, remote tool discovery, and a real remote tool call through the plugin client. It does **not yet close the entire first stabilization checklist item** because the documented lifecycle also calls for explicit enable/disable/remove coverage and should confirm the intended Core proxy path rather than only lower-level client helpers.
+The live loopback plugin lifecycle smoke is now complete. It starts a real Streamable HTTP MCP server and exercises the actual Core plugin tool handlers through:
+
+`plugin_register (disabled) -> plugin_set_enabled(true) -> plugin_discover -> plugin_call -> plugin_set_enabled(false) -> disabled-call rejection -> plugin_remove -> plugin_list(empty)`
+
+This closes the first stabilization checklist item. The docs-only handoff/progress commit may be newer than the substantive baseline listed above, so every new session must still check the actual branch HEAD and latest CI before editing.
 
 ### Active unit
 
-Finish the first post-M5 stabilization item: representative live MCP plugin lifecycle validation.
+Validate a declared plugin `skillSources` entry through the existing skill lifecycle without inventing a plugin-specific installer.
 
-Target lifecycle:
+Target evidence:
 
-`local registration -> enable -> discovery -> explicit plugin_call/proxy path -> disable -> remove`
+`plugin skillSources declaration -> normal skill_install -> existing external-skill security/provenance checks -> skill_activate`
 
-Keep this focused. Once complete and green, update this file so the next active unit becomes the plugin skill-source smoke.
+The declaration itself must remain inert: listing or discovering the plugin must not install or activate a skill automatically. Reuse the existing M5.1-M5.4 skill path and keep script execution disabled.
 
 ## Remaining stabilization work
 
 In order, unless an integration defect changes priority:
 
-1. Complete the live MCP plugin lifecycle smoke described above.
+1. **Completed:** live MCP plugin lifecycle smoke through the fixed Core proxy surface (`5fbc010b`, CI `35011189776`).
 2. Validate a declared plugin skill source through the existing `skill_install -> security -> skill_activate` path.
 3. With plugin configuration present, re-run representative main-agent + browser-worker flows and prove the worker still receives no plugin tools.
 4. Run representative end-to-end main-agent/browser-worker regression and fix integration defects found.
