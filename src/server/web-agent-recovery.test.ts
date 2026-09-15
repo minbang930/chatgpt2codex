@@ -137,7 +137,8 @@ describe("Web worker target recovery", () => {
       recovered: true,
     });
     expect(recoveredInput?.workerId).toBe(worker.workerId);
-    expect(recoveredInput?.task).toBe("Continue after browser loss");
+    expect(recoveredInput?.task).toContain("Ponytail coding policy (FULL)");
+    expect(recoveredInput?.task).toContain("Continue after browser loss");
     expect(recoveredInput?.workerToken).not.toBe(originalToken);
     expect(await verifyWorkerCapability(ctx.stateDir, recoveredInput!.workerToken)).toMatchObject({ workerId: worker.workerId });
     expect((await getBrowserWorkerSession(ctx.stateDir, worker.workerId))?.browserHandle).toBe("fake:recovered-target");
