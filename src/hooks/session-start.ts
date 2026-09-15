@@ -1,5 +1,6 @@
 import type { ProjectRegistryEntry, ToolContext } from "../types.js";
-import { HookEngine, type HookDispatchReport } from "./engine.js";
+import type { HookDispatchReport } from "./engine.js";
+import { auditHookDispatch, getHookEngine } from "./runtime.js";
 
 interface SessionLike {
   activeProjectId?: unknown;
@@ -26,25 +27,6 @@ async function readActiveProjectId(ctx: ToolContext): Promise<string | undefined
   }
 }
 
-async function auditDispatch(ctx: ToolContext, report: HookDispatchReport): Promise<void> {
-  const failed = report.results.filter((result) => result.status === "failed").length;
-  const timedOut = report.results.filter((result) => result.status === "timed_out").length;
-  try {
-    await ctx.ledger.append({
-      type: "hook.dispatch",
-      event: report.event,
-      configured: report.configured,
-      executed: report.executed,
-      failed,
-      timedOut,
-      configError: report.configError !== undefined,
-      durationMs: report.durationMs,
-    });
-  } catch {
-    // Hook observability is never allowed to make MCP session creation fail.
-  }
-}
-
 /**
  * Emit the M4 SessionStart lifecycle event for one freshly-created MCP server
  * instance. HTTP creates one MCP server per initialize/session; stdio creates
@@ -58,8 +40,7 @@ async function auditDispatch(ctx: ToolContext, report: HookDispatchReport): Prom
 export async function emitSessionStartHook(ctx: ToolContext): Promise<HookDispatchReport> {
   const activeProjectId = await readActiveProjectId(ctx);
   const activeProject = projectForId(ctx.registry, activeProjectId);
-  const engine = new HookEngine(ctx.stateDir);
-  const report = await engine.emit(
+  const report = await getHookEngine(ctx).emit(
     "SessionStart",
     {
       transport: ctx.remote === true ? "http" : "stdio",
@@ -72,6 +53,6 @@ export async function emitSessionStartHook(ctx: ToolContext): Promise<HookDispat
       ...(activeProject ? { projectRoot: activeProject.root } : {}),
     },
   );
-  await auditDispatch(ctx, report);
+  await auditHookDispatch(ctx, report);
   return report;
 }
