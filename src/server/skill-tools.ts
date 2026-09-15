@@ -1,9 +1,19 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { DomainError, ErrorCode, makeResult, type ToolContext } from "../types.js";
+import {
+  MAX_SKILL_CATALOG_CHARS,
+  MAX_SKILL_CATALOG_DESCRIPTION_CHARS,
+  MAX_SKILL_CATALOG_ITEMS,
+  activateSkillName,
+  assertSkillCanActivate,
+  deactivateSkillName,
+  getActivatedSkillSelection,
+  type SkillActivationScope,
+} from "../skills/activation.js";
 import { installSkill, readSkillProvenance, removeSkill, updateSkill } from "../skills/install.js";
 import { discoverSkillRegistry, loadRegisteredSkill } from "../skills/registry.js";
-import type { SkillScope } from "../skills/types.js";
+import type { SkillMetadata, SkillScope } from "../skills/types.js";
 import { resolveActiveProject } from "../workspace/active.js";
 import { requireProjectLease } from "../workspace/lease-guard.js";
 import { addToolCallProof } from "./tool-proof.js";
@@ -14,6 +24,7 @@ const networkWrite = { readOnlyHint: false, destructiveHint: false, openWorldHin
 const destructive = { readOnlyHint: false, destructiveHint: true, openWorldHint: false } as const;
 const securitySchemes = [{ type: "oauth2", scopes: ["chatgpt2codex"] }] as const;
 const scopeSchema = z.enum(["global", "project"]);
+const activationScopeSchema = z.enum(["global", "project"]);
 const skillNameSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 
 function meta(invoking: string, invoked: string) {
@@ -51,13 +62,27 @@ async function projectForScope(ctx: ToolContext, scope: SkillScope, write: boole
   return project;
 }
 
+function trimCatalogDescription(description: string): { description: string; descriptionTruncated: boolean } {
+  if (description.length <= MAX_SKILL_CATALOG_DESCRIPTION_CHARS) {
+    return { description, descriptionTruncated: false };
+  }
+  return {
+    description: `${description.slice(0, MAX_SKILL_CATALOG_DESCRIPTION_CHARS - 1)}…`,
+    descriptionTruncated: true,
+  };
+}
+
+function catalogCost(skill: SkillMetadata, description: string): number {
+  return skill.name.length + description.length + skill.scope.length + 96;
+}
+
 export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
   server.registerTool(
     "skill_list",
     {
       title: "List Agent Skills",
       description:
-        "List installed Agent Skills using lightweight name/description/scope metadata. Project skills override global skills with the same name.",
+        "List a bounded catalog of installed Agent Skills using lightweight name/description/scope metadata. Project skills override global skills with the same name. Use this early when specialized instructions may help, then call skill_activate for the relevant skill instead of loading every SKILL.md.",
       annotations: readOnly,
       _meta: meta("Listing Agent Skills...", "Agent Skills listed"),
       inputSchema: { query: z.string().max(200).optional() },
@@ -66,29 +91,58 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
       try {
         const project = await projectForRead(ctx);
         const snapshot = await discoverSkillRegistry({ stateDir: ctx.stateDir, projectRoot: project?.root });
+        const activation = await getActivatedSkillSelection(ctx.stateDir, project?.projectId);
+        const activeNames = new Set(activation.names);
+        const globalActive = new Set(activation.global);
+        const projectActive = new Set(activation.project);
         const needle = input.query?.trim().toLowerCase();
         const filtered = needle
           ? snapshot.skills.filter((skill) => `${skill.name}\n${skill.description}`.toLowerCase().includes(needle))
           : snapshot.skills;
-        const skills = await Promise.all(filtered.map(async (skill) => {
+
+        const skills: Array<Record<string, unknown>> = [];
+        let catalogChars = 0;
+        for (const skill of filtered) {
+          if (skills.length >= MAX_SKILL_CATALOG_ITEMS) break;
+          const clipped = trimCatalogDescription(skill.description);
+          const cost = catalogCost(skill, clipped.description);
+          if (catalogChars + cost > MAX_SKILL_CATALOG_CHARS) break;
           const provenance = await readSkillProvenance(skill.baseDir);
-          return {
+          skills.push({
             name: skill.name,
-            description: skill.description,
+            description: clipped.description,
+            ...(clipped.descriptionTruncated ? { descriptionTruncated: true } : {}),
             scope: skill.scope,
             managed: provenance !== null,
             sourceKind: provenance?.sourceKind,
-          };
-        }));
+            active: activeNames.has(skill.name),
+            activationScopes: [
+              ...(globalActive.has(skill.name) ? ["global"] : []),
+              ...(projectActive.has(skill.name) ? ["project"] : []),
+            ],
+          });
+          catalogChars += cost;
+        }
+        const truncated = skills.length < filtered.length;
         return ok(
           "skill_list",
           makeResult(
             {
               skills,
+              totalMatches: filtered.length,
+              truncated,
+              catalogLimits: {
+                maxItems: MAX_SKILL_CATALOG_ITEMS,
+                maxChars: MAX_SKILL_CATALOG_CHARS,
+              },
+              activeSkillNames: activation.names,
+              activationOverflow: activation.overflow,
               diagnostics: snapshot.diagnostics.slice(0, 20),
               activeProjectId: project?.projectId,
             },
-            skills.length === 0 ? "No matching Agent Skills are installed." : `Found ${skills.length} Agent Skill(s).`,
+            skills.length === 0
+              ? "No matching Agent Skills are installed."
+              : `Found ${filtered.length} matching Agent Skill(s); returned ${skills.length}${truncated ? " within catalog limits" : ""}.`,
           ),
         );
       } catch (error) {
@@ -101,7 +155,7 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
     "skill_view",
     {
       title: "View Agent Skill",
-      description: "Load the full SKILL.md for one installed skill only when its instructions are needed.",
+      description: "Load the full SKILL.md for one installed skill only when its instructions are needed. Viewing does not activate the skill for workers.",
       annotations: readOnly,
       _meta: meta("Loading Agent Skill...", "Agent Skill loaded"),
       inputSchema: { name: skillNameSchema },
@@ -135,6 +189,103 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
         );
       } catch (error) {
         return failed("skill_view", error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "skill_activate",
+    {
+      title: "Activate Agent Skill",
+      description:
+        "Explicitly activate one installed Agent Skill and return its bounded instructions for the main agent to follow now. Global activation applies across projects; project activation is tied to the active project. Activated skills are also supplied to later browser workers without granting any additional tools or permissions.",
+      annotations: localWrite,
+      _meta: meta("Activating Agent Skill...", "Agent Skill activated"),
+      inputSchema: {
+        name: skillNameSchema,
+        activationScope: activationScopeSchema.default("project"),
+      },
+    },
+    async (input) => {
+      try {
+        const project = await projectForRead(ctx);
+        const activationScope = input.activationScope as SkillActivationScope;
+        if (activationScope === "project" && !project) {
+          throw new DomainError(ErrorCode.PROJECT_NOT_SELECTED, "Project-scoped Agent Skill activation requires an active project");
+        }
+        const loaded = await loadRegisteredSkill({
+          stateDir: ctx.stateDir,
+          projectRoot: project?.root,
+          name: input.name,
+        });
+        if (!loaded.skill) {
+          throw new DomainError(ErrorCode.PROJECT_NOT_FOUND, `Skill not found: ${input.name}`);
+        }
+        assertSkillCanActivate(loaded.skill);
+        const activation = await activateSkillName({
+          stateDir: ctx.stateDir,
+          name: loaded.skill.name,
+          activationScope,
+          projectId: project?.projectId,
+        });
+        return ok(
+          "skill_activate",
+          makeResult(
+            {
+              name: loaded.skill.name,
+              description: loaded.skill.description,
+              installedScope: loaded.skill.scope,
+              activationScope,
+              activeProjectId: project?.projectId,
+              activeSkillNames: activation.names,
+              content: loaded.skill.content,
+            },
+            `Activated Agent Skill '${loaded.skill.name}' (${activationScope}). Follow the returned SKILL.md instructions for the current task where applicable.`,
+          ),
+        );
+      } catch (error) {
+        return failed("skill_activate", error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "skill_deactivate",
+    {
+      title: "Deactivate Agent Skill",
+      description:
+        "Deactivate one previously selected Agent Skill. This changes only runtime instruction selection; it does not uninstall the skill or modify project files.",
+      annotations: localWrite,
+      _meta: meta("Deactivating Agent Skill...", "Agent Skill deactivated"),
+      inputSchema: {
+        name: skillNameSchema,
+        activationScope: activationScopeSchema.default("project"),
+      },
+    },
+    async (input) => {
+      try {
+        const project = await projectForRead(ctx);
+        const activationScope = input.activationScope as SkillActivationScope;
+        const activation = await deactivateSkillName({
+          stateDir: ctx.stateDir,
+          name: input.name,
+          activationScope,
+          projectId: project?.projectId,
+        });
+        return ok(
+          "skill_deactivate",
+          makeResult(
+            {
+              name: input.name,
+              activationScope,
+              activeProjectId: project?.projectId,
+              activeSkillNames: activation.names,
+            },
+            `Deactivated Agent Skill '${input.name}' (${activationScope}).`,
+          ),
+        );
+      } catch (error) {
+        return failed("skill_deactivate", error);
       }
     },
   );
