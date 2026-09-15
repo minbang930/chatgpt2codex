@@ -5,7 +5,14 @@ import { z } from "zod";
 import { DomainError, ErrorCode } from "../types.js";
 import { Store } from "../state/store.js";
 import { findProject } from "../workspace/registry.js";
+import { readSkillProvenance } from "./install.js";
 import { loadRegisteredSkill } from "./registry.js";
+import {
+  assertExternalSkillSecurity,
+  describeSkillTrust,
+  scanSkillText,
+  type SkillTrustLevel,
+} from "./security.js";
 import type { LoadedSkill } from "./types.js";
 
 const DIR_MODE = 0o700;
@@ -38,7 +45,7 @@ export interface ActivatedSkillSelection {
 
 export interface ActivatedSkillContext {
   text: string;
-  skills: Array<Pick<LoadedSkill, "name" | "description" | "scope"> & { chars: number }>;
+  skills: Array<Pick<LoadedSkill, "name" | "description" | "scope"> & { chars: number; trustLevel: SkillTrustLevel }>;
   skipped: Array<{ name: string; reason: string }>;
   selectedNames: string[];
 }
@@ -205,6 +212,20 @@ export async function loadActivatedSkillContext(params: {
       skipped.push({ name, reason: `skill exceeds the ${MAX_ACTIVE_SKILL_CHARS}-character activation budget` });
       continue;
     }
+
+    const provenance = await readSkillProvenance(loaded.skill.baseDir);
+    const trust = describeSkillTrust(provenance);
+    const securityScan = scanSkillText(loaded.skill.content);
+    try {
+      assertExternalSkillSecurity(trust, securityScan, "worker activation context");
+    } catch (error) {
+      skipped.push({
+        name,
+        reason: error instanceof Error ? error.message : "external skill failed security validation",
+      });
+      continue;
+    }
+
     if (usedChars + loaded.skill.content.length > MAX_ACTIVE_SKILL_CONTEXT_CHARS) {
       skipped.push({ name, reason: `combined activation context exceeds ${MAX_ACTIVE_SKILL_CONTEXT_CHARS} characters` });
       continue;
@@ -215,10 +236,12 @@ export async function loadActivatedSkillContext(params: {
       description: loaded.skill.description,
       scope: loaded.skill.scope,
       chars: loaded.skill.content.length,
+      trustLevel: trust.level,
     });
     blocks.push([
       `### Agent Skill: ${loaded.skill.name}`,
       `Installed scope: ${loaded.skill.scope}`,
+      `Trust: ${trust.level}`,
       "",
       loaded.skill.content.trim(),
     ].join("\n"));
