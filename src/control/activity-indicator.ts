@@ -14,10 +14,9 @@ interface ActivityDriver {
 
 interface HelperRequest {
   id: number;
-  op: "show" | "hide" | "status" | "armCancel" | "disarmCancel" | "pulse" | "pointer" | "shutdown";
+  op: "show" | "hide" | "status" | "armCancel" | "disarmCancel" | "pulse" | "shutdown";
   x?: number;
   y?: number;
-  durationMs?: number;
 }
 
 interface HelperResponse {
@@ -185,7 +184,6 @@ public sealed class ComputerUseOverlayForm : Form {
     bool rippleActive;
     Point ripplePoint;
     long rippleStartedAt;
-    long pointerVisibleUntil;
     const double ActivityPeriodSeconds = 1.6;
     const double RippleDurationSeconds = 1.25;
 
@@ -305,10 +303,6 @@ public sealed class ComputerUseOverlayForm : Form {
         Invalidate();
     }
 
-    bool PointerActive() {
-        return Stopwatch.GetTimestamp() < pointerVisibleUntil;
-    }
-
     Point PointerClientPoint() {
         var screenPoint = Cursor.Position;
         return new Point(screenPoint.X - Bounds.Left, screenPoint.Y - Bounds.Top);
@@ -316,7 +310,7 @@ public sealed class ComputerUseOverlayForm : Form {
 
     bool PointerOnThisScreen() {
         var point = Cursor.Position;
-        return PointerActive() && Bounds.Contains(point.X, point.Y);
+        return Bounds.Contains(point.X, point.Y);
     }
 
     Rectangle PointerHaloRect() {
@@ -340,14 +334,6 @@ public sealed class ComputerUseOverlayForm : Form {
             }
             return ring;
         }
-    }
-
-    public void ShowAutomationPointer(int durationMs) {
-        int bounded = Math.Max(180, Math.Min(2800, durationMs));
-        long ticks = (long)Math.Round((bounded / 1000.0) * Stopwatch.Frequency);
-        pointerVisibleUntil = Stopwatch.GetTimestamp() + ticks;
-        UpdateWindowRegion();
-        Invalidate();
     }
 
     Rectangle BadgeRect() {
@@ -670,17 +656,6 @@ public static class ComputerUseOverlayHost {
         });
     }
 
-    public static void ShowAutomationPointer(int durationMs) {
-        var target = dispatcher;
-        if (target == null || target.IsDisposed) return;
-        Invoke(delegate {
-            foreach (var form in forms) {
-                var overlay = form as ComputerUseOverlayForm;
-                if (overlay != null) overlay.ShowAutomationPointer(durationMs);
-            }
-        });
-    }
-
     public static void Hide() {
         var target = dispatcher;
         if (target == null || target.IsDisposed) return;
@@ -731,7 +706,6 @@ while (-not $done -and ($line = [Console]::In.ReadLine()) -ne $null) {
       'armCancel' { [ComputerUseOverlayHost]::ArmCancel(); $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }
       'disarmCancel' { [ComputerUseOverlayHost]::DisarmCancel(); $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }
       'pulse' { [ComputerUseOverlayHost]::PulseAt([int]$payload.x, [int]$payload.y); $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }
-      'pointer' { [ComputerUseOverlayHost]::ShowAutomationPointer([int]$payload.durationMs); $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }
       'shutdown' {
         [ComputerUseOverlayHost]::Shutdown()
         $result = @{ id=$id; ok=$true; visible=$false }
@@ -870,7 +844,7 @@ async function startHelper(): Promise<ChildProcessWithoutNullStreams> {
 
 async function requestHelper(
   op: HelperRequest["op"],
-  payload: Pick<HelperRequest, "x" | "y" | "durationMs"> = {},
+  payload: Pick<HelperRequest, "x" | "y"> = {},
 ): Promise<HelperResponse> {
   const child = await startHelper();
   const id = nextRequestId++;
@@ -1032,12 +1006,6 @@ export async function showComputerUseClickPulse(x: number, y: number): Promise<v
   if (process.platform !== "win32" || testDriver !== undefined) return;
   if (!Number.isFinite(x) || !Number.isFinite(y)) return;
   await requestHelper("pulse", { x: Math.round(x), y: Math.round(y) }).catch(() => undefined);
-}
-
-export async function showComputerUseAutomationPointer(durationMs = 1_800): Promise<void> {
-  if (process.platform !== "win32" || testDriver !== undefined) return;
-  const bounded = Math.max(180, Math.min(2800, Math.round(durationMs)));
-  await requestHelper("pointer", { durationMs: bounded }).catch(() => undefined);
 }
 
 export async function withComputerUseActivity<T>(fn: () => Promise<T>): Promise<T> {
