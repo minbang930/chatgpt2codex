@@ -7,6 +7,7 @@ import { maskSensitiveRegions } from "./screenshot-mask.js";
 import { autoDecision, recordAutoUse } from "./auto.js";
 import { approveAction, getAction, isKilled, listActions, markDone, toSummary, type ControlActionRecord } from "./queue.js";
 import * as desktopInput from "./input-backend.js";
+import { computerUseCancelGeneration, isComputerUseRecentlyCancelled, wasComputerUseCancelledSince } from "./cancel.js";
 
 /**
  * Session worker that turns an `approved` control action into a real
@@ -67,6 +68,23 @@ async function captureActionEvidence(
  * ends by marking the record `done` and never throws to the executor loop.
  */
 export async function executeApprovedAction(ctx: ToolContext, record: ControlActionRecord): Promise<void> {
+  const cancelGeneration = computerUseCancelGeneration();
+  const cancelled = () => isComputerUseRecentlyCancelled() || wasComputerUseCancelledSince(cancelGeneration);
+  const markCancelled = async () => {
+    await ctx.ledger.append({
+      type: "control.action.cancelled",
+      actionId: record.actionId,
+      appName: record.appName,
+      reason: "escape",
+    });
+    await markDone(ctx.stateDir, record.actionId, { ok: false, error: "cancelled-by-user" });
+  };
+
+  if (cancelled()) {
+    await markCancelled();
+    return;
+  }
+
   if (await isKilled(ctx.stateDir)) {
     await ctx.ledger.append({
       type: "control.action.blocked",
@@ -111,9 +129,15 @@ export async function executeApprovedAction(ctx: ToolContext, record: ControlAct
   }
 
   const evidenceBefore = await captureActionEvidence(ctx, record, "before");
+  if (cancelled()) {
+    await markCancelled();
+    return;
+  }
   try {
     let axSummary: Record<string, unknown> | undefined;
     let windowPoint: { x: number; y: number } | undefined;
+
+    if (cancelled()) throw new Error("cancelled-by-user");
 
     if (record.kind === "click") {
       if (record.target.ax) {
@@ -172,6 +196,7 @@ export async function executeApprovedAction(ctx: ToolContext, record: ControlAct
       await desktopInput.pressKey(record.appName, keyCode);
     }
 
+    if (cancelled()) throw new Error("cancelled-by-user");
     const evidenceAfter = await captureActionEvidence(ctx, record, "after");
     const evidence = { before: evidenceBefore?.path, after: evidenceAfter?.path };
     await ctx.ledger.append({
@@ -193,7 +218,7 @@ export async function executeApprovedAction(ctx: ToolContext, record: ControlAct
     // Text-carrying actions never persist raw OS/helper errors: even though
     // text is sent to both native backends over stdin/environment rather than
     // argv, keep the fixed reason code as defense in depth.
-    const message = record.kind === "type" ? "type-failed" : redact(rawMessage);
+    const message = cancelled() || rawMessage === "cancelled-by-user" ? "cancelled-by-user" : record.kind === "type" ? "type-failed" : redact(rawMessage);
     const evidenceAfter = await captureActionEvidence(ctx, record, "after");
     const evidence = { before: evidenceBefore?.path, after: evidenceAfter?.path };
     await ctx.ledger.append({

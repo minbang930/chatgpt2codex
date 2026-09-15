@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { buildSafeChildEnv } from "../exec/command-runner.js";
+import { signalComputerUseCancel } from "./cancel.js";
 
 interface ActivityDriver {
   show(): Promise<void>;
@@ -13,7 +14,7 @@ interface ActivityDriver {
 
 interface HelperRequest {
   id: number;
-  op: "show" | "hide" | "status" | "shutdown";
+  op: "show" | "hide" | "status" | "armCancel" | "disarmCancel" | "shutdown";
 }
 
 interface HelperResponse {
@@ -52,7 +53,8 @@ const MAX_STDERR = 6_000;
 const WINDOWS_ACTIVITY_SCRIPT = String.raw`
 param(
   [switch]$Probe,
-  [int]$ParentPid = 0
+  [int]$ParentPid = 0,
+  [string]$CancelFile = ''
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -65,6 +67,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
@@ -143,7 +146,7 @@ public sealed class ComputerUseOverlayForm : Form {
     }
 
     Rectangle BadgeRect() {
-        int width = Scale(132);
+        int width = Scale(228);
         int height = Scale(28);
         int top = Scale(12);
         return new Rectangle(Math.Max(0, (ClientSize.Width - width) / 2), top, width, height);
@@ -211,7 +214,7 @@ public sealed class ComputerUseOverlayForm : Form {
             using (var font = new Font("Segoe UI", 9.0f, FontStyle.Bold, GraphicsUnit.Point)) {
                 TextRenderer.DrawText(
                     e.Graphics,
-                    "Computer Use",
+                    "Computer Use  |  Esc to cancel",
                     font,
                     badge,
                     Color.White,
@@ -236,14 +239,70 @@ public static class ComputerUseOverlayHost {
     static List<Form> forms = new List<Form>();
     static bool visible;
     static int parentPid;
+    static string cancelFile;
+    static IntPtr keyboardHook = IntPtr.Zero;
+    static LowLevelKeyboardProc keyboardProc;
+    static bool cancelRaised;
+
+    const int WH_KEYBOARD_LL = 13;
+    const int WM_KEYDOWN = 0x0100;
+    const int WM_KEYUP = 0x0101;
+    const int WM_SYSKEYDOWN = 0x0104;
+    const int WM_SYSKEYUP = 0x0105;
+    const int VK_ESCAPE = 0x1B;
+
+    delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError=true)]
+    static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc callback, IntPtr hMod, uint threadId);
+    [DllImport("user32.dll", SetLastError=true)]
+    static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [DllImport("user32.dll")]
+    static extern IntPtr CallNextHookEx(IntPtr hook, int nCode, IntPtr wParam, IntPtr lParam);
+    [DllImport("kernel32.dll", CharSet=CharSet.Auto, SetLastError=true)]
+    static extern IntPtr GetModuleHandle(string moduleName);
+
+    static IntPtr KeyboardHookProc(int nCode, IntPtr wParam, IntPtr lParam) {
+        if (nCode >= 0) {
+            int message = wParam.ToInt32();
+            int vk = Marshal.ReadInt32(lParam);
+            if (vk == VK_ESCAPE && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN || message == WM_KEYUP || message == WM_SYSKEYUP)) {
+                if (!cancelRaised && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)) {
+                    cancelRaised = true;
+                    try {
+                        if (!String.IsNullOrWhiteSpace(cancelFile)) File.WriteAllText(cancelFile, DateTime.UtcNow.Ticks.ToString());
+                    } catch { }
+                }
+                return new IntPtr(1);
+            }
+        }
+        return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
+    }
+
+    static void ArmEscapeHookCore() {
+        cancelRaised = false;
+        if (keyboardHook != IntPtr.Zero) return;
+        keyboardProc = KeyboardHookProc;
+        var module = GetModuleHandle(null);
+        keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, keyboardProc, module, 0);
+        if (keyboardHook == IntPtr.Zero) throw new InvalidOperationException("could not install local Esc cancellation hook");
+    }
+
+    static void DisarmEscapeHookCore() {
+        cancelRaised = false;
+        if (keyboardHook == IntPtr.Zero) return;
+        try { UnhookWindowsHookEx(keyboardHook); } catch { }
+        keyboardHook = IntPtr.Zero;
+    }
 
     public static int Probe() {
         ComputerUseOverlayForm.EnableProcessDpiAwareness();
         return Screen.AllScreens.Length;
     }
 
-    public static void EnsureStarted(int ownerPid) {
+    public static void EnsureStarted(int ownerPid, string signalPath) {
         ComputerUseOverlayForm.EnableProcessDpiAwareness();
+        cancelFile = signalPath;
         lock (Sync) {
             if (uiThread != null && uiThread.IsAlive && dispatcher != null && !dispatcher.IsDisposed) return;
             parentPid = ownerPid;
@@ -269,6 +328,7 @@ public static class ComputerUseOverlayHost {
                 var p = Process.GetProcessById(parentPid);
                 if (p.HasExited) throw new InvalidOperationException();
             } catch {
+                DisarmEscapeHookCore();
                 HideCore();
                 Application.ExitThread();
             }
@@ -310,9 +370,19 @@ public static class ComputerUseOverlayHost {
         target.Invoke(action);
     }
 
-    public static void Show(int ownerPid) {
-        EnsureStarted(ownerPid);
+    public static void Show(int ownerPid, string signalPath) {
+        EnsureStarted(ownerPid, signalPath);
         Invoke(ShowCore);
+    }
+
+    public static void ArmCancel() {
+        Invoke(ArmEscapeHookCore);
+    }
+
+    public static void DisarmCancel() {
+        var target = dispatcher;
+        if (target == null || target.IsDisposed) return;
+        Invoke(DisarmEscapeHookCore);
     }
 
     public static void Hide() {
@@ -333,6 +403,7 @@ public static class ComputerUseOverlayHost {
         if (target == null || target.IsDisposed) return;
         try {
             target.Invoke(new Action(delegate {
+                DisarmEscapeHookCore();
                 HideCore();
                 Application.ExitThread();
             }));
@@ -347,7 +418,7 @@ if ($Probe) {
   exit 0
 }
 
-[ComputerUseOverlayHost]::EnsureStarted($ParentPid)
+[ComputerUseOverlayHost]::EnsureStarted($ParentPid, $CancelFile)
 [Console]::Out.WriteLine((@{ id=0; ok=$true; ready=$true } | ConvertTo-Json -Compress))
 [Console]::Out.Flush()
 $done = $false
@@ -358,9 +429,11 @@ while (-not $done -and ($line = [Console]::In.ReadLine()) -ne $null) {
     $payload = $line | ConvertFrom-Json
     $id = [int]$payload.id
     switch ([string]$payload.op) {
-      'show' { [ComputerUseOverlayHost]::Show($ParentPid); $result = @{ id=$id; ok=$true; visible=$true } }
+      'show' { [ComputerUseOverlayHost]::Show($ParentPid, $CancelFile); $result = @{ id=$id; ok=$true; visible=$true } }
       'hide' { [ComputerUseOverlayHost]::Hide(); $result = @{ id=$id; ok=$true; visible=$false } }
       'status' { $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }
+      'armCancel' { [ComputerUseOverlayHost]::ArmCancel(); $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }
+      'disarmCancel' { [ComputerUseOverlayHost]::DisarmCancel(); $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }
       'shutdown' {
         [ComputerUseOverlayHost]::Shutdown()
         $result = @{ id=$id; ok=$true; visible=$false }
@@ -382,6 +455,9 @@ let helperStart: Promise<ChildProcessWithoutNullStreams> | undefined;
 let nextRequestId = 1;
 const pending = new Map<number, PendingRequest>();
 let stderrTail = "";
+const cancelSignalFile = path.join(os.tmpdir(), "chatgpt2codex", `computer-use-cancel-${process.pid}.signal`);
+let cancelPollTimer: NodeJS.Timeout | undefined;
+let cancelPollBusy = false;
 
 function powershellPath(): string {
   const systemRoot = process.env.SystemRoot || process.env.SYSTEMROOT || "C:\\Windows";
@@ -415,7 +491,7 @@ async function startHelper(): Promise<ChildProcessWithoutNullStreams> {
     const script = await helperScriptPath();
     const child = spawn(
       powershellPath(),
-      ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-ParentPid", String(process.pid)],
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-ParentPid", String(process.pid), "-CancelFile", cancelSignalFile],
       { env: buildSafeChildEnv(), windowsHide: true, stdio: ["pipe", "pipe", "pipe"] },
     );
     stderrTail = "";
@@ -516,6 +592,50 @@ async function requestHelper(op: HelperRequest["op"]): Promise<HelperResponse> {
   });
 }
 
+async function clearNativeCancelSignal(): Promise<void> {
+  await fs.unlink(cancelSignalFile).catch(() => undefined);
+}
+
+function stopNativeCancelPolling(): void {
+  if (!cancelPollTimer) return;
+  clearInterval(cancelPollTimer);
+  cancelPollTimer = undefined;
+  cancelPollBusy = false;
+}
+
+function startNativeCancelPolling(): void {
+  if (process.platform !== "win32" || testDriver !== undefined || cancelPollTimer) return;
+  void clearNativeCancelSignal();
+  cancelPollTimer = setInterval(() => {
+    if (cancelPollBusy) return;
+    cancelPollBusy = true;
+    void fs.readFile(cancelSignalFile, "utf8").then(async () => {
+      await clearNativeCancelSignal();
+      signalComputerUseCancel("escape");
+      await forceHideComputerUseActivity();
+    }).catch(() => undefined).finally(() => {
+      cancelPollBusy = false;
+    });
+  }, 75);
+  cancelPollTimer.unref?.();
+}
+
+async function armNativeCancel(): Promise<void> {
+  if (process.platform !== "win32" || testDriver !== undefined) return;
+  await clearNativeCancelSignal();
+  await requestHelper("armCancel");
+  startNativeCancelPolling();
+}
+
+async function disarmNativeCancel(): Promise<void> {
+  stopNativeCancelPolling();
+  if (process.platform !== "win32" || testDriver !== undefined) return;
+  if (helper && helper.exitCode === null && !helper.killed) {
+    await requestHelper("disarmCancel").catch(() => undefined);
+  }
+  await clearNativeCancelSignal();
+}
+
 const nativeDriver: ActivityDriver = {
   async show() {
     if (process.platform !== "win32") return;
@@ -584,8 +704,10 @@ async function syncVisibility(): Promise<void> {
 export async function beginComputerUseActivity(): Promise<() => Promise<void>> {
   if (!enabled()) return async () => undefined;
   cancelHideTimer();
+  const wasInactive = activeCount === 0;
   activeCount += 1;
   await queueTransition(syncVisibility);
+  if (wasInactive) await armNativeCancel().catch(() => undefined);
   let released = false;
   return async () => {
     if (released) return;
@@ -595,6 +717,7 @@ export async function beginComputerUseActivity(): Promise<() => Promise<void>> {
       await queueTransition(syncVisibility);
       return;
     }
+    await disarmNativeCancel();
     cancelHideTimer();
     hideTimer = setTimeout(() => {
       hideTimer = undefined;
@@ -637,6 +760,7 @@ export async function forceHideComputerUseActivity(): Promise<void> {
   cancelHideTimer();
   activeCount = 0;
   suppressCount = 0;
+  await disarmNativeCancel();
   await queueTransition(async () => setVisible(false));
 }
 
@@ -666,6 +790,7 @@ export async function probeWindowsActivityIndicatorSupport(): Promise<{ ok: bool
 /** Tests/shutdown may stop the persistent cosmetic helper explicitly. */
 export async function stopWindowsActivityIndicatorHelper(): Promise<void> {
   cancelHideTimer();
+  await disarmNativeCancel();
   activeCount = 0;
   suppressCount = 0;
   visible = false;

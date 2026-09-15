@@ -7,6 +7,8 @@ import { assertAllowedTarget, controlAllowlist, isAppAllowed, isControlChatGptEx
 import { assertScreenshotTargetAllowed, maskSensitiveRegions } from "./screenshot-mask.js";
 import { captureControlAppScreenshot, captureControlScreenScreenshot } from "./capture.js";
 import { executeApprovedAction } from "./executor.js";
+import { forceHideComputerUseActivity } from "./activity-indicator.js";
+import { assertComputerUseNotRecentlyCancelled } from "./cancel.js";
 import * as desktopInput from "./input-backend.js";
 import {
   approveAction,
@@ -114,6 +116,7 @@ export interface ComputerScreenshotInput {
 export async function handleComputerScreenshot(ctx: ToolContext, input: ComputerScreenshotInput): Promise<CallToolResultLike> {
   return withControlErrorMapping(ctx, "computer_screenshot", input, async () => {
     const { projectId, root } = await requireControlLease(ctx);
+    assertComputerUseNotRecentlyCancelled();
     // A full-screen capture shows whatever is visible, so the sensitive-app
     // gate checks the live frontmost app where the platform can report it.
     // Windows ChatGPT-exposed mode still refuses full-screen capture entirely
@@ -250,6 +253,7 @@ export async function handleComputerRequestAction(ctx: ToolContext, input: Compu
   const redactedInput = { ...input, text: input.text ? "[redacted]" : undefined };
   return withControlErrorMapping(ctx, "computer_request_action", redactedInput, async () => {
     const { projectId } = await requireControlLease(ctx);
+    assertComputerUseNotRecentlyCancelled();
 
     if (await isKilled(ctx.stateDir)) {
       throw new DomainError(ErrorCode.CONTROL_KILLED, "Control session is killed; grant a new control lease to resume");
@@ -382,6 +386,7 @@ export async function handleComputerKillSwitch(ctx: ToolContext, input: Computer
   return withControlErrorMapping(ctx, "computer_kill_switch", input, async () => {
     const { projectId } = await requireControlLease(ctx);
     await setKill(ctx.stateDir);
+    await forceHideComputerUseActivity();
     await ctx.ledger.append({ type: "control.kill", projectId, reason: input.reason });
     return {
       structuredContent: { killed: true },

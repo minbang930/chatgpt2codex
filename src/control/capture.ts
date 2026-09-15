@@ -1,9 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { DomainError, ErrorCode } from "../types.js";
 import { captureE2eAppScreenshot, captureE2eScreenshot, type E2eScreenshotResult } from "../e2e/local-e2e.js";
 import { withComputerUseActivity, withComputerUseIndicatorSuppressed } from "./activity-indicator.js";
+import { computerUseCancelGeneration, waitForComputerUseDelay } from "./cancel.js";
 import * as winNative from "./win-native.js";
 
 export interface ControlScreenshotResult extends E2eScreenshotResult {
@@ -37,8 +37,9 @@ export async function captureControlAppScreenshot(
   }
 
   return withComputerUseActivity(async () => {
+    const cancelGeneration = computerUseCancelGeneration();
     if (input.waitMs && input.waitMs > 0) {
-      await delay(Math.min(input.waitMs, 30_000));
+      await waitForComputerUseDelay(Math.min(input.waitMs, 30_000), cancelGeneration);
     }
     const dir = await screenshotDir(projectRoot);
     const file = path.join(dir, `${Date.now()}-${slug(input.label ?? input.appName)}.png`);

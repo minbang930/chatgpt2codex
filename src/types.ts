@@ -149,6 +149,7 @@ export enum ErrorCode {
   CONFIRMATION_PENDING = "CONFIRMATION_PENDING",
   SENSITIVE_TARGET_BLOCKED = "SENSITIVE_TARGET_BLOCKED",
   CONTROL_KILLED = "CONTROL_KILLED",
+  CONTROL_CANCELLED = "CONTROL_CANCELLED",
 }
 
 /** Thrown by any domain-level failure. Tool boundary must catch and map. */

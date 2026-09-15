@@ -1,6 +1,15 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  __resetComputerUseCancelForTests,
+  assertComputerUseNotRecentlyCancelled,
+  computerUseCancelGeneration,
+  signalComputerUseCancel,
+  waitForComputerUseDelay,
+  wasComputerUseCancelledSince,
+} from "./cancel.js";
+import { ErrorCode } from "../types.js";
+import {
   __getComputerUseActivityStateForTests,
   __setComputerUseActivityDriverForTests,
   beginComputerUseActivity,
@@ -13,6 +22,7 @@ import {
 describe("control/activity-indicator lifecycle", () => {
   afterEach(async () => {
     __setComputerUseActivityDriverForTests(undefined);
+    __resetComputerUseCancelForTests();
     await stopWindowsActivityIndicatorHelper();
   });
 
@@ -81,6 +91,29 @@ describe("control/activity-indicator lifecycle", () => {
     await delay(20);
     expect(calls).toEqual(["show", "hide"]);
   });
+
+  it("records local Esc cancellation and rejects immediate follow-up control", () => {
+    __resetComputerUseCancelForTests({ latchMs: 5_000 });
+    const before = computerUseCancelGeneration();
+    signalComputerUseCancel("escape");
+    expect(wasComputerUseCancelledSince(before)).toBe(true);
+    try {
+      assertComputerUseNotRecentlyCancelled();
+      throw new Error("expected cancellation");
+    } catch (error) {
+      expect((error as { code?: string }).code).toBe(ErrorCode.CONTROL_CANCELLED);
+    }
+  });
+
+  it("interrupts screenshot-style waits immediately on local Esc", async () => {
+    const before = computerUseCancelGeneration();
+    const started = Date.now();
+    const pending = waitForComputerUseDelay(5_000, before);
+    setTimeout(() => signalComputerUseCancel("escape"), 20);
+    await expect(pending).rejects.toMatchObject({ code: ErrorCode.CONTROL_CANCELLED });
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
 });
 
 if (process.platform === "win32") {
