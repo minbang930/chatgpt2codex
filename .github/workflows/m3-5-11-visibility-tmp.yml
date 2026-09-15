@@ -1,0 +1,56 @@
+name: M3.5.11 activity visibility temporary
+
+on:
+  push:
+    branches: [dev/custom-runtime]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/custom-runtime
+          fetch-depth: 0
+      - name: Tune activity visibility
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('src/control/activity-indicator.ts')
+          s = p.read_text(encoding='utf-8')
+
+          replacements = {
+              'const DEFAULT_IDLE_HIDE_MS = 1_200;': 'const DEFAULT_IDLE_HIDE_MS = 2_200;',
+              'double multiplier = 0.84 + (0.24 * bounded);': 'double multiplier = 0.82 + (0.36 * bounded);',
+              'const double RippleDurationSeconds = 0.62;': 'const double RippleDurationSeconds = 1.25;',
+              'int travel = Scale(25);': 'int travel = Scale(32);',
+              'int radius = Scale(18);': 'int radius = Scale(22);',
+              'int bounded = Math.Max(120, Math.Min(1500, durationMs));': 'int bounded = Math.Max(180, Math.Min(2800, durationMs));',
+              'int[] thicknesses = new int[] { 36, 18, 3 };': 'int[] thicknesses = new int[] { 42, 22, 4 };',
+              'double[] opacities = new double[] { 0.035, 0.060, 0.075 };': 'double[] opacities = new double[] { 0.055, 0.085, 0.105 };',
+              'new Pen(Color.FromArgb(210, 70, 175, 255), Math.Max(1, Scale(3)))': 'new Pen(Color.FromArgb(235, 70, 175, 255), Math.Max(1, Scale(3)))',
+              'new Pen(Color.FromArgb(150, 205, 235, 255), Math.Max(1, Scale(1)))': 'new Pen(Color.FromArgb(185, 205, 235, 255), Math.Max(1, Scale(1)))',
+              'Math.Max(1, Scale(2)))) {\n                e.Graphics.DrawEllipse(pen, RippleRect(progress));': 'Math.Max(1, Scale(3)))) {\n                e.Graphics.DrawEllipse(pen, RippleRect(progress));',
+              'export async function showComputerUseAutomationPointer(durationMs = 650): Promise<void> {': 'export async function showComputerUseAutomationPointer(durationMs = 1_800): Promise<void> {',
+              'const bounded = Math.max(120, Math.min(1500, Math.round(durationMs)));': 'const bounded = Math.max(180, Math.min(2800, Math.round(durationMs)));',
+          }
+
+          for old, new in replacements.items():
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one match for {old!r}, found {count}')
+              s = s.replace(old, new, 1)
+
+          p.write_text(s, encoding='utf-8')
+      - name: Commit M3.5.11
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/control/activity-indicator.ts
+          git commit -m "fix: improve Computer Use activity visibility"
+          git push origin HEAD:dev/custom-runtime
