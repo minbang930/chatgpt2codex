@@ -25,6 +25,7 @@ function plugin(enabled: boolean): PluginDefinition {
     name: "Docs MCP",
     enabled,
     transport: { kind: "streamable-http", url: "https://example.org/mcp", headers: [] },
+    skillSources: [],
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
   };
