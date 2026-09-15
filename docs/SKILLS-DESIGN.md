@@ -72,7 +72,7 @@ Activation state is runtime-owned and separate from skill packages:
 
 It stores a global selected-name list plus project-id-specific selected-name lists. Selection is by skill name; when instructions are loaded, the normal project-over-global registry precedence is applied again so a project override remains authoritative.
 
-M5 does not add bundled skills or plugin-provided skill roots yet.
+M5.1-M5.4 do not add bundled skills or plugin-provided skill roots yet.
 
 ## Skill package contract
 
@@ -106,19 +106,19 @@ The disclosure model is:
 
 ```text
 Tier 0: bounded registry metadata
-  name + description + installed scope + active state
+  name + description + installed scope + active state + trust metadata
 
 Tier 1: one full SKILL.md
-  returned by skill_view or explicit skill_activate
+  returned by skill_view or explicit skill_activate only after applicable trust checks
 
 Tier 2: activated launch context
   only explicitly selected skills, within deterministic count/character budgets
 
 Tier 3: support resource
-  references/assets/templates/scripts loaded explicitly by path
+  references/assets/templates loaded explicitly by path
 ```
 
-M5.1 implements the safe metadata/full-skill primitives. M5.2 exposes discovery and management. M5.3 adds explicit activation plus bounded browser-worker propagation. Support-resource reads remain deferred to M5.4.
+Executable `scripts/` are intentionally outside Tier 3. M5.1 implements the safe metadata/full-skill primitives. M5.2 exposes discovery and management. M5.3 adds explicit activation plus bounded browser-worker propagation. M5.4 adds bounded support-resource reads plus trust/security checks while keeping scripts non-executable.
 
 ## M5.1 safety boundaries
 
@@ -133,7 +133,7 @@ The foundation loader follows these rules:
 - once a directory owns a valid `SKILL.md`, discovery does not descend below that skill root; support files therefore cannot accidentally become independent skills.
 - discovery never executes scripts, package managers, hooks, or install commands.
 
-Executable skill content remains disabled by default until a later M5 security/approval unit explicitly defines it.
+Executable skill content remains disabled by default unless a later reviewed execution contract explicitly adds it.
 
 ## M5.2 management contract
 
@@ -147,7 +147,7 @@ skill_update
 skill_remove
 ```
 
-`skill_list` returns discovery metadata and never returns the full instruction body. `skill_view` resolves project-over-global precedence and returns the selected `SKILL.md` only when the agent asks for it.
+`skill_list` returns discovery metadata and never returns the full instruction body. `skill_view` resolves project-over-global precedence and returns the selected `SKILL.md` only when the agent asks for it and applicable trust checks permit instruction disclosure.
 
 ### Managed install sources
 
@@ -174,10 +174,11 @@ source
  -> copy a validated snapshot
  -> write provenance
  -> validate managed copy
+ -> for external Git sources: static trust/security gate
  -> atomically place it under project/global skills
 ```
 
-The copied package is bounded to 2048 regular files and 32 MiB. Symlinks and unsupported filesystem entries are rejected, VCS metadata is not copied, and no file in `scripts/` or elsewhere is executed during discovery, install, update, list, view, or activation.
+The copied package is bounded to 2048 regular files and 32 MiB. Symlinks and unsupported filesystem entries are rejected, VCS metadata is not copied, and no file in `scripts/` or elsewhere is executed during discovery, install, update, list, view, activation, or resource reads.
 
 ### Provenance
 
@@ -241,13 +242,13 @@ activated context:
   max 24,000 characters across activated skill bodies
 ```
 
-If a skill exceeds the per-skill activation budget, `skill_activate` rejects activation and the agent can still inspect it explicitly with `skill_view`. Stale or unavailable activation entries are skipped when constructing browser-worker context rather than preventing an otherwise healthy worker from launching.
+If a skill exceeds the per-skill activation budget, `skill_activate` rejects activation and the agent can still inspect it explicitly with `skill_view` when the trust gate permits it. Stale or unavailable activation entries are skipped when constructing browser-worker context rather than preventing an otherwise healthy worker from launching.
 
 ### Main-agent behavior
 
-`skill_list` reports bounded metadata, whether each visible skill is active, its activation scopes, the effective active-name list, and whether catalog truncation occurred. This keeps discovery cheap.
+`skill_list` reports bounded metadata, trust/source metadata, whether each visible skill is active, its activation scopes, the effective active-name list, and whether catalog truncation occurred. This keeps discovery cheap.
 
-`skill_activate` is the explicit transition from discovery to instruction use. It validates the selected effective skill, persists the activation, and returns that one bounded `SKILL.md` body to the main agent so it can follow the instructions immediately. `skill_deactivate` removes only the requested runtime selection and never uninstalls the package.
+`skill_activate` is the explicit transition from discovery to instruction use. It validates the selected effective skill, applies the external-skill trust/security gate when applicable, persists the activation only after that gate succeeds, and returns that one bounded `SKILL.md` body to the main agent. `skill_deactivate` removes only the requested runtime selection and never uninstalls the package.
 
 ### Browser-worker propagation
 
@@ -262,7 +263,7 @@ durable worker.task
 
 The original durable `worker.task` is never rewritten with skill content. Recovery re-reads the current activation state rather than persisting a skill-expanded task in durable worker state.
 
-Skill-context loading is best-effort at the worker boundary: corrupt/stale optional extension state does not fabricate worker failure or change durable worker state.
+Skill-context loading is best-effort at the worker boundary: corrupt/stale optional extension state does not fabricate worker failure or change durable worker state. External Git skills are checked again before their body is injected into worker launch context; a failed check skips that optional skill instead of granting access.
 
 ### Capability boundary
 
@@ -277,6 +278,59 @@ Activation does not:
 - execute `scripts/` or dependency installation commands from the skill package.
 
 Any future executable skill or plugin access requires a separate reviewed authorization boundary.
+
+## M5.4 resource and security contract
+
+M5.4 adds two explicit read-only tools:
+
+```text
+skill_resource_read
+skill_security_status
+```
+
+### Resource reads
+
+`skill_resource_read` accepts only paths rooted under:
+
+```text
+references/
+templates/
+assets/
+```
+
+The request path must be relative, traversal-free, and resolve canonically inside the selected installed skill. Symlink escapes are rejected. `scripts/` is not in the allowlist.
+
+Reads are bounded. Text resources are returned as text; bounded binary resources may be returned as base64 with explicit encoding metadata. Resource loading never launches an executable, package manager, shell, hook, or dependency installer.
+
+For external Git skills, text resources pass through the same conservative static safety gate before their contents are returned for agent use.
+
+### Trust model
+
+The runtime classifies the effective installed package as:
+
+```text
+unmanaged
+managed-local
+external-git
+```
+
+Trust metadata is descriptive, not a capability. A managed local package is not automatically privileged beyond its existing project/global scope, and an external Git package does not gain tool access merely because its provenance is known.
+
+`skill_security_status` reports provenance/trust plus bounded static-scan metadata without returning the full `SKILL.md` body.
+
+### Static safety gate
+
+The M5.4 scanner is intentionally conservative and limited to obvious patterns. Blocking categories include:
+
+- attempts to override higher-priority/system/developer/safety instructions;
+- persistence or agent/runtime configuration modification instructions;
+- broad destructive filesystem commands;
+- instructions to execute packaged `scripts/` content;
+- explicit data-exfiltration instructions.
+
+Destructive Git reset/clean patterns are surfaced as warnings rather than silently treated as safe.
+
+The scanner is not a general malware detector and is not treated as proof of safety. For external Git skills, an incomplete or blocking scan fails closed for install/update/activation/instruction disclosure paths that rely on the scanned content. Scanner failure never grants capability and never causes a script to execute.
 
 ## M5 units
 
@@ -297,7 +351,7 @@ Any future executable skill or plugin access requires a separate reviewed author
 - project/global target scope.
 - managed-only update/removal and bounded snapshot export.
 
-### M5.3 - Skill activation — implemented
+### M5.3 - Skill activation — complete
 
 - bounded `skill_list` catalog with active-state metadata.
 - explicit `skill_activate` / `skill_deactivate` selection.
@@ -307,13 +361,14 @@ Any future executable skill or plugin access requires a separate reviewed author
 - original durable worker task remains unchanged.
 - worker capabilities and tool authorization remain unchanged.
 
-### M5.4 - Skill resources and security
+### M5.4 - Skill resources and security — complete
 
-- bounded reads from `references/`, `templates/`, and `assets/`.
-- executable `scripts/` remain disabled unless a reviewed execution contract is added.
-- external-source trust/provenance reporting.
-- static checks for obvious secret-exfiltration, prompt-injection/persistence, destructive, and agent-config modification patterns before install/activation.
-- explicit approval for any future executable install/resource path.
+- bounded non-executable reads from `references/`, `templates/`, and `assets/`.
+- executable `scripts/` remain disabled.
+- explicit trust/provenance reporting for unmanaged, managed-local, and external-Git skills.
+- conservative static checks before external-Git install/update/activation and instruction/resource disclosure.
+- fail-closed blocking semantics for unsafe/incomplete external-skill validation.
+- trust/security metadata exposed without turning trust into a capability grant.
 
 ### M5.5 - External MCP plugins
 
@@ -324,9 +379,9 @@ Any future executable skill or plugin access requires a separate reviewed author
 
 Workers do not automatically inherit external plugin tools. Any future worker plugin access must use an explicit allowlist/capability boundary just like the existing worker-scoped Core tools.
 
-## Non-goals through M5.3
+## Non-goals through M5.4
 
-M5.1-M5.3 do not:
+M5.1-M5.4 do not:
 
 - execute skill scripts or install commands.
 - install npm/pip/brew/etc dependencies declared by third-party content.
@@ -335,3 +390,4 @@ M5.1-M5.3 do not:
 - automatically grant external MCP tools to workers.
 - implement a public marketplace or registry.
 - treat a mutable Git checkout as an installed skill.
+- treat static scanning as proof that third-party content is trustworthy.
