@@ -1,4 +1,5 @@
 import { DomainError, ErrorCode } from "../types.js";
+import { loadActivatedSkillContext } from "../skills/activation.js";
 import { issueWorkerCapability, revokeWorkerCapability } from "./capability.js";
 import {
   BrowserWorkerController,
@@ -13,6 +14,28 @@ export interface BrowserWorkerLaunchOutcome {
   worker: WorkerRecord;
   browser: BrowserWorkerSession;
   capabilityExpiresAt: number;
+}
+
+async function workerSkillContext(stateDir: string, worker: WorkerRecord): Promise<string | undefined> {
+  try {
+    const activated = await loadActivatedSkillContext({
+      stateDir,
+      projectId: worker.projectId,
+    });
+    const warnings = activated.skipped.length > 0
+      ? [
+        "Activated Agent Skill notes:",
+        ...activated.skipped.map((item) => `- ${item.name}: ${item.reason}`),
+      ].join("\n")
+      : "";
+    const combined = [activated.text, warnings].filter(Boolean).join("\n\n").trim();
+    return combined || undefined;
+  } catch {
+    // Skills are an instruction-layer extension. Corrupt/missing optional skill
+    // activation state must not prevent an otherwise healthy durable worker
+    // from launching with its original task and existing capability boundary.
+    return undefined;
+  }
 }
 
 async function launchWorkerBrowser(
@@ -30,6 +53,7 @@ async function launchWorkerBrowser(
       projectId: worker.projectId,
       task: applyPonytailToWorkerTask(worker.task),
       workerToken: capability.token,
+      skillContext: await workerSkillContext(stateDir, worker),
     });
     return { browser, capabilityExpiresAt: capability.expiresAt };
   } catch (error) {
