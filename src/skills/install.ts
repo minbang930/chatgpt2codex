@@ -144,19 +144,19 @@ async function acquireLocalSource(source: string, workspaceRoot: string): Promis
 }> {
   const workspaceReal = await realpath(workspaceRoot);
   const requested = path.isAbsolute(source) ? source : path.resolve(workspaceRoot, source);
+  const requestedInfo = await lstat(requested);
+  if (!requestedInfo.isDirectory() || requestedInfo.isSymbolicLink()) {
+    throw new Error("local skill source must be a real directory, not a symlink");
+  }
   const sourceReal = await realpath(requested);
   if (!isInsideRoot(workspaceReal, sourceReal)) {
     throw new Error("local skill source must remain inside the configured workspace root");
-  }
-  const info = await lstat(sourceReal);
-  if (!info.isDirectory() || info.isSymbolicLink()) {
-    throw new Error("local skill source must be a real directory, not a symlink");
   }
   return { rootDir: sourceReal, source: sourceReal, cleanup: async () => undefined };
 }
 
 async function selectSkill(rootDir: string, requestedName?: string): Promise<SkillMetadata> {
-  const discovered = await discoverSkillRoot({ rootDir, scope: "global" });
+  const discovered = await discoverSkillRoot({ rootDir, scope: "global", includeRoot: true });
   if (requestedName) {
     const selected = discovered.skills.find((skill) => skill.name === requestedName);
     if (!selected) {
@@ -272,7 +272,8 @@ async function replaceManagedDirectory(rootReal: string, skillName: string, prep
 
 async function installFromSource(params: SkillInstallRequest & { replace: boolean; installedAt?: string }): Promise<SkillInstallResult> {
   const rootReal = await ensureManagedRoot(targetRoot(params));
-  const acquired = isGitSource(params.source)
+  const gitSource = isGitSource(params.source);
+  const acquired = gitSource
     ? await acquireGitSource(params.source, params.ref)
     : await acquireLocalSource(params.source, params.workspaceRoot);
 
@@ -282,11 +283,11 @@ async function installFromSource(params: SkillInstallRequest & { replace: boolea
     const now = new Date().toISOString();
     const provenance: SkillSourceProvenance = {
       version: 1,
-      sourceKind: isGitSource(params.source) ? "git" : "local",
+      sourceKind: gitSource ? "git" : "local",
       source: acquired.source,
       skillName: selected.name,
       ...(params.ref ? { requestedRef: params.ref } : {}),
-      ...(isGitSource(params.source) ? { resolvedCommit: (acquired as { resolvedCommit?: string }).resolvedCommit } : {}),
+      ...(gitSource ? { resolvedCommit: (acquired as { resolvedCommit: string }).resolvedCommit } : {}),
       installedAt: params.installedAt ?? now,
       ...(params.replace ? { updatedAt: now } : {}),
     };
