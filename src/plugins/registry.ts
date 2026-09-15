@@ -10,15 +10,25 @@ const REGISTRY_FILE = "plugins.json";
 const MAX_CONFIG_BYTES = 256 * 1024;
 export const MAX_PLUGINS = 16;
 export const MAX_PLUGIN_HEADERS = 8;
+export const MAX_PLUGIN_SKILL_SOURCES = 8;
 
 const pluginIdSchema = z.string().trim().min(1).max(80).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 const pluginNameSchema = z.string().trim().min(1).max(120);
 const envNameSchema = z.string().trim().min(1).max(128).regex(/^[A-Za-z_][A-Za-z0-9_]*$/);
 const headerNameSchema = z.string().trim().min(1).max(128).regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/);
+const skillNameSchema = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
+const gitRefSchema = z.string().trim().min(1).max(200).refine((value) => !value.startsWith("-"), "ref must not start with '-'");
 
 const headerSchema = z.object({
   name: headerNameSchema,
   valueEnv: envNameSchema,
+}).strict();
+
+const skillSourceSchema = z.object({
+  id: pluginIdSchema,
+  source: z.string().trim().min(1).max(2048),
+  ref: gitRefSchema.optional(),
+  skillName: skillNameSchema.optional(),
 }).strict();
 
 const transportSchema = z.object({
@@ -32,6 +42,7 @@ const pluginSchema = z.object({
   name: pluginNameSchema,
   enabled: z.boolean(),
   transport: transportSchema,
+  skillSources: z.array(skillSourceSchema).max(MAX_PLUGIN_SKILL_SOURCES).optional().default([]),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 }).strict();
@@ -42,6 +53,7 @@ const registrySchema = z.object({
 }).strict();
 
 export type PluginHeaderConfig = z.infer<typeof headerSchema>;
+export type PluginSkillSource = z.infer<typeof skillSourceSchema>;
 export type PluginTransport = z.infer<typeof transportSchema>;
 export type PluginDefinition = z.infer<typeof pluginSchema>;
 export type PluginRegistry = z.infer<typeof registrySchema>;
@@ -55,6 +67,7 @@ export interface PluginPublicSummary {
     url: string;
     headers: Array<{ name: string; valueEnv: string; available: boolean }>;
   };
+  skillSources: PluginSkillSource[];
   createdAt: string;
   updatedAt: string;
 }
@@ -106,6 +119,19 @@ function validateUrl(raw: string): string {
   return parsed.toString();
 }
 
+function normalizeSkillSourceUrl(raw: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw configError("plugin skill source must be a valid HTTPS Git URL");
+  }
+  if (parsed.protocol !== "https:") throw configError("plugin skill source must use HTTPS");
+  if (parsed.username || parsed.password) throw configError("plugin skill source must not embed credentials");
+  if (parsed.search || parsed.hash) throw configError("plugin skill source must not contain a query string or fragment");
+  return parsed.toString().replace(/\/$/, "");
+}
+
 function normalizeHeaders(headers: PluginHeaderConfig[] | undefined): PluginHeaderConfig[] {
   const normalized = headers ?? [];
   const seen = new Set<string>();
@@ -118,6 +144,22 @@ function normalizeHeaders(headers: PluginHeaderConfig[] | undefined): PluginHead
     if (seen.has(lower)) throw configError(`duplicate plugin header '${name}'`);
     seen.add(lower);
     return { name, valueEnv: envNameSchema.parse(header.valueEnv) };
+  });
+}
+
+function normalizeSkillSources(sources: PluginSkillSource[] | undefined): PluginSkillSource[] {
+  const normalized = sources ?? [];
+  const seen = new Set<string>();
+  return normalized.map((source) => {
+    const id = pluginIdSchema.parse(source.id);
+    if (seen.has(id)) throw configError(`duplicate plugin skill source '${id}'`);
+    seen.add(id);
+    return {
+      id,
+      source: normalizeSkillSourceUrl(source.source),
+      ...(source.ref ? { ref: gitRefSchema.parse(source.ref) } : {}),
+      ...(source.skillName ? { skillName: skillNameSchema.parse(source.skillName) } : {}),
+    };
   });
 }
 
@@ -160,7 +202,11 @@ export async function readPluginRegistry(stateDir: string): Promise<PluginRegist
   if (!parsed.success) throw configError(parsed.error.issues.slice(0, 6).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; "));
   return {
     version: 1,
-    plugins: parsed.data.plugins.map((plugin) => ({ ...plugin, transport: normalizeTransport(plugin.transport) })),
+    plugins: parsed.data.plugins.map((plugin) => ({
+      ...plugin,
+      transport: normalizeTransport(plugin.transport),
+      skillSources: normalizeSkillSources(plugin.skillSources),
+    })),
   };
 }
 
@@ -170,6 +216,7 @@ export async function registerPlugin(params: {
   name: string;
   url: string;
   headers?: PluginHeaderConfig[];
+  skillSources?: PluginSkillSource[];
   enabled?: boolean;
 }): Promise<PluginDefinition> {
   const registry = await readPluginRegistry(params.stateDir);
@@ -186,6 +233,7 @@ export async function registerPlugin(params: {
     name: pluginNameSchema.parse(params.name),
     enabled: params.enabled ?? false,
     transport: normalizeTransport({ kind: "streamable-http", url: params.url, headers: params.headers ?? [] }),
+    skillSources: normalizeSkillSources(params.skillSources),
     createdAt: now,
     updatedAt: now,
   };
@@ -233,6 +281,7 @@ export function summarizePlugin(plugin: PluginDefinition, env: NodeJS.ProcessEnv
         available: typeof env[header.valueEnv] === "string" && env[header.valueEnv]!.length > 0,
       })),
     },
+    skillSources: plugin.skillSources.map((source) => ({ ...source })),
     createdAt: plugin.createdAt,
     updatedAt: plugin.updatedAt,
   };
