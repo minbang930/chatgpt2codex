@@ -17,12 +17,14 @@ jobs:
           ref: dev/custom-runtime
           fetch-depth: 0
       - name: Apply M3.5.4 patch
-        run: python scripts/m3_esc_cancel_patch.py
+        run: |
+          python scripts/m3_esc_cancel_patch.py
+          python scripts/m3_esc_cancel_finalize.py
       - name: Commit M3.5.4
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/workflows/m3-esc-cancel-tmp.yml scripts/m3_esc_cancel_patch.py
-          git add src/types.ts src/control/cancel.ts src/control/activity-indicator.ts src/control/capture.ts src/control/tools.ts src/control/executor.ts src/control/cancel.test.ts .github/workflows/ci.yml
+          git rm .github/workflows/m3-esc-cancel-tmp.yml scripts/m3_esc_cancel_patch.py scripts/m3_esc_cancel_finalize.py
+          git add src/types.ts src/control/cancel.ts src/control/activity-indicator.ts src/control/activity-indicator.test.ts src/control/capture.ts src/control/tools.ts src/control/executor.ts
           git commit -m "feat: add local Esc cancellation for Windows Computer Use"
           git push origin HEAD:dev/custom-runtime
