@@ -10,6 +10,17 @@ import { addToolCallProof } from "./tool-proof.js";
 
 const skillNameSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 const resourcePathSchema = z.string().min(1).max(1024);
+const securitySchemes = [{ type: "oauth2", scopes: ["chatgpt2codex"] }] as const;
+
+function meta(invoking: string, invoked: string) {
+  return {
+    securitySchemes,
+    ui: { visibility: ["model"] },
+    "openai/visibility": "public",
+    "openai/toolInvocation/invoking": invoking,
+    "openai/toolInvocation/invoked": invoked,
+  };
+}
 
 function result(tool: string, value: ReturnType<typeof makeResult>) {
   return { ...value, structuredContent: addToolCallProof(value.structuredContent, tool, value.isError !== true) };
@@ -28,6 +39,7 @@ export function registerSkillSecurityTools(server: McpServer, ctx: ToolContext):
       title: "Inspect Agent Skill Trust",
       description: "Return provenance, trust level, and bounded static scan metadata for one installed Agent Skill without returning its instruction body.",
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      _meta: meta("Inspecting Agent Skill trust...", "Agent Skill trust inspected"),
       inputSchema: { name: skillNameSchema },
     },
     async (input) => {
@@ -54,6 +66,7 @@ export function registerSkillSecurityTools(server: McpServer, ctx: ToolContext):
       title: "Read Agent Skill Resource",
       description: "Read one bounded non-executable file from references, templates, or assets in an installed Agent Skill.",
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      _meta: meta("Reading Agent Skill resource...", "Agent Skill resource loaded"),
       inputSchema: { name: skillNameSchema, path: resourcePathSchema },
     },
     async (input) => {
