@@ -58,6 +58,7 @@ export interface BrowserWorkerLaunchInput {
   projectId: string;
   task: string;
   workerToken: string;
+  skillContext?: string;
   route: BrowserWorkerRoute;
 }
 
