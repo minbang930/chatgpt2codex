@@ -5,6 +5,7 @@ import { installAgentNotificationPiggyback } from "../agents/piggyback.js";
 import { emitSessionStartHook } from "../hooks/session-start.js";
 import { installToolLifecycleHooks } from "../hooks/tool-lifecycle.js";
 import { registerAgentTools } from "./agent-tools.js";
+import { registerSkillTools } from "./skill-tools.js";
 import { registerTools } from "./tools.js";
 import { registerWebAgentTools } from "./web-agent-tools.js";
 import { registerWorkerTools } from "./worker-tools.js";
@@ -26,10 +27,11 @@ export async function createServer(ctx: ToolContext): Promise<McpServer> {
   installWorkerCompletionBrowserCleanup(server, ctx.stateDir);
   registerWebAgentTools(server, ctx);
   registerWorkerTools(server, ctx);
+  registerSkillTools(server, ctx);
 
   // Install lifecycle hooks only after every tool surface has registered so a
-  // single wrapper covers Core, agent, Web-agent, and worker tools without
-  // duplicating hook calls inside individual handlers.
+  // single wrapper covers Core, agent, Web-agent, worker, and extension tools
+  // without duplicating hook calls inside individual handlers.
   installToolLifecycleHooks(server, ctx);
 
   // SessionStart is intentionally best-effort inside the hook layer: malformed
