@@ -55,6 +55,13 @@ export interface SkillInstallResult {
   targetDir: string;
 }
 
+type AcquiredSkillSource = {
+  rootDir: string;
+  source: string;
+  cleanup: () => Promise<void>;
+  resolvedCommit?: string;
+};
+
 function targetRoot(params: Pick<SkillInstallRequest, "stateDir" | "projectRoot" | "scope">): string {
   if (params.scope === "project") {
     if (!params.projectRoot) throw new Error("project-scoped skill install requires an active project");
@@ -109,12 +116,7 @@ async function runGit(cwd: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-async function acquireGitSource(source: string, ref?: string): Promise<{
-  rootDir: string;
-  source: string;
-  resolvedCommit: string;
-  cleanup: () => Promise<void>;
-}> {
+async function acquireGitSource(source: string, ref?: string): Promise<AcquiredSkillSource> {
   const url = normalizeGitUrl(source);
   const temp = await mkdtemp(path.join(tmpdir(), "chatgpt2codex-skill-git-"));
   const repoDir = path.join(temp, "repo");
@@ -137,11 +139,7 @@ async function acquireGitSource(source: string, ref?: string): Promise<{
   }
 }
 
-async function acquireLocalSource(source: string, workspaceRoot: string): Promise<{
-  rootDir: string;
-  source: string;
-  cleanup: () => Promise<void>;
-}> {
+async function acquireLocalSource(source: string, workspaceRoot: string): Promise<AcquiredSkillSource> {
   const workspaceReal = await realpath(workspaceRoot);
   const requested = path.isAbsolute(source) ? source : path.resolve(workspaceRoot, source);
   const requestedInfo = await lstat(requested);
@@ -273,7 +271,7 @@ async function replaceManagedDirectory(rootReal: string, skillName: string, prep
 async function installFromSource(params: SkillInstallRequest & { replace: boolean; installedAt?: string }): Promise<SkillInstallResult> {
   const rootReal = await ensureManagedRoot(targetRoot(params));
   const gitSource = isGitSource(params.source);
-  const acquired = gitSource
+  const acquired: AcquiredSkillSource = gitSource
     ? await acquireGitSource(params.source, params.ref)
     : await acquireLocalSource(params.source, params.workspaceRoot);
 
@@ -287,7 +285,7 @@ async function installFromSource(params: SkillInstallRequest & { replace: boolea
       source: acquired.source,
       skillName: selected.name,
       ...(params.ref ? { requestedRef: params.ref } : {}),
-      ...(gitSource ? { resolvedCommit: (acquired as { resolvedCommit: string }).resolvedCommit } : {}),
+      ...(gitSource && acquired.resolvedCommit ? { resolvedCommit: acquired.resolvedCommit } : {}),
       installedAt: params.installedAt ?? now,
       ...(params.replace ? { updatedAt: now } : {}),
     };
