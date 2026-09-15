@@ -17,6 +17,7 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { loadSkillDirectory } from "./loader.js";
 import { discoverSkillRoot, globalSkillsDir, projectSkillsDir } from "./registry.js";
+import { assertExternalSkillSecurity, describeSkillTrust, scanSkillPackageDirectory } from "./security.js";
 import type { LoadedSkill, SkillMetadata, SkillScope } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -292,6 +293,12 @@ async function installFromSource(params: SkillInstallRequest & { replace: boolea
 
     try {
       await copySkillTree(selected.baseDir, preparedDir);
+      const securityScan = await scanSkillPackageDirectory(preparedDir);
+      assertExternalSkillSecurity(
+        describeSkillTrust(provenance),
+        securityScan,
+        params.replace ? "skill update" : "skill install",
+      );
       await writeProvenance(preparedDir, provenance);
       const validation = await loadSkillDirectory({ rootDir: rootReal, skillDir: preparedDir, scope: params.scope });
       if (!validation.skill) {
