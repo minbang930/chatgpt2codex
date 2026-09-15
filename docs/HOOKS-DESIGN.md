@@ -6,7 +6,7 @@ This document defines the M4 lifecycle-hook contract for the `dev/custom-runtime
 
 Add a small local lifecycle hook engine without coupling Core correctness to hook availability or success.
 
-Hooks are an optional extension point for local automation and later Ponytail-style behavior. They are not an authorization layer and must not weaken the existing project, lease, command, worker, or Computer Use safety boundaries.
+Hooks are an optional extension point for local automation. They are not an authorization layer and must not weaken the existing project, lease, command, worker, or Computer Use safety boundaries. Ponytail-style coding guidance is deliberately kept at the worker instruction layer rather than making the generic hook engine a policy engine.
 
 ## M4 delivery order
 
@@ -21,9 +21,9 @@ M4 is intentionally split into small units:
 2. **M4.2 - `SessionStart` integration**
 3. **M4.3 - `PreToolUse` / `PostToolUse` integration**
 4. **M4.4 - `SubagentStart` / `SubagentStop` integration**
-5. **M4.5 - Ponytail-style integration after the lifecycle semantics are stable**
+5. **M4.5 - Ponytail-style worker instruction integration**
 
-M4.1 defines all event names up front, but it does **not** yet emit them from the runtime. Wiring begins in M4.2.
+M4.1 defines all event names up front. M4.2-M4.4 wire them into the runtime. M4.5 consumes the stable worker launch path without changing hook authorization or failure semantics.
 
 ## Supported lifecycle events
 
@@ -124,7 +124,7 @@ A hook cannot provide an arbitrary `cwd` path through configuration.
 
 ## Ordering and failure semantics
 
-Hooks for one event execute sequentially in configuration order in M4.1. This keeps event behavior deterministic and avoids command-hook races while the contract is still new.
+Hooks for one event execute sequentially in configuration order. This keeps event behavior deterministic and avoids command-hook races.
 
 Failures are isolated:
 
@@ -135,7 +135,7 @@ Failures are isolated:
 - a failed hook does not prevent later hooks for the same event from running
 - hook stdout/stderr is bounded before being retained in the dispatch report
 
-The default M4 contract is **observational/best-effort**. A hook result does not grant permission and does not veto a Core operation. If a future pre-tool policy hook needs explicit allow/deny semantics, that must be introduced as a separate reviewed contract rather than inferred from process exit codes.
+The M4 contract is **observational/best-effort**. A hook result does not grant permission and does not veto a Core operation. If a future pre-tool policy hook needs explicit allow/deny semantics, that must be introduced as a separate reviewed contract rather than inferred from process exit codes.
 
 ## Security boundaries
 
@@ -150,13 +150,13 @@ The hook engine must preserve these invariants:
 
 ## Future hook drivers
 
-MCP/local-handler hook kinds may be useful later, but they are intentionally deferred. Maintaining a single direct-command driver first keeps M4.1 small enough to verify thoroughly.
+MCP/local-handler hook kinds may be useful later, but they are intentionally deferred. Maintaining a single direct-command driver keeps the hook surface small and auditable.
 
-## Integration plan
+## Runtime integration
 
 ### M4.2 - SessionStart
 
-Create one engine per runtime context and emit `SessionStart` after the session/runtime context is ready. The hook remains best-effort; startup must continue when the hook config or hook process fails.
+Create one engine per runtime context and emit `SessionStart` after the session/runtime context is ready. The hook remains best-effort; startup continues when the hook config or hook process fails.
 
 ### M4.3 - Tool lifecycle
 
@@ -170,12 +170,30 @@ request
  -> response
 ```
 
-Payloads should use bounded metadata such as tool name, project identity, success/error state, and duration. Raw secrets and unrestricted tool arguments should not be copied into hook payloads by default.
+Payloads use bounded metadata such as tool name, project identity, success/error state, and duration. Raw secrets and unrestricted tool arguments/results are not copied into hook payloads by default.
 
 ### M4.4 - Subagent lifecycle
 
-Emit `SubagentStart` only when a durable browser worker actually transitions into its accepted/running lifecycle, and `SubagentStop` once when it reaches or is forced into a terminal/retired state. Hook emission must not become the durable source of truth for worker state.
+Emit `SubagentStart` only after a durable browser worker actually transitions into its accepted/running lifecycle, and `SubagentStop` once when the durable worker reaches a terminal state. Hook emission never becomes the durable source of truth for worker state, and duplicate state transitions do not create duplicate lifecycle events.
 
-### M4.5 - Ponytail-style behavior
+### M4.5 - Ponytail-style worker instructions
 
-Ponytail-specific policy or convenience behavior is added only after the generic event timing, payloads, timeout behavior, and failure isolation have been verified independently.
+Ponytail is implemented as a small instruction adapter on the existing browser-worker launch path, not as a hook driver and not as hook stdout interpreted as model instructions.
+
+The default worker mode is `FULL`. A task may override it on its first non-empty line with either plain or slash-prefixed text:
+
+```text
+ponytail lite
+ponytail full
+ponytail ultra
+ponytail off
+
+/ponytail lite
+/ponytail full
+/ponytail ultra
+/ponytail off
+```
+
+The directive is stripped before the task is sent to the ChatGPT Web worker. `OFF` sends only the normal task. Active modes prepend bounded coding guidance that favors reuse, standard/native facilities, direct solutions, minimal coherent changes, and focused verification while explicitly preserving validation, security, correctness, accessibility, meaningful edge cases, and user-requested behavior.
+
+Only the launch-time instruction is adapted. The durable worker record retains the original task unchanged, so Ponytail policy never becomes durable worker-state authority. Initial launch and browser recovery share the same adapter path, keeping behavior consistent without widening the hook engine or worker tool surface.
