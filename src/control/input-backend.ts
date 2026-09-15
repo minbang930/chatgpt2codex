@@ -1,6 +1,6 @@
 import { DomainError, ErrorCode } from "../types.js";
 import type { ResolvedTargetPreview } from "./queue.js";
-import { withComputerUseActivity } from "./activity-indicator.js";
+import { showComputerUseClickPulse, withComputerUseActivity } from "./activity-indicator.js";
 import * as macInput from "./mac-input.js";
 import * as winInput from "./win-native.js";
 import * as winUia from "./win-uia.js";
@@ -64,7 +64,10 @@ export async function resolveWindowPoint(appName: string, xRel: number, yRel: nu
 export async function clickAtPoint(appName: string, x: number, y: number): Promise<void> {
   if (process.platform === "darwin") return macInput.clickAtPoint(appName, x, y);
   if (process.platform === "win32") {
-    return withComputerUseActivity(() => winInput.clickAtPoint(appName, x, y));
+    return withComputerUseActivity(async () => {
+      await winInput.clickAtPoint(appName, x, y);
+      await showComputerUseClickPulse(x, y);
+    });
   }
   return unsupported();
 }

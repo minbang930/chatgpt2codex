@@ -14,7 +14,9 @@ interface ActivityDriver {
 
 interface HelperRequest {
   id: number;
-  op: "show" | "hide" | "status" | "armCancel" | "disarmCancel" | "shutdown";
+  op: "show" | "hide" | "status" | "armCancel" | "disarmCancel" | "pulse" | "shutdown";
+  x?: number;
+  y?: number;
 }
 
 interface HelperResponse {
@@ -84,7 +86,13 @@ public sealed class ComputerUseOverlayForm : Form {
     const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
 
     readonly bool showBadge;
+    readonly System.Windows.Forms.Timer animationTimer;
     int dpi = 96;
+    bool rippleActive;
+    Point ripplePoint;
+    long rippleStartedAt;
+    const double ActivityPeriodSeconds = 1.6;
+    const double RippleDurationSeconds = 0.62;
 
     [DllImport("user32.dll")]
     static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
@@ -114,6 +122,13 @@ public sealed class ComputerUseOverlayForm : Form {
         TabStop = false;
         DoubleBuffered = true;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
+        animationTimer = new System.Windows.Forms.Timer();
+        animationTimer.Interval = 50;
+        animationTimer.Tick += delegate {
+            if (rippleActive && RippleProgress() >= 1.0) rippleActive = false;
+            UpdateWindowRegion();
+            Invalidate();
+        };
     }
 
     protected override bool ShowWithoutActivation { get { return true; } }
@@ -130,9 +145,19 @@ public sealed class ComputerUseOverlayForm : Form {
         return Math.Max(1, (int)Math.Round(logicalPixels * Math.Max(96, dpi) / 96.0));
     }
 
-    Rectangle[] BorderRects() {
+    double ActivityPulse() {
+        double seconds = (double)Stopwatch.GetTimestamp() / Stopwatch.Frequency;
+        return (Math.Sin((seconds / ActivityPeriodSeconds) * Math.PI * 2.0) + 1.0) / 2.0;
+    }
+
+    int CurrentBorderThickness() {
+        int min = Scale(4);
+        int delta = Scale(2);
+        return min + (int)Math.Round(ActivityPulse() * delta);
+    }
+
+    Rectangle[] BorderRects(int thickness) {
         int inset = Scale(2);
-        int thickness = Scale(4);
         int width = Math.Max(1, ClientSize.Width);
         int height = Math.Max(1, ClientSize.Height);
         int horizontalWidth = Math.Max(1, width - (2 * inset));
@@ -143,6 +168,46 @@ public sealed class ComputerUseOverlayForm : Form {
             new Rectangle(inset, inset, thickness, verticalHeight),
             new Rectangle(Math.Max(inset, width - inset - thickness), inset, thickness, verticalHeight),
         };
+    }
+
+    double RippleProgress() {
+        if (!rippleActive) return 1.0;
+        double elapsed = (double)(Stopwatch.GetTimestamp() - rippleStartedAt) / Stopwatch.Frequency;
+        return Math.Max(0.0, Math.Min(1.0, elapsed / RippleDurationSeconds));
+    }
+
+    Rectangle RippleRect(double progress) {
+        int startRadius = Scale(7);
+        int travel = Scale(25);
+        int radius = startRadius + (int)Math.Round(travel * progress);
+        return new Rectangle(ripplePoint.X - radius, ripplePoint.Y - radius, radius * 2, radius * 2);
+    }
+
+    Region RippleRingRegion() {
+        double progress = RippleProgress();
+        var outerRect = RippleRect(progress);
+        var outerPath = new GraphicsPath();
+        outerPath.AddEllipse(outerRect);
+        var ring = new Region(outerPath);
+        outerPath.Dispose();
+        int ringWidth = Scale(5);
+        var innerRect = Rectangle.Inflate(outerRect, -ringWidth, -ringWidth);
+        if (innerRect.Width > 1 && innerRect.Height > 1) {
+            using (var innerPath = new GraphicsPath()) {
+                innerPath.AddEllipse(innerRect);
+                ring.Exclude(innerPath);
+            }
+        }
+        return ring;
+    }
+
+    public void PulseAtScreen(int x, int y) {
+        if (!Bounds.Contains(x, y)) return;
+        ripplePoint = new Point(x - Bounds.Left, y - Bounds.Top);
+        rippleStartedAt = Stopwatch.GetTimestamp();
+        rippleActive = true;
+        UpdateWindowRegion();
+        Invalidate();
     }
 
     Rectangle BadgeRect() {
@@ -171,9 +236,12 @@ public sealed class ComputerUseOverlayForm : Form {
         if (ClientSize.Width <= 0 || ClientSize.Height <= 0) return;
         var next = new Region();
         next.MakeEmpty();
-        foreach (var rect in BorderRects()) next.Union(rect);
+        foreach (var rect in BorderRects(CurrentBorderThickness())) next.Union(rect);
         if (showBadge) {
             using (var badgePath = RoundedRect(BadgeRect(), Scale(7))) next.Union(badgePath);
+        }
+        if (rippleActive) {
+            using (var rippleRegion = RippleRingRegion()) next.Union(rippleRegion);
         }
         var previous = Region;
         Region = next;
@@ -190,26 +258,50 @@ public sealed class ComputerUseOverlayForm : Form {
         try { SetWindowDisplayAffinity(Handle, WDA_EXCLUDEFROMCAPTURE); } catch { }
     }
 
+    protected override void OnShown(EventArgs e) {
+        base.OnShown(e);
+        animationTimer.Start();
+    }
+
+    protected override void OnVisibleChanged(EventArgs e) {
+        base.OnVisibleChanged(e);
+        if (!Visible) animationTimer.Stop();
+    }
+
     protected override void OnSizeChanged(EventArgs e) {
         base.OnSizeChanged(e);
         if (IsHandleCreated) UpdateWindowRegion();
+    }
+
+    protected override void Dispose(bool disposing) {
+        if (disposing) {
+            animationTimer.Stop();
+            animationTimer.Dispose();
+        }
+        base.Dispose(disposing);
     }
 
     protected override void OnPaintBackground(PaintEventArgs e) {
     }
 
     protected override void OnPaint(PaintEventArgs e) {
-        var accent = Color.FromArgb(0, 120, 212);
+        double pulse = ActivityPulse();
+        int green = 105 + (int)Math.Round(35.0 * pulse);
+        int blue = 190 + (int)Math.Round(50.0 * pulse);
+        var accent = Color.FromArgb(0, Math.Min(255, green), Math.Min(255, blue));
         using (var accentBrush = new SolidBrush(accent)) {
-            foreach (var rect in BorderRects()) e.Graphics.FillRectangle(accentBrush, rect);
+            foreach (var rect in BorderRects(CurrentBorderThickness())) e.Graphics.FillRectangle(accentBrush, rect);
         }
 
         if (showBadge) {
             var badge = BadgeRect();
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            int badgeLevel = 26 + (int)Math.Round(8.0 * pulse);
             using (var badgePath = RoundedRect(badge, Scale(7)))
-            using (var badgeBrush = new SolidBrush(Color.FromArgb(28, 28, 30))) {
+            using (var badgeBrush = new SolidBrush(Color.FromArgb(badgeLevel, badgeLevel, badgeLevel + 2)))
+            using (var badgePen = new Pen(accent, Math.Max(1, Scale(1)))) {
                 e.Graphics.FillPath(badgeBrush, badgePath);
+                e.Graphics.DrawPath(badgePen, badgePath);
             }
             using (var font = new Font("Segoe UI", 9.0f, FontStyle.Bold, GraphicsUnit.Point)) {
                 TextRenderer.DrawText(
@@ -220,6 +312,15 @@ public sealed class ComputerUseOverlayForm : Form {
                     Color.White,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix
                 );
+            }
+        }
+
+        if (rippleActive) {
+            double progress = RippleProgress();
+            int alpha = Math.Max(0, Math.Min(255, (int)Math.Round(230.0 * (1.0 - progress))));
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var pen = new Pen(Color.FromArgb(alpha, 75, 180, 255), Math.Max(1, Scale(2)))) {
+                e.Graphics.DrawEllipse(pen, RippleRect(progress));
             }
         }
     }
@@ -385,6 +486,17 @@ public static class ComputerUseOverlayHost {
         Invoke(DisarmEscapeHookCore);
     }
 
+    public static void PulseAt(int x, int y) {
+        var target = dispatcher;
+        if (target == null || target.IsDisposed) return;
+        Invoke(delegate {
+            foreach (var form in forms) {
+                var overlay = form as ComputerUseOverlayForm;
+                if (overlay != null) overlay.PulseAtScreen(x, y);
+            }
+        });
+    }
+
     public static void Hide() {
         var target = dispatcher;
         if (target == null || target.IsDisposed) return;
@@ -434,6 +546,7 @@ while (-not $done -and ($line = [Console]::In.ReadLine()) -ne $null) {
       'status' { $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }
       'armCancel' { [ComputerUseOverlayHost]::ArmCancel(); $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }
       'disarmCancel' { [ComputerUseOverlayHost]::DisarmCancel(); $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }
+      'pulse' { [ComputerUseOverlayHost]::PulseAt([int]$payload.x, [int]$payload.y); $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }
       'shutdown' {
         [ComputerUseOverlayHost]::Shutdown()
         $result = @{ id=$id; ok=$true; visible=$false }
@@ -570,7 +683,10 @@ async function startHelper(): Promise<ChildProcessWithoutNullStreams> {
   }
 }
 
-async function requestHelper(op: HelperRequest["op"]): Promise<HelperResponse> {
+async function requestHelper(
+  op: HelperRequest["op"],
+  payload: Pick<HelperRequest, "x" | "y"> = {},
+): Promise<HelperResponse> {
   const child = await startHelper();
   const id = nextRequestId++;
   return new Promise((resolve, reject) => {
@@ -581,7 +697,7 @@ async function requestHelper(op: HelperRequest["op"]): Promise<HelperResponse> {
       if (child.exitCode === null && !child.killed) child.kill();
     }, REQUEST_TIMEOUT_MS);
     pending.set(id, { resolve, reject, timer });
-    child.stdin.write(`${JSON.stringify({ id, op })}\n`, (error) => {
+    child.stdin.write(`${JSON.stringify({ id, op, ...payload })}\n`, (error) => {
       if (!error) return;
       const request = pending.get(id);
       if (!request) return;
@@ -725,6 +841,12 @@ export async function beginComputerUseActivity(): Promise<() => Promise<void>> {
     }, idleHideMs);
     hideTimer.unref?.();
   };
+}
+
+export async function showComputerUseClickPulse(x: number, y: number): Promise<void> {
+  if (process.platform !== "win32" || testDriver !== undefined) return;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  await requestHelper("pulse", { x: Math.round(x), y: Math.round(y) }).catch(() => undefined);
 }
 
 export async function withComputerUseActivity<T>(fn: () => Promise<T>): Promise<T> {
