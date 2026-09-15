@@ -5,6 +5,7 @@ import { installAgentNotificationPiggyback } from "../agents/piggyback.js";
 import { emitSessionStartHook } from "../hooks/session-start.js";
 import { installToolLifecycleHooks } from "../hooks/tool-lifecycle.js";
 import { registerAgentTools } from "./agent-tools.js";
+import { registerPluginCallTools } from "./plugin-call-tools.js";
 import { registerPluginDiscoveryTools } from "./plugin-discovery-tools.js";
 import { registerPluginTools } from "./plugin-tools.js";
 import { registerSkillSecurityTools } from "./skill-security-tools.js";
@@ -25,6 +26,7 @@ export async function createServer(ctx: ToolContext): Promise<McpServer> {
   registerSkillSecurityTools(server, ctx);
   registerPluginTools(server, ctx);
   registerPluginDiscoveryTools(server, ctx);
+  registerPluginCallTools(server, ctx);
   installToolLifecycleHooks(server, ctx);
   await emitSessionStartHook(ctx);
   return server;
