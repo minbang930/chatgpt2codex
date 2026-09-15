@@ -129,7 +129,8 @@ describe("Web agent MCP tools", () => {
       mode: "project",
       projectRef: { label: "Repo Project" },
     });
-    expect(launchInput?.task).toBe("Implement the migration");
+    expect(launchInput?.task).toContain("Ponytail coding policy (FULL)");
+    expect(launchInput?.task).toContain("Implement the migration");
     expect(launchInput?.workerToken).toMatch(/^wcap\.wrk_/);
     expect((await getAgentStatus(ctx.stateDir, worker.workerId)).status).toBe("running");
   });
