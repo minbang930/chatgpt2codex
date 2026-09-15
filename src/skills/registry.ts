@@ -33,7 +33,7 @@ export function globalSkillsDir(stateDir: string): string {
   return path.join(stateDir, GLOBAL_SKILLS_RELATIVE_DIR);
 }
 
-async function discoverRoot(params: {
+export async function discoverSkillRoot(params: {
   rootDir: string;
   scope: SkillScope;
 }): Promise<{ skills: SkillMetadata[]; diagnostics: SkillDiagnostic[] }> {
@@ -96,6 +96,15 @@ async function discoverRoot(params: {
     }
   };
 
+  const directRoot = await loadSkillMetadata({ rootDir: rootRealPath, skillDir: rootRealPath, scope: params.scope });
+  if (directRoot.metadata) {
+    return { skills: [directRoot.metadata], diagnostics };
+  }
+  if (directRoot.diagnostic && directRoot.diagnostic.kind !== "missing") {
+    diagnostics.push(directRoot.diagnostic);
+    return { skills, diagnostics };
+  }
+
   let children;
   try {
     children = await readdir(rootRealPath, { withFileTypes: true });
@@ -128,9 +137,9 @@ export async function discoverSkillRegistry(params: {
   stateDir: string;
   projectRoot?: string;
 }): Promise<SkillRegistrySnapshot> {
-  const global = await discoverRoot({ rootDir: globalSkillsDir(params.stateDir), scope: "global" });
+  const global = await discoverSkillRoot({ rootDir: globalSkillsDir(params.stateDir), scope: "global" });
   const project = params.projectRoot
-    ? await discoverRoot({ rootDir: projectSkillsDir(params.projectRoot), scope: "project" })
+    ? await discoverSkillRoot({ rootDir: projectSkillsDir(params.projectRoot), scope: "project" })
     : { skills: [] as SkillMetadata[], diagnostics: [] as SkillDiagnostic[] };
 
   const selected = new Map<string, SkillMetadata>();
