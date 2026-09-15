@@ -37,11 +37,11 @@ jobs:
 
       - name: Agent and platform-safe tests
         if: matrix.os != 'windows-latest'
-        run: npx vitest run src/agents src/state/store.test.ts src/server/agent-tools.test.ts src/server/agent-piggyback.test.ts src/server/web-agent-tools.test.ts src/server/web-agent-stop-tool.test.ts src/server/web-agent-recovery.test.ts src/server/web-agent-parallel.test.ts src/control/win-native.test.ts src/control/win-uia.test.ts src/control/activity-indicator.test.ts
+        run: npx vitest run src/agents src/state/store.test.ts src/server/agent-tools.test.ts src/server/agent-piggyback.test.ts src/server/web-agent-tools.test.ts src/server/web-agent-stop-tool.test.ts src/server/web-agent-recovery.test.ts src/server/web-agent-parallel.test.ts src/hooks/engine.test.ts src/control/win-native.test.ts src/control/win-uia.test.ts src/control/activity-indicator.test.ts
 
       - name: Agent tests (Windows)
         if: matrix.os == 'windows-latest'
-        run: npx vitest run src/agents src/state/store.test.ts src/server/agent-tools.test.ts src/server/agent-piggyback.test.ts src/server/web-agent-tools.test.ts src/server/web-agent-stop-tool.test.ts src/server/web-agent-recovery.test.ts src/server/web-agent-parallel.test.ts
+        run: npx vitest run src/agents src/state/store.test.ts src/server/agent-tools.test.ts src/server/agent-piggyback.test.ts src/server/web-agent-tools.test.ts src/server/web-agent-stop-tool.test.ts src/server/web-agent-recovery.test.ts src/server/web-agent-parallel.test.ts src/hooks/engine.test.ts
 
       - name: Windows native input helper test
         if: matrix.os == 'windows-latest'
