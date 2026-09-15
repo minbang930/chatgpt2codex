@@ -48,12 +48,16 @@ async function launchWorkerBrowser(
   const controller = new BrowserWorkerController(stateDir, driver);
   let browser: BrowserWorkerSession | undefined;
   try {
+    const ponytailTask = applyPonytailToWorkerTask(worker.task);
+    const skillContext = await workerSkillContext(stateDir, worker);
+    const launchTask = skillContext
+      ? [ponytailTask, "", "Additional activated Agent Skill instructions:", skillContext].join("\n")
+      : ponytailTask;
     browser = await controller.launch({
       workerId: worker.workerId,
       projectId: worker.projectId,
-      task: applyPonytailToWorkerTask(worker.task),
+      task: launchTask,
       workerToken: capability.token,
-      skillContext: await workerSkillContext(stateDir, worker),
     });
     return { browser, capabilityExpiresAt: capability.expiresAt };
   } catch (error) {
