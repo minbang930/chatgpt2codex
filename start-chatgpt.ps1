@@ -16,14 +16,30 @@ $nodePath = Join-Path $env:ProgramFiles "nodejs"
 $cloudflaredPath = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages\Cloudflare.cloudflared_Microsoft.Winget.Source_8wekyb3d8bbwe"
 $env:PATH = "$Root\bin;$nodePath;$cloudflaredPath;$env:USERPROFILE\.local\bin;$machinePath;$userPath;$env:PATH"
 
+function Get-EffectiveEnvironmentValue([string]$Name) {
+    foreach ($scope in @("Process", "User", "Machine")) {
+        try {
+            $value = [System.Environment]::GetEnvironmentVariable($Name, $scope)
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                return $value.Trim()
+            }
+        } catch {
+        }
+    }
+    return $null
+}
+
 if (-not $Workspace) {
     $Workspace = Join-Path $HOME "workspace"
 }
 New-Item -ItemType Directory -Force -Path $Workspace | Out-Null
 $Workspace = [System.IO.Path]::GetFullPath($Workspace)
 
-$cloudflaredName = $env:CLOUDFLARED_TUNNEL_NAME
-$cloudflaredToken = $env:CLOUDFLARED_TUNNEL_TOKEN
+# The tray launcher can outlive the PowerShell session that originally set a
+# user-scoped Cloudflare tunnel variable. Re-read persistent Windows user/machine
+# scopes here instead of depending only on the launcher's inherited environment.
+$cloudflaredName = Get-EffectiveEnvironmentValue "CLOUDFLARED_TUNNEL_NAME"
+$cloudflaredToken = Get-EffectiveEnvironmentValue "CLOUDFLARED_TUNNEL_TOKEN"
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "chatgpt2codex"
 New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 $cfOut = Join-Path $tempRoot "cloudflared.out.log"
