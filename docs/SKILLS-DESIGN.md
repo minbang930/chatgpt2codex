@@ -106,7 +106,7 @@ Tier 2: support resource
   references/assets/templates/scripts loaded explicitly by path
 ```
 
-M5.1 implements Tier 0 plus safe Tier 1 loading primitives. MCP tools and automatic worker integration come later.
+M5.1 implements the safe metadata/full-skill primitives. M5.2 exposes Tier 0 through `skill_list` and Tier 1 through `skill_view`; support-resource reads remain deferred to M5.4.
 
 ## M5.1 safety boundaries
 
@@ -123,34 +123,100 @@ The foundation loader follows these rules:
 
 Executable skill content remains disabled by default until a later M5 security/approval unit explicitly defines it.
 
-## Planned M5 units
+## M5.2 management contract
 
-### M5.1 - Agent Skills foundation
+The Core MCP surface now exposes five fixed Agent Skills tools:
+
+```text
+skill_list
+skill_view
+skill_install
+skill_update
+skill_remove
+```
+
+`skill_list` returns bounded discovery metadata and never returns the full instruction body. `skill_view` resolves project-over-global precedence and returns the selected `SKILL.md` only when the agent asks for it.
+
+### Managed install sources
+
+M5.2 accepts two source classes:
+
+- a local directory inside the configured workspace root;
+- an HTTPS Git repository URL.
+
+Local source paths are canonicalized and must remain inside the runtime workspace. The requested local source itself must be a real directory rather than a symlink.
+
+Git sources are cloned into a temporary installation workspace with terminal prompting disabled. Embedded URL credentials are rejected. An optional ref may be fetched explicitly, and the resolved commit SHA is recorded before any content is copied into managed storage.
+
+If a source exposes exactly one valid skill it can be installed directly. If it exposes multiple skills, the caller must provide `skillName`; this supports repositories whose `skills/` directory contains a collection of independent skills without treating the whole repository as one package.
+
+### Snapshot/export semantics
+
+A managed install never points the runtime at a mutable source checkout.
+
+```text
+source
+ -> temporary/canonical source tree
+ -> bounded skill discovery
+ -> select one skill root
+ -> copy a validated snapshot
+ -> write provenance
+ -> validate managed copy
+ -> atomically place it under project/global skills
+```
+
+The copied package is bounded to 2048 regular files and 32 MiB. Symlinks and unsupported filesystem entries are rejected, VCS metadata is not copied, and no file in `scripts/` or elsewhere is executed during discovery, install, update, list, or view.
+
+### Provenance
+
+Managed installs contain runtime-owned provenance at:
+
+```text
+<skill>/.chatgpt2codex/source.json
+```
+
+The record contains:
+
+- source kind (`local` or `git`);
+- normalized source;
+- installed skill name;
+- optional requested Git ref;
+- resolved Git commit when applicable;
+- install time;
+- update time after refresh.
+
+`skill_update` refreshes only a managed install from its recorded source and keeps the original install timestamp. `skill_remove` deletes only a managed install. Existing manual/project-authored skills without valid runtime provenance are never overwritten, updated, or deleted by the management tools.
+
+### Scope and authorization
+
+Global skills are managed under `<stateDir>/skills/`. Project skills are managed under `<project>/.agents/skills/` and project-scoped mutations require the active project plus its existing write lease. The skills subsystem does not create a second project-authorization model.
+
+## M5 units
+
+### M5.1 - Agent Skills foundation — complete
 
 - `SKILL.md` metadata parser.
 - safe local loader.
 - global/project roots and precedence.
 - bounded recursive discovery and collision diagnostics.
 - load full selected skill on demand.
-- no install/network/tool surface yet.
 
-### M5.2 - Skill management tools
+### M5.2 - Skill management tools — complete
 
 - `skill_list` / `skill_view` progressive-disclosure tools.
-- install/remove/update lifecycle.
+- `skill_install` / `skill_update` / `skill_remove` lifecycle.
 - Git/local source support.
 - source/ref/resolved-commit provenance.
 - project/global target scope.
-
-A Git install should stage into a temporary location, resolve a commit, validate the selected skill root, then copy/export into a managed target. Installed content must not silently track a mutable checkout.
+- managed-only update/removal and bounded snapshot export.
 
 ### M5.3 - Skill activation
 
-- expose bounded installed-skill metadata to the main ChatGPT agent.
-- explicit skill selection/view for the main agent.
+- expose a bounded installed-skill catalog to the main ChatGPT agent.
+- make skill selection explicit and predictable for the main agent.
 - add selected skills to the existing browser-worker bootstrap path.
 - preserve the original durable worker task; skill adaptation remains launch-time instruction context, matching the M4.5 Ponytail separation.
-- keep context/catalog size bounded.
+- keep catalog/instruction context size bounded.
 
 ### M5.4 - Skill resources and security
 
@@ -169,14 +235,13 @@ A Git install should stage into a temporary location, resolve a commit, validate
 
 Workers do not automatically inherit external plugin tools. Any future worker plugin access must use an explicit allowlist/capability boundary just like the existing worker-scoped Core tools.
 
-## Non-goals for the foundation
+## Non-goals through M5.2
 
-M5.1 does not:
+M5.1/M5.2 do not:
 
-- clone Git repositories.
-- install or update skills.
-- execute skill scripts.
-- install npm/pip/brew/etc dependencies.
+- execute skill scripts or install commands.
+- install npm/pip/brew/etc dependencies declared by third-party content.
 - inject all installed skills into prompts.
 - automatically grant external MCP tools to workers.
 - implement a public marketplace or registry.
+- treat a mutable Git checkout as an installed skill.
