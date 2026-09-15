@@ -36,6 +36,7 @@ export function globalSkillsDir(stateDir: string): string {
 export async function discoverSkillRoot(params: {
   rootDir: string;
   scope: SkillScope;
+  includeRoot?: boolean;
 }): Promise<{ skills: SkillMetadata[]; diagnostics: SkillDiagnostic[] }> {
   const skills: SkillMetadata[] = [];
   const diagnostics: SkillDiagnostic[] = [];
@@ -96,13 +97,15 @@ export async function discoverSkillRoot(params: {
     }
   };
 
-  const directRoot = await loadSkillMetadata({ rootDir: rootRealPath, skillDir: rootRealPath, scope: params.scope });
-  if (directRoot.metadata) {
-    return { skills: [directRoot.metadata], diagnostics };
-  }
-  if (directRoot.diagnostic && directRoot.diagnostic.kind !== "missing") {
-    diagnostics.push(directRoot.diagnostic);
-    return { skills, diagnostics };
+  if (params.includeRoot) {
+    const directRoot = await loadSkillMetadata({ rootDir: rootRealPath, skillDir: rootRealPath, scope: params.scope });
+    if (directRoot.metadata) {
+      return { skills: [directRoot.metadata], diagnostics };
+    }
+    if (directRoot.diagnostic && directRoot.diagnostic.kind !== "missing") {
+      diagnostics.push(directRoot.diagnostic);
+      return { skills, diagnostics };
+    }
   }
 
   let children;
