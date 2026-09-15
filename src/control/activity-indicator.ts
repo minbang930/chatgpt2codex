@@ -44,10 +44,9 @@ const MAX_STDERR = 6_000;
  * from win-native.ts is intentional: a cosmetic indicator can fail/restart
  * without disturbing the trusted SendInput helper or changing authorization.
  *
- * The overlay uses one shaped topmost window per Windows display. Its region
- * contains an inset four-sided frame plus a small primary-display badge, so
- * right/bottom edges stay inside the physical display instead of being clipped.
- * Every window is
+ * The overlay uses translucent topmost glow bands plus one shaped interaction
+ * overlay per Windows display. Glow intensity breathes while geometry stays
+ * fixed; the primary-display badge remains intentionally static. Every window is
  * TOOLWINDOW + NOACTIVATE + TRANSPARENT, returns HTTRANSPARENT for hit-tests,
  * and requests WDA_EXCLUDEFROMCAPTURE. capture.ts additionally suppresses the
  * overlay around the actual pixel read as a fallback for capture APIs/drivers
@@ -74,6 +73,63 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
+
+public sealed class ComputerUseGlowBandForm : Form {
+    const int WS_EX_TRANSPARENT = 0x20;
+    const int WS_EX_TOOLWINDOW = 0x80;
+    const int WS_EX_LAYERED = 0x80000;
+    const int WS_EX_NOACTIVATE = 0x08000000;
+    const int WM_NCHITTEST = 0x0084;
+    const int WM_MOUSEACTIVATE = 0x0021;
+    static readonly IntPtr HTTRANSPARENT = new IntPtr(-1);
+    static readonly IntPtr MA_NOACTIVATE = new IntPtr(3);
+    const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
+
+    readonly double baseOpacity;
+
+    [DllImport("user32.dll")]
+    static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+
+    public ComputerUseGlowBandForm(Rectangle bounds, double opacity) {
+        baseOpacity = Math.Max(0.01, Math.Min(0.80, opacity));
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        StartPosition = FormStartPosition.Manual;
+        TopMost = true;
+        BackColor = Color.FromArgb(0, 126, 230);
+        Opacity = baseOpacity;
+        Bounds = bounds;
+        TabStop = false;
+    }
+
+    protected override bool ShowWithoutActivation { get { return true; } }
+
+    protected override CreateParams CreateParams {
+        get {
+            var cp = base.CreateParams;
+            cp.ExStyle |= WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE;
+            return cp;
+        }
+    }
+
+    protected override void OnHandleCreated(EventArgs e) {
+        base.OnHandleCreated(e);
+        try { SetWindowDisplayAffinity(Handle, WDA_EXCLUDEFROMCAPTURE); } catch { }
+    }
+
+    public void SetPulse(double pulse) {
+        // Glow breathes through luminance/opacity only. Geometry never changes,
+        // avoiding the hard expanding-border look of the previous indicator.
+        double multiplier = 0.88 + (0.18 * Math.Max(0.0, Math.Min(1.0, pulse)));
+        Opacity = Math.Max(0.01, Math.Min(0.82, baseOpacity * multiplier));
+    }
+
+    protected override void WndProc(ref Message m) {
+        if (m.Msg == WM_NCHITTEST) { m.Result = HTTRANSPARENT; return; }
+        if (m.Msg == WM_MOUSEACTIVATE) { m.Result = MA_NOACTIVATE; return; }
+        base.WndProc(ref m);
+    }
+}
 
 public sealed class ComputerUseOverlayForm : Form {
     const int WS_EX_TRANSPARENT = 0x20;
@@ -283,7 +339,6 @@ public sealed class ComputerUseOverlayForm : Form {
         if (ClientSize.Width <= 0 || ClientSize.Height <= 0) return;
         var next = new Region();
         next.MakeEmpty();
-        foreach (var rect in BorderRects(CurrentBorderThickness())) next.Union(rect);
         if (showBadge) {
             using (var badgePath = RoundedRect(BadgeRect(), Scale(7))) next.Union(badgePath);
         }
@@ -335,23 +390,12 @@ public sealed class ComputerUseOverlayForm : Form {
     }
 
     protected override void OnPaint(PaintEventArgs e) {
-        double pulse = ActivityPulse();
-        int green = 105 + (int)Math.Round(35.0 * pulse);
-        int blue = 190 + (int)Math.Round(50.0 * pulse);
-        var accent = Color.FromArgb(0, Math.Min(255, green), Math.Min(255, blue));
-        using (var accentBrush = new SolidBrush(accent)) {
-            foreach (var rect in BorderRects(CurrentBorderThickness())) e.Graphics.FillRectangle(accentBrush, rect);
-        }
-
         if (showBadge) {
             var badge = BadgeRect();
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            int badgeLevel = 26 + (int)Math.Round(8.0 * pulse);
             using (var badgePath = RoundedRect(badge, Scale(7)))
-            using (var badgeBrush = new SolidBrush(Color.FromArgb(badgeLevel, badgeLevel, badgeLevel + 2)))
-            using (var badgePen = new Pen(accent, Math.Max(1, Scale(1)))) {
+            using (var badgeBrush = new SolidBrush(Color.FromArgb(28, 28, 30))) {
                 e.Graphics.FillPath(badgeBrush, badgePath);
-                e.Graphics.DrawPath(badgePen, badgePath);
             }
             using (var font = new Font("Segoe UI", 9.0f, FontStyle.Bold, GraphicsUnit.Point)) {
                 TextRenderer.DrawText(
@@ -496,8 +540,23 @@ public static class ComputerUseOverlayHost {
             }
         };
         parentTimer.Start();
+
+        var glowTimer = new System.Windows.Forms.Timer();
+        glowTimer.Interval = 80;
+        glowTimer.Tick += delegate {
+            double seconds = (double)Stopwatch.GetTimestamp() / Stopwatch.Frequency;
+            double pulse = (Math.Sin((seconds / 2.6) * Math.PI * 2.0) + 1.0) / 2.0;
+            foreach (var form in forms) {
+                var glow = form as ComputerUseGlowBandForm;
+                if (glow != null) glow.SetPulse(pulse);
+            }
+        };
+        glowTimer.Start();
+
         ready.Set();
         Application.Run();
+        glowTimer.Stop();
+        glowTimer.Dispose();
         parentTimer.Stop();
         parentTimer.Dispose();
         HideCore();
@@ -506,11 +565,37 @@ public static class ComputerUseOverlayHost {
         visible = false;
     }
 
+    static void AddGlowBands(Rectangle bounds) {
+        // Adjacent translucent strips approximate a soft Codex-like bloom
+        // without expanding/contracting hard geometry. The falloff reaches
+        // roughly 33 px inward at 100% scale and fades rapidly toward content.
+        int[] widths = new int[] { 2, 2, 3, 4, 5, 7, 10 };
+        double[] opacities = new double[] { 0.50, 0.36, 0.25, 0.16, 0.10, 0.055, 0.025 };
+        int offset = 0;
+        for (int i = 0; i < widths.Length; i++) {
+            int band = widths[i];
+            double opacity = opacities[i];
+            Rectangle[] strips = new Rectangle[] {
+                new Rectangle(bounds.Left, bounds.Top + offset, bounds.Width, band),
+                new Rectangle(bounds.Left, bounds.Bottom - offset - band, bounds.Width, band),
+                new Rectangle(bounds.Left + offset, bounds.Top, band, bounds.Height),
+                new Rectangle(bounds.Right - offset - band, bounds.Top, band, bounds.Height),
+            };
+            foreach (var strip in strips) {
+                var glow = new ComputerUseGlowBandForm(strip, opacity);
+                forms.Add(glow);
+                glow.Show();
+            }
+            offset += band;
+        }
+    }
+
     static void ShowCore() {
         if (visible) return;
         HideCore();
         ComputerUseOverlayForm.EnableProcessDpiAwareness();
         foreach (var screen in Screen.AllScreens) {
+            AddGlowBands(screen.Bounds);
             var overlay = new ComputerUseOverlayForm(screen.Bounds, screen.Primary);
             forms.Add(overlay);
             overlay.Show();
