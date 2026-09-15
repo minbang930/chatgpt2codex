@@ -22,20 +22,26 @@ class FakeConnection implements CdpConnection {
   readonly calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
   closed = false;
 
-  constructor(private readonly composerReady: boolean) {}
+  constructor(
+    private readonly composerReady: boolean,
+    private readonly appAvailable = true,
+  ) {}
 
   async send(method: string, params?: Record<string, unknown>): Promise<unknown> {
     this.calls.push({ method, params });
     if (method === "Runtime.enable") return {};
-    if (method === "Input.dispatchKeyEvent") return {};
+    if (method === "Input.dispatchKeyEvent" || method === "Input.insertText") return {};
     if (method !== "Runtime.evaluate") return {};
 
     const expression = String(params?.expression ?? "");
     if (expression.includes("rect.width > 0")) {
       return { result: { value: this.composerReady } };
     }
-    if (expression.includes("document.execCommand('insertText'")) {
-      return { result: { value: { ok: true, length: 123 } } };
+    if (expression.includes("candidate.click();")) {
+      return { result: { value: { ok: this.appAvailable, text: this.appAvailable ? "ChatGPT To Codex Worker" : undefined } } };
+    }
+    if (expression.includes("composer.focus();")) {
+      return { result: { value: true } };
     }
     if (expression.includes("current.trim().length === 0")) {
       return { result: { value: true } };
@@ -54,11 +60,12 @@ describe("agents/chrome-cdp", () => {
     expect(prompt).toContain("worker_project_rules");
     expect(prompt).toContain("worker_finish");
     expect(prompt).toContain("Do not call project_select");
+    expect(prompt).toContain("dedicated ChatGPT To Codex Worker app");
     expect(prompt).toContain("wcap.wrk_00000000-0000-0000-0000-000000000001.secret");
     expect(prompt).toContain("Implement the SQLite migration and verify it");
   });
 
-  it("opens a standalone ChatGPT worker tab, inserts the bootstrap, and submits it", async () => {
+  it("selects the dedicated worker app before submitting a standalone worker bootstrap", async () => {
     const endpoint: ChromeDevToolsEndpoint = { port: 9222 };
     const connection = new FakeConnection(true);
     const opened: string[] = [];
@@ -76,6 +83,8 @@ describe("agents/chrome-cdp", () => {
       sleepMs: async () => undefined,
       composerAttempts: 1,
       composerPollMs: 0,
+      appMentionAttempts: 1,
+      appMentionPollMs: 0,
     });
 
     const result = await driver.launch(launchInput());
@@ -84,12 +93,65 @@ describe("agents/chrome-cdp", () => {
     expect(closedTargets).toEqual([]);
     expect(connection.closed).toBe(true);
 
-    const insert = connection.calls.find(
-      (call) => call.method === "Runtime.evaluate" && String(call.params?.expression ?? "").includes("document.execCommand('insertText'"),
+    const insertedText = connection.calls
+      .filter((call) => call.method === "Input.insertText")
+      .map((call) => String(call.params?.text ?? ""));
+    expect(insertedText[0]).toBe("@ChatGPT To Codex Worker");
+    expect(insertedText[1]).toContain("Implement the SQLite migration and verify it");
+    expect(insertedText[1]).toContain("wcap.wrk_00000000-0000-0000-0000-000000000001.secret");
+
+    const appSelection = connection.calls.find(
+      (call) => call.method === "Runtime.evaluate" && String(call.params?.expression ?? "").includes("candidate.click();"),
     );
-    expect(String(insert?.params?.expression)).toContain("Implement the SQLite migration and verify it");
-    expect(String(insert?.params?.expression)).toContain("wcap.wrk_00000000-0000-0000-0000-000000000001.secret");
+    expect(String(appSelection?.params?.expression)).toContain("ChatGPT To Codex Worker");
     expect(connection.calls.filter((call) => call.method === "Input.dispatchKeyEvent")).toHaveLength(2);
+  });
+
+  it("supports an explicitly configured worker app name", async () => {
+    const connection = new FakeConnection(true);
+    const driver = new ChromeCdpBrowserWorkerDriver({
+      ensureEndpoint: async () => ({ port: 9222 }),
+      openTarget: async (_endpoint, url) => ({ id: "target-custom-app", url, webSocketDebuggerUrl: "ws://custom-app" }),
+      closeTarget: async () => undefined,
+      connect: async () => connection,
+      sleepMs: async () => undefined,
+      composerAttempts: 1,
+      composerPollMs: 0,
+      workerAppName: "C2C Worker Dev",
+      appMentionAttempts: 1,
+      appMentionPollMs: 0,
+    });
+
+    await driver.launch(launchInput());
+    const mentions = connection.calls.filter((call) => call.method === "Input.insertText");
+    expect(mentions[0]?.params?.text).toBe("@C2C Worker Dev");
+    const selection = connection.calls.find(
+      (call) => call.method === "Runtime.evaluate" && String(call.params?.expression ?? "").includes("candidate.click();"),
+    );
+    expect(String(selection?.params?.expression)).toContain("C2C Worker Dev");
+  });
+
+  it("fails closed when the dedicated worker app is not available", async () => {
+    const connection = new FakeConnection(true, false);
+    const closedTargets: string[] = [];
+    const driver = new ChromeCdpBrowserWorkerDriver({
+      ensureEndpoint: async () => ({ port: 9222 }),
+      openTarget: async (_endpoint, url) => ({ id: "target-no-app", url, webSocketDebuggerUrl: "ws://no-app" }),
+      closeTarget: async (_endpoint, targetId) => {
+        closedTargets.push(targetId);
+      },
+      connect: async () => connection,
+      sleepMs: async () => undefined,
+      composerAttempts: 1,
+      composerPollMs: 0,
+      appMentionAttempts: 1,
+      appMentionPollMs: 0,
+    });
+
+    await expect(driver.launch(launchInput())).rejects.toThrow(/custom app.*\/mcp\/worker/i);
+    expect(closedTargets).toEqual(["target-no-app"]);
+    expect(connection.calls.filter((call) => call.method === "Input.dispatchKeyEvent")).toHaveLength(0);
+    expect(connection.closed).toBe(true);
   });
 
   it("prefers the mapped ChatGPT Project and falls back to standalone when its composer is unavailable", async () => {
@@ -117,6 +179,8 @@ describe("agents/chrome-cdp", () => {
       sleepMs: async () => undefined,
       composerAttempts: 1,
       composerPollMs: 0,
+      appMentionAttempts: 1,
+      appMentionPollMs: 0,
     });
 
     const result = await driver.launch(
@@ -149,6 +213,8 @@ describe("agents/chrome-cdp", () => {
       sleepMs: async () => undefined,
       composerAttempts: 1,
       composerPollMs: 0,
+      appMentionAttempts: 1,
+      appMentionPollMs: 0,
     });
 
     await expect(driver.launch(launchInput())).rejects.toThrow(/Sign in to ChatGPT/);
