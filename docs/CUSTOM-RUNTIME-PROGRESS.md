@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **Implementation roadmap complete through M5**
 
-Active unit: **Post-M5 stabilization / hard browser-worker MCP catalog isolation gap**
+Active unit: **Post-M5 stabilization / ChatGPT-side worker MCP routing live validation**
 
 Detailed design documents:
 
@@ -316,11 +316,19 @@ Post-roadmap work should therefore be stabilization and real integration validat
   - Verified in `f849dff0`; CI `35014499804` passed on Ubuntu, macOS, and Windows.
   - Configuring/enabling a plugin does not add any `worker_plugin_*` tool. Worker mirrors remain exactly derived from `WORKER_CORE_TOOL_NAMES`.
   - `dispatchWorkerCoreTool()` rejects `plugin_list`, `plugin_discover`, and `plugin_call` before worker capability use, so the worker capability itself cannot authorize plugin access.
-  - The same validation exposed a separate transport/catalog gap: a browser-worker ChatGPT session currently connects to the same remote `/mcp` catalog as the main agent, and that shared `tools/list` still exposes the unprefixed main-agent `plugin_list`, `plugin_discover`, and `plugin_call` proxies.
-- [ ] Add a hard browser-worker MCP identity/catalog boundary so a worker ChatGPT session cannot invoke the shared unprefixed plugin proxies.
-  - Do not solve this by globally disabling plugin tools while a worker exists; main-agent plugin access must continue to work.
-  - Prefer a dedicated worker MCP endpoint/credential or equivalent authenticated worker-session role that reuses the existing durable worker capability model and generates a worker-only catalog.
-  - Until this is implemented, the browser bootstrap's `worker_*` restriction is an instruction-layer defense for the shared unprefixed proxies, not a server-side authorization boundary.
+  - This validation exposed the original shared remote catalog gap and motivated the dedicated worker transport.
+- [x] Add a hard browser-worker MCP identity/catalog boundary while preserving main-agent plugin access.
+  - Implemented a worker-only MCP server factory and dedicated `/mcp/worker` resource while keeping the normal main catalog on `/mcp`.
+  - The worker catalog is exactly `worker_finish` plus `worker_*` mirrors derived from `WORKER_CORE_TOOL_NAMES`; unprefixed plugin/main tools are not registered on that transport.
+  - Main and worker OAuth resource audiences are exact-matched at the HTTP boundary, and tracked MCP sessions are role-bound so tokens/session IDs cannot be replayed across routes.
+  - The existing opaque worker capability remains the authority for each worker operation; the worker endpoint only narrows catalog exposure.
+  - Real OAuth authorization-code + PKCE and Streamable HTTP MCP clients verify main plugin availability, worker plugin denial, worker protected-resource metadata, and cross-audience rejection in `src/server/worker-mcp-isolation.test.ts`.
+  - Implementation/test HEAD `87f497f0`; CI `35017393064` passed on Ubuntu, macOS, and Windows.
+- [ ] Route and live-validate actual browser-worker ChatGPT conversations through `/mcp/worker` while the parent/main-agent connection remains on `/mcp`.
+  - The Chrome/CDP bootstrap cannot securely choose a different installed ChatGPT connector merely through prompt text.
+  - Prefer an explicit separately configured worker connector/Project/app context if ChatGPT does not expose programmatic per-conversation connector selection.
+  - Initial launch and recovery must follow the same worker routing rule, and the worker context must not also expose the main `/mcp` connector in a way that defeats the boundary.
+  - Do not use timing heuristics, "next connection is worker" state, first-call role inference, or prompt compliance as worker identity.
 - [ ] Keep CI green and fix integration defects discovered by stabilization before defining any new milestone.
 
 ## Update policy
