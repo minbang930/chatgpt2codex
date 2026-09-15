@@ -15,11 +15,12 @@ Target architecture, in brief:
 - Existing Core remains the authority for project selection, leases, file/shell/git operations, policy, audit, and related safety checks.
 - Durable Agent Manager state owns worker lifecycle/results.
 - Full-write workers use isolated Git branches/worktrees and scoped worker capabilities rather than the main session state.
-- Browser-worker `worker_*` repository authority is generated only from the explicit `WORKER_CORE_TOOL_NAMES` allowlist.
+- Browser-worker repository authority is generated only from the explicit `WORKER_CORE_TOOL_NAMES` allowlist.
+- Remote main and worker MCP transports are now separated: `/mcp` is the main-agent resource; `/mcp/worker` exposes only `worker_*` plus `worker_finish`.
 - Windows Computer Use reuses the existing control lease/policy/audit plane.
 - Hooks, Agent Skills, and external MCP plugins are optional extensions around Core, not alternate authorization systems.
 
-Important current stabilization caveat: the worker-prefixed capability surface is narrow, but the browser-worker ChatGPT connection still uses the same remote `/mcp` catalog as the main ChatGPT connection. That shared catalog currently contains unprefixed main-agent plugin proxy tools. See **Active unit** below.
+Important current stabilization caveat: the server-side worker transport/catalog boundary is implemented, but a real ChatGPT browser-worker conversation must still be routed to the `/mcp/worker` connector/resource. A conversation connected to `/mcp` is intentionally a main-agent session. See **Active unit** below.
 
 See `docs/CUSTOM-RUNTIME-PLAN.md` for the detailed architecture.
 
@@ -90,9 +91,12 @@ See `docs/SKILLS-DESIGN.md`.
 - plugin failures are isolated from Core;
 - optional plugin `skillSources` are declarations only and remain inert until the normal skill lifecycle is explicitly used;
 - plugin configuration does not add `worker_plugin_*` tools or widen `WORKER_CORE_TOOL_NAMES`;
-- `dispatchWorkerCoreTool()` rejects plugin tools outside the worker allowlist before capability use.
+- `dispatchWorkerCoreTool()` rejects plugin tools outside the worker allowlist before capability use;
+- main remote sessions use `/mcp` and keep their fixed plugin proxies;
+- isolated worker remote sessions use `/mcp/worker`, whose catalog is exactly `worker_finish` plus mirrors derived from `WORKER_CORE_TOOL_NAMES`;
+- exact OAuth resource-audience checks and role-bound MCP sessions prevent main/worker token or session replay across those routes.
 
-Do **not** currently claim that a browser-worker ChatGPT session is server-side unable to invoke all unprefixed plugin proxies. The shared remote MCP catalog gap described below must be closed first.
+The worker endpoint narrows the catalog; the opaque durable `workerToken` remains the authorization for a particular worker/worktree. Do not confuse endpoint selection with worker authority.
 
 See `docs/PLUGINS-DESIGN.md`.
 
@@ -104,18 +108,25 @@ See `docs/PLUGINS-DESIGN.md`.
 - Do not add plugin tools to `WORKER_CORE_TOOL_NAMES` and do not create a `worker_plugin_*` proxy merely to simplify tests.
 - Skill scripts must not auto-run because a repo/skill/plugin was listed, installed, or activated.
 - Browser workers remain narrower in capability than the main agent.
-- Do not solve the shared plugin-catalog gap by globally disabling main-agent plugin proxies while any worker exists.
+- Do not globally disable main-agent plugin proxies while any worker exists.
+- Do not replace authenticated worker endpoint routing with prompt text, timing heuristics, "next connection is worker" state, or first-tool-call role inference.
+- Keep `/mcp` for the main agent and `/mcp/worker` for worker-only remote catalog use.
 
 ## Current operational state
 
 Phase: **Post-M5 stabilization / integration validation**.
 
-Latest completed substantive validation:
+Latest completed substantive implementation validation:
 
-- Code/test commit: `f849dff0f369f8dae1a9d52aaf741c1004da5302` (`test: verify plugin worker capability isolation`)
-- CI: GitHub Actions `35014499804` — **success** on Ubuntu, macOS, and Windows.
-- Plugin design clarification: `6afafd3ad9ad857f1fb24aa6691f5a0272dd7332`.
-- Progress update: `3906172c98b19667f63ebe7e7fd64b836ee9630e`.
+- Implementation/test HEAD: `87f497f03a83aa12d49eac70105479d3e5fabf19` (`test: assert worker rejects plugin call result`).
+- CI: GitHub Actions `35017393064` — **success** on Ubuntu, macOS, and Windows.
+- Server boundary implementation sequence:
+  - `f2d03f0e` — worker-only MCP server factory;
+  - `a9888c70` — `/mcp/worker`, exact OAuth resource audiences, role-bound sessions;
+  - `4ea9693c` — worker-only catalog regression;
+  - `7bbeabc9` — real OAuth + Streamable HTTP main/worker isolation E2E;
+  - `87f497f0` — correct MCP tool-not-found assertion semantics.
+- Plugin design updated after validation to describe the server boundary and remaining ChatGPT-side routing requirement.
 
 Completed stabilization evidence so far:
 
@@ -134,45 +145,33 @@ Completed stabilization evidence so far:
    - worker mirrors remain exactly derived from `WORKER_CORE_TOOL_NAMES`;
    - `dispatchWorkerCoreTool()` rejects `plugin_list`, `plugin_discover`, and `plugin_call` before worker capability use.
    Verified by `f849dff0`; CI `35014499804`.
-
-### Stabilization finding: shared remote catalog gap
-
-The same validation found a real isolation gap relative to the stronger wording previously used in the design docs.
-
-Current transport behavior:
-
-```text
-main ChatGPT session -----------\
-                                 -> same remote /mcp server -> normal remote tools/list
-browser-worker ChatGPT session -/
-```
-
-For every remote MCP initialize, `src/server/http.ts` calls `createServer({ ...ctx, remote: true })`. The connection currently carries no authenticated role/session identity that tells Core whether the caller is the main ChatGPT conversation or a browser-worker conversation.
-
-Consequences:
-
-- the hard `worker_*` capability path is correctly narrow;
-- no `worker_plugin_*` tool exists;
-- but shared remote `tools/list` still contains unprefixed `plugin_list`, `plugin_discover`, and `plugin_call`;
-- the browser bootstrap tells a worker to use `worker_*` tools, but prompt text is not a server-side authorization boundary for those shared unprefixed proxies.
-
-This is now captured by `src/plugins/worker-isolation.integration.test.ts` so future work cannot accidentally confuse worker-capability isolation with remote-catalog isolation.
+4. Hard server-side main/worker MCP catalog isolation:
+   - `/mcp` retains the main-agent catalog including configured plugin proxies;
+   - `/mcp/worker` exposes only `worker_*` plus `worker_finish`;
+   - worker protected-resource metadata advertises the worker resource;
+   - main and worker OAuth tokens cannot be replayed against the opposite endpoint;
+   - MCP session IDs are role-bound and cannot cross routes;
+   - calling an unregistered main/plugin tool through the worker transport returns MCP tool-not-found;
+   - the existing worker capability still gates every actual worker operation.
+   Verified by `87f497f0`; CI `35017393064`.
 
 ### Active unit
 
-Close the **hard browser-worker MCP catalog isolation gap** without breaking normal main-agent plugin use.
+Validate and wire the **ChatGPT-side browser-worker connector routing** so actual worker conversations use `/mcp/worker` while the parent/main-agent conversation continues to use `/mcp`.
 
-Required properties for the fix:
+The server side is already ready. The remaining integration problem is that the Chrome/CDP bootstrap currently submits a worker prompt/capability into ChatGPT but cannot securely switch the conversation's installed MCP connector URL by prompt text.
 
-- Core must be able to identify an authenticated browser-worker MCP session before catalog generation/invocation.
-- Browser-worker sessions must receive a worker-only tool catalog; unprefixed `plugin_list`, `plugin_discover`, `plugin_call`, normal file/shell/git tools, Computer Use, and other main-agent-only tools must not be callable merely because they share the same server process.
-- Reuse the existing durable worker capability model rather than creating an unrelated second authority system.
-- A dedicated worker MCP endpoint/credential or an equivalent authenticated worker-session role is acceptable if it cleanly composes with the existing worker token lifecycle.
-- Main-agent remote sessions must retain their configured plugin proxy surface.
-- Do not rely on bootstrap prompt compliance as the authorization boundary.
-- Do not add worker plugin access as part of this fix.
+Required properties for this next unit:
 
-Before implementing a broad transport change, inspect the current MCP/OAuth/bootstrap connection model and choose the smallest coherent place to bind worker identity to a remote MCP session. Add focused tests that prove both sides simultaneously: main-agent plugin proxies remain available, while an authenticated worker session cannot list or call them.
+- a real browser-worker ChatGPT conversation must connect through the `/mcp/worker` resource, not the main `/mcp` connector;
+- the main-agent ChatGPT connection must remain on `/mcp` and retain its plugin proxy surface;
+- a worker ChatGPT-side Project/app/connector context must not simultaneously expose the main `/mcp` connector in a way that defeats the server boundary;
+- initial launch and recovery must use the same routing rule;
+- routing must compose with the existing opaque worker capability rather than replacing it;
+- do not infer worker identity from prompt compliance, connection timing, or first tool call;
+- if ChatGPT's connector model cannot programmatically choose the endpoint per worker, prefer an explicit separately configured worker connector/Project context and document the operational prerequisite rather than weakening the server boundary.
+
+Inspect the current ChatGPT Project/connector assumptions first. If a deterministic automated test can cover routing metadata without relying on ChatGPT UI internals, add it. Then perform a representative live worker launch when the configured worker connector is available.
 
 ## Remaining stabilization work
 
@@ -180,11 +179,12 @@ In order, unless a discovered defect changes priority:
 
 1. **Completed:** fixed Core external MCP lifecycle smoke (`5fbc010b`, CI `35011189776`).
 2. **Completed:** plugin `skillSources` -> normal external Git Skill lifecycle smoke (`c99bee63`, CI `35013285118`).
-3. **Completed:** configured plugin vs worker-prefixed capability validation (`f849dff0`, CI `35014499804`); this found the shared remote catalog gap.
-4. Close and regression-test the hard browser-worker MCP catalog isolation gap while preserving main-agent plugin access.
-5. Run representative end-to-end main-agent/browser-worker regression after the isolation fix.
-6. Use a real public/external MCP service only when a deliberate endpoint is available and it adds evidence beyond deterministic integration coverage.
-7. Define a new milestone only after stabilization is complete.
+3. **Completed:** configured plugin vs worker-prefixed capability validation (`f849dff0`, CI `35014499804`); this exposed the original shared remote catalog gap.
+4. **Completed:** hard server-side `/mcp` versus `/mcp/worker` catalog/auth/session isolation (`87f497f0`, CI `35017393064`).
+5. Route and live-validate actual browser-worker ChatGPT sessions through `/mcp/worker`, preserving `/mcp` for the main agent.
+6. Run a representative end-to-end main-agent/browser-worker regression after ChatGPT-side routing is in place.
+7. Use a real public/external MCP service only when a deliberate endpoint is available and it adds evidence beyond deterministic integration coverage.
+8. Define a new milestone only after stabilization is complete.
 
 ## Source-of-truth documents
 
@@ -193,7 +193,7 @@ In order, unless a discovered defect changes priority:
 - `docs/WINDOWS-COMPUTER-USE-DESIGN.md` - Windows Computer Use boundaries.
 - `docs/HOOKS-DESIGN.md` - hook engine semantics and safety model.
 - `docs/SKILLS-DESIGN.md` - Agent Skills lifecycle/security design.
-- `docs/PLUGINS-DESIGN.md` - external MCP plugin configuration/proxy/security design, including the current shared-catalog limitation.
+- `docs/PLUGINS-DESIGN.md` - external MCP plugin configuration/proxy/security design and the worker transport boundary.
 
 ## Handoff maintenance rule
 
