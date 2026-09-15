@@ -179,6 +179,10 @@ public static class ChatGpt2CodexWinInput {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowTextLength(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
     [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int command);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
@@ -289,14 +293,65 @@ public static class ChatGpt2CodexWinInput {
         }, IntPtr.Zero);
         return found;
     }
+    static bool WaitForForeground(IntPtr hWnd, int timeoutMs) {
+        var sw = Stopwatch.StartNew();
+        do {
+            if (GetForegroundWindow() == hWnd) return true;
+            Thread.Sleep(25);
+        } while (sw.ElapsedMilliseconds < timeoutMs);
+        return GetForegroundWindow() == hWnd;
+    }
+
+    static void NudgeForegroundPermission() {
+        // Windows can reject SetForegroundWindow for a background helper even
+        // after the user has authorized control. A tiny Alt down/up is the
+        // standard foreground-lock nudge; it does not type text or target an
+        // arbitrary window and is used only after the exact allowlisted target
+        // has already been resolved.
+        var inputs = new INPUT[2];
+        inputs[0].type = INPUT_KEYBOARD; inputs[0].U.ki.wVk = 0x12;
+        inputs[1] = inputs[0]; inputs[1].U.ki.dwFlags = KEYEVENTF_KEYUP;
+        SendInput(2, inputs, Marshal.SizeOf(typeof(INPUT)));
+    }
+
     public static IntPtr Activate(string appName) {
         var hWnd = FindWindow(appName);
         if (hWnd == IntPtr.Zero) throw new InvalidOperationException("target app window not found");
         if (GetForegroundWindow() == hWnd) return hWnd;
+
         ShowWindowAsync(hWnd, SW_RESTORE);
-        if (!SetForegroundWindow(hWnd)) throw new InvalidOperationException("Windows refused to activate the target app window");
-        Thread.Sleep(75);
-        if (GetForegroundWindow() != hWnd) throw new InvalidOperationException("target app did not become foreground; synthetic input refused");
+
+        uint ignoredPid;
+        uint currentThread = GetCurrentThreadId();
+        IntPtr foregroundWindow = GetForegroundWindow();
+        uint foregroundThread = foregroundWindow == IntPtr.Zero ? 0 : GetWindowThreadProcessId(foregroundWindow, out ignoredPid);
+        uint targetThread = GetWindowThreadProcessId(hWnd, out ignoredPid);
+        bool attachedForeground = false;
+        bool attachedTarget = false;
+
+        try {
+            if (foregroundThread != 0 && foregroundThread != currentThread)
+                attachedForeground = AttachThreadInput(currentThread, foregroundThread, true);
+            if (targetThread != 0 && targetThread != currentThread && targetThread != foregroundThread)
+                attachedTarget = AttachThreadInput(currentThread, targetThread, true);
+
+            BringWindowToTop(hWnd);
+            SetForegroundWindow(hWnd);
+            SetFocus(hWnd);
+        } finally {
+            if (attachedTarget) AttachThreadInput(currentThread, targetThread, false);
+            if (attachedForeground) AttachThreadInput(currentThread, foregroundThread, false);
+        }
+
+        if (!WaitForForeground(hWnd, 350)) {
+            NudgeForegroundPermission();
+            ShowWindowAsync(hWnd, SW_RESTORE);
+            BringWindowToTop(hWnd);
+            SetForegroundWindow(hWnd);
+        }
+
+        if (!WaitForForeground(hWnd, 700))
+            throw new InvalidOperationException("target app did not become foreground; synthetic input refused");
         return hWnd;
     }
     public static RECT RectForApp(string appName) {
