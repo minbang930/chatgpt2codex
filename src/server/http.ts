@@ -4,23 +4,24 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import {
   createOAuthMetadata,
   getOAuthProtectedResourceMetadataUrl,
+  mcpAuthMetadataRouter,
   mcpAuthRouter,
 } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { checkResourceAllowed, resourceUrlFromServerUrl } from "@modelcontextprotocol/sdk/shared/auth-utils.js";
+import { resourceUrlFromServerUrl } from "@modelcontextprotocol/sdk/shared/auth-utils.js";
 import type { ToolContext } from "../types.js";
-import { createServer as createMcpServer } from "./mcp-server.js";
+import { createServer as createMcpServer, createWorkerServer as createWorkerMcpServer } from "./mcp-server.js";
 import { SingleUserOAuthProvider, type OAuthConfig } from "../auth/oauth-provider.js";
 import { verifyOwnerToken } from "../auth/owner-token.js";
 import { registerActionRoutes } from "./actions.js";
 
 /**
  * HTTP + OAuth 2.1 transport gateway (PRD §4 Transport Gateway, §5 CLI,
- * §7 auth, §11 SR-05/SR-12) exposing the SAME 15 tools that serve over
- * stdio (src/server/mcp-server.ts / registerTools) over a Streamable HTTP
- * `/mcp` endpoint, so ChatGPT (web) can connect over a public HTTPS tunnel.
+ * §7 auth, §11 SR-05/SR-12) exposing Core over Streamable HTTP `/mcp` for
+ * main ChatGPT sessions and a capability-narrow `/mcp/worker` sub-resource
+ * for isolated browser workers.
  *
  * Does not alter or remove the stdio transport path in src/cli.ts.
  */
@@ -70,9 +71,12 @@ export function defaultHttpServerConfig(overrides: Partial<HttpServerConfig> = {
   };
 }
 
+type McpSessionRole = "main" | "worker";
+
 interface TrackedSession {
   transport: StreamableHTTPServerTransport;
   lastActiveAtMs: number;
+  role: McpSessionRole;
 }
 
 function sendJsonRpcError(res: Response, status: number, code: number, message: string): void {
@@ -81,6 +85,14 @@ function sendJsonRpcError(res: Response, status: number, code: number, message: 
 
 function hashAuditValue(value: string): string {
   return createHash("sha256").update(value).digest("base64url");
+}
+
+function resourceMatchesExactly(requested: URL | string, configured: URL): boolean {
+  try {
+    return resourceUrlFromServerUrl(requested).href === configured.href;
+  } catch {
+    return false;
+  }
 }
 
 const TRUSTED_CHATGPT_ORIGINS = ["https://chatgpt.com", "https://chat.openai.com"] as const;
@@ -123,11 +135,10 @@ function securityHeaders(_req: Request, res: Response, next: () => void): void {
   next();
 }
 
-/** SR-05/SR-12: reject cross-origin browser requests to /mcp and the OAuth
+/** SR-05/SR-12: reject cross-origin browser requests to MCP and OAuth
  * endpoints whose Origin header does not match the configured public origin
  * or a loopback origin. Non-browser clients (no Origin header, e.g. the
- * ChatGPT backend or curl) are unaffected — Origin is only ever sent by
- * browsers, so this only closes the browser/DNS-rebinding attack surface. */
+ * ChatGPT backend or curl) are unaffected. */
 function makeOriginAllowlist(allowedOrigins: Set<string>) {
   return function originAllowlist(req: Request, res: Response, next: () => void): void {
     if (isOAuthBrowserFlowPath(req.path)) {
@@ -170,7 +181,9 @@ export interface RunningHttpServer {
 export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): RunningHttpServer {
   const publicUrl = new URL(config.publicUrl);
   const mcpUrl = new URL("/mcp", publicUrl);
+  const workerMcpUrl = new URL("/mcp/worker", publicUrl);
   const resourceServerUrl = resourceUrlFromServerUrl(mcpUrl);
+  const workerResourceServerUrl = resourceUrlFromServerUrl(workerMcpUrl);
 
   const loopbackHosts = ["127.0.0.1", "localhost", "[::1]", "::1"];
   const allowedHostnames = Array.from(
@@ -220,6 +233,9 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
         hasClientName: event.clientName !== undefined,
       }),
   };
+  // The provider is rooted at /mcp. Its existing resource validation permits
+  // path descendants, so /mcp/worker is a standards-compatible child resource
+  // without introducing a second OAuth store/provider.
   const oauthProvider = new SingleUserOAuthProvider(oauthConfig, mcpUrl, ctx.stateDir);
   const oauthMetadata = createOAuthMetadata({
     provider: oauthProvider,
@@ -227,10 +243,15 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
     baseUrl: publicUrl,
     scopesSupported: config.oauth.scopes,
   });
-  const bearerAuth = requireBearerAuth({
+  const mainBearerAuth = requireBearerAuth({
     verifier: oauthProvider,
     requiredScopes: [config.oauth.scopes[0] ?? "chatgpt2codex"],
     resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceServerUrl),
+  });
+  const workerBearerAuth = requireBearerAuth({
+    verifier: oauthProvider,
+    requiredScopes: [config.oauth.scopes[0] ?? "chatgpt2codex"],
+    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(workerResourceServerUrl),
   });
 
   app.use(
@@ -241,6 +262,17 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
       resourceServerUrl,
       scopesSupported: config.oauth.scopes,
       resourceName: "chatgpt2codex",
+    }),
+  );
+  // Advertise the worker child resource through the same authorization server.
+  // A worker connector can therefore request an audience-bound token for
+  // /mcp/worker while main-agent OAuth behavior remains unchanged.
+  app.use(
+    mcpAuthMetadataRouter({
+      oauthMetadata,
+      resourceServerUrl: workerResourceServerUrl,
+      scopesSupported: config.oauth.scopes,
+      resourceName: "chatgpt2codex worker",
     }),
   );
 
@@ -276,10 +308,9 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
 
   registerActionRoutes(app, ctx, publicUrl);
 
-  // Per-session transport map with TTL + hard cap (NFR-03/SR-09): every
-  // initialize request creates one transport, keyed by MCP session id.
-  // Idle sessions are swept on a timer; the map never grows unbounded even
-  // under a client that never sends a clean close.
+  // Per-session transport map with TTL + hard cap (NFR-03/SR-09). The role is
+  // stored with the session id so a main transport cannot be replayed through
+  // /mcp/worker and a worker transport cannot be replayed through /mcp.
   const sessions = new Map<string, TrackedSession>();
   let lastSessionActivityAtMs = Date.now();
   let idleShutdownQueued = false;
@@ -320,9 +351,11 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
   }, Math.min(config.sessionTtlMs, config.idleShutdownMs ?? 60_000, 60_000));
   sweepInterval.unref();
 
-  app.all("/mcp", async (req, res) => {
+  async function handleMcpRequest(role: McpSessionRole, req: Request, res: Response): Promise<void> {
     const sessionId = req.header("mcp-session-id");
     const initializeRequest = req.method === "POST" && isInitializeRequest(req.body);
+    const configuredResource = role === "worker" ? workerResourceServerUrl : resourceServerUrl;
+    const bearerAuth = role === "worker" ? workerBearerAuth : mainBearerAuth;
 
     await new Promise<void>((resolve, reject) => {
       bearerAuth(req, res, (error?: unknown) => {
@@ -332,10 +365,10 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
     }).catch(() => undefined);
     if (res.headersSent) return;
 
-    if (
-      !req.auth?.resource ||
-      !checkResourceAllowed({ requestedResource: req.auth.resource, configuredResource: resourceServerUrl })
-    ) {
+    // The OAuth provider intentionally accepts /mcp descendants. At the
+    // transport boundary the audience is exact: a /mcp/worker token cannot be
+    // replayed against /mcp, and a /mcp token cannot enter the worker route.
+    if (!req.auth?.resource || !resourceMatchesExactly(req.auth.resource, configuredResource)) {
       sendJsonRpcError(res, 401, -32001, "Unauthorized");
       return;
     }
@@ -345,7 +378,7 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
 
       if (sessionId) {
         const tracked = sessions.get(sessionId);
-        if (!tracked) {
+        if (!tracked || tracked.role !== role) {
           sendJsonRpcError(res, 404, -32000, "Unknown MCP session");
           return;
         }
@@ -360,7 +393,7 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
           onsessioninitialized: (newSessionId) => {
             if (transport) {
               lastSessionActivityAtMs = Date.now();
-              sessions.set(newSessionId, { transport, lastActiveAtMs: lastSessionActivityAtMs });
+              sessions.set(newSessionId, { transport, lastActiveAtMs: lastSessionActivityAtMs, role });
             }
           },
         });
@@ -370,12 +403,10 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
           if (closedSessionId) sessions.delete(closedSessionId);
         };
 
-        // Mark this session remote: it's how ChatGPT (and any other network
-        // MCP client) connects, so project_select preset=control must be
-        // refused here even when the desktop-control tools are exposed to
-        // ChatGPT (see src/server/tools.ts project_select handler /
-        // isControlChatGptExposed) — lease arming stays local-only (stdio).
-        const mcpServer = await createMcpServer({ ...ctx, remote: true });
+        const remoteCtx = { ...ctx, remote: true };
+        const mcpServer = role === "worker"
+          ? await createWorkerMcpServer(remoteCtx)
+          : await createMcpServer(remoteCtx);
         await mcpServer.connect(transport);
       } else {
         sendJsonRpcError(res, 400, -32000, "No valid MCP session");
@@ -388,7 +419,10 @@ export function createHttpServer(ctx: ToolContext, config: HttpServerConfig): Ru
         sendJsonRpcError(res, 500, -32603, error instanceof Error ? error.message : "Internal server error");
       }
     }
-  });
+  }
+
+  app.all("/mcp", (req, res) => handleMcpRequest("main", req, res));
+  app.all("/mcp/worker", (req, res) => handleMcpRequest("worker", req, res));
 
   let closed = false;
   return {
