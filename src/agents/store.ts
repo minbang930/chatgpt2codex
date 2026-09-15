@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { emitSubagentStartHook, emitSubagentStopHook } from "../hooks/subagent-lifecycle.js";
 import { DomainError, ErrorCode } from "../types.js";
 
 const DIR_MODE = 0o700;
@@ -189,6 +190,9 @@ async function finalizeWorker(
     notification: makeNotification(status, now),
   };
   await writeWorker(stateDir, next);
+  // Durable state is the source of truth. Only after the final state has been
+  // persisted do we publish the best-effort SubagentStop notification.
+  await emitSubagentStopHook(stateDir, { ...next, status });
   return next;
 }
 
@@ -318,6 +322,10 @@ export async function markWorkerRunning(stateDir: string, workerId: string): Pro
     updatedAt: now,
   };
   await writeWorker(stateDir, next);
+  // As with finalization, publish lifecycle notification only after the durable
+  // pending -> running transition has committed. Repeated calls are idempotent
+  // and return above without emitting duplicate SubagentStart events.
+  await emitSubagentStartHook(stateDir, next);
   return next;
 }
 
