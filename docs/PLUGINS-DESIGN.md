@@ -17,7 +17,7 @@ local operator registers endpoint
  -> plugin failures stay isolated from Core
 ```
 
-Browser workers do not inherit plugin tools automatically.
+Worker-prefixed browser-worker tools do not inherit plugin authority automatically. A later stabilization check found an important distinction between that worker capability boundary and the shared remote MCP catalog; see **Worker boundary and current shared-catalog gap** below.
 
 ## Boundary
 
@@ -104,20 +104,30 @@ The proxy:
 
 Because an arbitrary external MCP tool may mutate remote state, `plugin_call` is conservatively exposed as an open-world, potentially destructive operation. Enabling the plugin is the local operator's network-authority gate; calling a tool still requires the main agent to select that plugin/tool explicitly.
 
-## Worker boundary
+## Worker boundary and current shared-catalog gap
 
-Worker tools remain generated from the explicit `WORKER_CORE_TOOL_NAMES` allowlist. Plugin registration occurs outside that worker mirror path, and no `worker_plugin_call` surface exists.
+The hard worker capability path is narrow:
 
-Therefore browser workers do not automatically inherit:
+- `registerWorkerTools()` creates only `worker_*` mirrors derived from the explicit `WORKER_CORE_TOOL_NAMES` allowlist;
+- no `worker_plugin_call`, `worker_plugin_discover`, or other `worker_plugin_*` surface is registered;
+- `dispatchWorkerCoreTool()` checks the same allowlist before capability verification and rejects `plugin_list`, `plugin_discover`, `plugin_call`, and every other non-allowlisted Core tool;
+- adding or enabling plugin configuration does not widen this worker-prefixed capability surface.
 
-- `plugin_register`;
-- `plugin_set_enabled`;
-- `plugin_remove`;
-- `plugin_discover`;
-- `plugin_call`;
-- any remotely discovered plugin tool.
+That boundary was exercised with plugin configuration present in `src/plugins/worker-isolation.integration.test.ts`.
 
-Any future worker plugin access requires a separate reviewed allowlist/capability contract.
+However, the current ChatGPT Web worker still connects through the same remote `/mcp` service as the main ChatGPT session. `createServer({ ...ctx, remote: true })` registers the normal remote tool catalog for each remote MCP connection, and the transport currently has no authenticated role/session identity that distinguishes a parent/main-agent chat from a browser-worker chat.
+
+As a result, the shared remote `tools/list` catalog still contains the unprefixed main-agent proxy tools `plugin_list`, `plugin_discover`, and `plugin_call`. The worker bootstrap instructs the browser worker to use `worker_*` tools, but that instruction is not equivalent to a server-side capability denial for those unprefixed plugin proxies.
+
+Therefore the precise current security statement is:
+
+- plugin configuration **does not widen the worker capability or `worker_*` tool surface**;
+- browser workers **do not receive any worker-prefixed plugin proxy or dynamically discovered plugin tool**;
+- strict server-side proof that a browser-worker ChatGPT session cannot invoke the shared unprefixed plugin proxies is **not yet implemented**.
+
+Hard isolation requires a reviewed transport/authentication boundary that can identify a worker MCP session before tool catalog generation/invocation—for example a dedicated worker MCP endpoint/credential or an equivalent authenticated worker-session role. It must reuse the existing durable worker capability/authorization model rather than relying on prompt text or creating an unrelated authority system.
+
+Do not solve this by globally hiding or disabling plugin proxies whenever workers exist: the main-agent remote session must retain its explicitly configured plugin surface. Any future worker plugin access must still require a separate reviewed allowlist/capability contract.
 
 ## Optional plugin skill sources
 
@@ -172,7 +182,7 @@ plugin_remove
 - remote tool existence validation;
 - no dynamic remote tool registration;
 - per-call failure isolation;
-- browser workers remain denied by default.
+- no worker-prefixed plugin proxy is registered.
 
 ### M5.5.4 - Optional plugin skill sources — complete
 
@@ -189,7 +199,9 @@ M5.5 does not:
 - allow external plugins to mutate the Core tool registry at runtime;
 - let a remote ChatGPT session register or enable new plugin endpoints;
 - persist plaintext plugin credentials;
-- automatically grant plugin tools to browser workers;
+- add plugin tools to `WORKER_CORE_TOOL_NAMES` or create a `worker_plugin_*` proxy;
 - execute plugin-provided local scripts;
 - automatically install or activate plugin-declared skills;
 - treat plugin-provided skills as trusted merely because the plugin is enabled.
+
+Strict per-browser-worker filtering of the shared unprefixed remote plugin proxies is now a stabilization item, not a completed M5.5 property.
