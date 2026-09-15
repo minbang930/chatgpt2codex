@@ -11,12 +11,13 @@ The desired user experience is:
 ```text
 install a skill from GitHub or a local source
  -> discover only lightweight metadata by default
- -> load full SKILL.md only when needed
+ -> explicitly activate only the skills needed for the task
+ -> pass the same bounded instruction context to browser workers
  -> optionally load support files on demand
  -> keep executable content and external MCP servers behind separate reviewed boundaries
 ```
 
-This is distinct from the existing M4 lifecycle-hook engine. Skills are model instructions/resources, not hook commands and not durable worker state.
+This is distinct from the existing M4 lifecycle-hook engine. Skills are model instructions/resources, not hook commands, durable worker state, or a capability grant.
 
 ## Reference implementations
 
@@ -45,7 +46,7 @@ The custom runtime should implement only the subset needed for ChatGPT2Codex rat
 
 ## Storage and precedence
 
-Initial roots:
+Skill package roots:
 
 ```text
 Project:
@@ -63,7 +64,15 @@ project > global
 
 If a project skill and global skill expose the same `name`, the project skill wins and the registry records a collision diagnostic.
 
-M5.1 does not add bundled skills or plugin-provided skill roots yet.
+Activation state is runtime-owned and separate from skill packages:
+
+```text
+<stateDir>/skill-activations.json
+```
+
+It stores a global selected-name list plus project-id-specific selected-name lists. Selection is by skill name; when instructions are loaded, the normal project-over-global registry precedence is applied again so a project override remains authoritative.
+
+M5 does not add bundled skills or plugin-provided skill roots yet.
 
 ## Skill package contract
 
@@ -87,26 +96,29 @@ description: Short description used for discovery.
 ---
 ```
 
-M5.1 parses the top-level metadata required for discovery without introducing a general YAML dependency. Full/nested manifest semantics can be added only when a concrete skill feature needs them.
+The runtime parses only the top-level metadata required for discovery without introducing a general YAML dependency. Full/nested manifest semantics can be added only when a concrete skill feature needs them.
 
 ## Progressive disclosure
 
 Do not place every installed skill body into every prompt.
 
-The intended disclosure model is:
+The disclosure model is:
 
 ```text
-Tier 0: registry metadata
-  name + description + scope
+Tier 0: bounded registry metadata
+  name + description + installed scope + active state
 
-Tier 1: full SKILL.md
-  loaded explicitly when the skill is selected
+Tier 1: one full SKILL.md
+  returned by skill_view or explicit skill_activate
 
-Tier 2: support resource
+Tier 2: activated launch context
+  only explicitly selected skills, within deterministic count/character budgets
+
+Tier 3: support resource
   references/assets/templates/scripts loaded explicitly by path
 ```
 
-M5.1 implements the safe metadata/full-skill primitives. M5.2 exposes Tier 0 through `skill_list` and Tier 1 through `skill_view`; support-resource reads remain deferred to M5.4.
+M5.1 implements the safe metadata/full-skill primitives. M5.2 exposes discovery and management. M5.3 adds explicit activation plus bounded browser-worker propagation. Support-resource reads remain deferred to M5.4.
 
 ## M5.1 safety boundaries
 
@@ -125,7 +137,7 @@ Executable skill content remains disabled by default until a later M5 security/a
 
 ## M5.2 management contract
 
-The Core MCP surface now exposes five fixed Agent Skills tools:
+The management surface exposes:
 
 ```text
 skill_list
@@ -135,7 +147,7 @@ skill_update
 skill_remove
 ```
 
-`skill_list` returns bounded discovery metadata and never returns the full instruction body. `skill_view` resolves project-over-global precedence and returns the selected `SKILL.md` only when the agent asks for it.
+`skill_list` returns discovery metadata and never returns the full instruction body. `skill_view` resolves project-over-global precedence and returns the selected `SKILL.md` only when the agent asks for it.
 
 ### Managed install sources
 
@@ -165,7 +177,7 @@ source
  -> atomically place it under project/global skills
 ```
 
-The copied package is bounded to 2048 regular files and 32 MiB. Symlinks and unsupported filesystem entries are rejected, VCS metadata is not copied, and no file in `scripts/` or elsewhere is executed during discovery, install, update, list, or view.
+The copied package is bounded to 2048 regular files and 32 MiB. Symlinks and unsupported filesystem entries are rejected, VCS metadata is not copied, and no file in `scripts/` or elsewhere is executed during discovery, install, update, list, view, or activation.
 
 ### Provenance
 
@@ -191,6 +203,81 @@ The record contains:
 
 Global skills are managed under `<stateDir>/skills/`. Project skills are managed under `<project>/.agents/skills/` and project-scoped mutations require the active project plus its existing write lease. The skills subsystem does not create a second project-authorization model.
 
+## M5.3 activation contract
+
+M5.3 adds two explicit selection tools:
+
+```text
+skill_activate
+skill_deactivate
+```
+
+Activation does not install, execute, or authorize anything. It selects instruction content that the main ChatGPT agent may follow immediately and that later browser workers receive as launch-time context.
+
+### Activation scopes
+
+`skill_activate` accepts an activation scope independent of the skill's install scope:
+
+- `global`: the selected skill name is considered for every project context;
+- `project`: the selected name is tied to the currently active project.
+
+For one project context, global selections are considered first and project selections are then appended, with duplicate names removed deterministically. The effective skill body is resolved through the normal project-over-global registry, so a project-local skill with the same name overrides the global package.
+
+Project activation changes only runtime selection state. It does not modify project files and therefore does not invent a second filesystem-write authorization model.
+
+### Deterministic budgets
+
+M5.3 keeps both catalog and activated instruction context bounded:
+
+```text
+skill_list catalog:
+  max 32 returned entries
+  max 6,000 approximate metadata characters
+  max 500 description characters per entry
+
+activated context:
+  max 3 effective active skill names
+  max 8,000 characters per activated SKILL.md
+  max 24,000 characters across activated skill bodies
+```
+
+If a skill exceeds the per-skill activation budget, `skill_activate` rejects activation and the agent can still inspect it explicitly with `skill_view`. Stale or unavailable activation entries are skipped when constructing browser-worker context rather than preventing an otherwise healthy worker from launching.
+
+### Main-agent behavior
+
+`skill_list` reports bounded metadata, whether each visible skill is active, its activation scopes, the effective active-name list, and whether catalog truncation occurred. This keeps discovery cheap.
+
+`skill_activate` is the explicit transition from discovery to instruction use. It validates the selected effective skill, persists the activation, and returns that one bounded `SKILL.md` body to the main agent so it can follow the instructions immediately. `skill_deactivate` removes only the requested runtime selection and never uninstalls the package.
+
+### Browser-worker propagation
+
+Initial launch and recovery use the same skill-context adapter:
+
+```text
+durable worker.task
+ -> Ponytail launch-time adaptation
+ -> append currently activated bounded skill instructions
+ -> ChatGPT Web worker bootstrap
+```
+
+The original durable `worker.task` is never rewritten with skill content. Recovery re-reads the current activation state rather than persisting a skill-expanded task in durable worker state.
+
+Skill-context loading is best-effort at the worker boundary: corrupt/stale optional extension state does not fabricate worker failure or change durable worker state.
+
+### Capability boundary
+
+Agent Skills are instructions/resources only.
+
+Activation does not:
+
+- alter the worker capability token or its scope;
+- add any `worker_*` tool;
+- grant normal Core tools to a worker;
+- grant Computer Use or external MCP/plugin access;
+- execute `scripts/` or dependency installation commands from the skill package.
+
+Any future executable skill or plugin access requires a separate reviewed authorization boundary.
+
 ## M5 units
 
 ### M5.1 - Agent Skills foundation — complete
@@ -210,13 +297,15 @@ Global skills are managed under `<stateDir>/skills/`. Project skills are managed
 - project/global target scope.
 - managed-only update/removal and bounded snapshot export.
 
-### M5.3 - Skill activation
+### M5.3 - Skill activation — implemented
 
-- expose a bounded installed-skill catalog to the main ChatGPT agent.
-- make skill selection explicit and predictable for the main agent.
-- add selected skills to the existing browser-worker bootstrap path.
-- preserve the original durable worker task; skill adaptation remains launch-time instruction context, matching the M4.5 Ponytail separation.
-- keep catalog/instruction context size bounded.
+- bounded `skill_list` catalog with active-state metadata.
+- explicit `skill_activate` / `skill_deactivate` selection.
+- global and active-project selection layers with deterministic precedence.
+- bounded full-skill activation returned to the main agent.
+- selected skills appended to initial/recovery browser-worker launch context.
+- original durable worker task remains unchanged.
+- worker capabilities and tool authorization remain unchanged.
 
 ### M5.4 - Skill resources and security
 
@@ -235,13 +324,14 @@ Global skills are managed under `<stateDir>/skills/`. Project skills are managed
 
 Workers do not automatically inherit external plugin tools. Any future worker plugin access must use an explicit allowlist/capability boundary just like the existing worker-scoped Core tools.
 
-## Non-goals through M5.2
+## Non-goals through M5.3
 
-M5.1/M5.2 do not:
+M5.1-M5.3 do not:
 
 - execute skill scripts or install commands.
 - install npm/pip/brew/etc dependencies declared by third-party content.
-- inject all installed skills into prompts.
+- inject every installed skill into prompts.
+- automatically select arbitrary third-party skills without an explicit activation step.
 - automatically grant external MCP tools to workers.
 - implement a public marketplace or registry.
 - treat a mutable Git checkout as an installed skill.
