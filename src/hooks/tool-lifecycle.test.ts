@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -130,7 +130,7 @@ describe("tool lifecycle hooks", () => {
       }),
     );
     expect(JSON.stringify(events)).not.toContain("toolAvailabilityGate");
-    expect(path.resolve(events[0]?.cwd ?? "")).toBe(path.resolve(fixture.projectRoot));
+    expect(await realpath(events[0]?.cwd ?? "")).toBe(await realpath(fixture.projectRoot));
   });
 
   it("marks mapped tool errors unsuccessful and exposes only bounded requested project identity", async () => {
