@@ -6,10 +6,11 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **Implementation roadmap complete through M5**
 
-Active unit: **Post-M5 stabilization / live integration validation**
+Active unit: **Post-M5 stabilization / plugin skill-source smoke validation**
 
 Detailed design documents:
 
+- `docs/SESSION-HANDOFF.md` - current operational context for continuing work across ChatGPT sessions.
 - `docs/WINDOWS-COMPUTER-USE-DESIGN.md`
 - `docs/HOOKS-DESIGN.md`
 - `docs/SKILLS-DESIGN.md`
@@ -304,7 +305,8 @@ The milestone plan in `docs/CUSTOM-RUNTIME-PLAN.md` ends at M5. No new feature m
 
 Post-roadmap work should therefore be stabilization and real integration validation rather than widening scope automatically:
 
-- [ ] Run one live external MCP smoke test against a deliberately configured endpoint: local registration -> enable -> discovery -> explicit `plugin_call` -> disable/remove.
+- [x] Run one live external MCP smoke test against a deliberately configured endpoint: local registration -> enable -> discovery -> explicit `plugin_call` -> disable/remove.
+  - Verified by loopback Streamable HTTP MCP integration through the actual Core plugin tool handlers in commit `5fbc010b`; CI `35011189776` passed on Ubuntu, macOS, and Windows.
 - [ ] Run a declared plugin skill-source smoke test through the existing `skill_install` / `skill_activate` path.
 - [ ] Re-run representative main-agent + browser-worker flows after plugin configuration exists and verify workers still do not receive plugin tools.
 - [ ] Keep CI green and fix integration defects discovered by those smoke tests before defining any new milestone.
@@ -312,3 +314,5 @@ Post-roadmap work should therefore be stabilization and real integration validat
 ## Update policy
 
 Update this file whenever a unit is completed, blocked, materially redesigned, or moved in scope. Record verification and relevant commits before beginning the next unit.
+
+Keep `docs/SESSION-HANDOFF.md` synchronized whenever a milestone/stabilization unit completes, the active unit or architectural direction changes, or a major live validation changes the next session's operational context.
