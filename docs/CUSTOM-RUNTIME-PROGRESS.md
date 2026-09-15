@@ -4,9 +4,9 @@ Implementation status for `dev/custom-runtime`.
 
 ## Current status
 
-Overall phase: **M4 - Hooks**
+Overall phase: **M4 - Hooks complete**
 
-Active unit: **M4.2 - SessionStart integration**
+Active unit: **M5 - Plugins (next)**
 
 ## Completed
 
@@ -265,41 +265,77 @@ Implementation notes:
 - `57afd780` corrected a TypeScript Buffer-generic mismatch exposed by CI without changing runtime semantics.
 - `dd1925a` made the hook cwd test compare real paths so macOS `/var` versus `/private/var` aliases do not create a false failure.
 - `a9099de` gave one pre-existing Windows DOM-recovery test a 10-second budget after hosted Windows setup exceeded its old 5-second test timeout; this was test-only and did not change browser-worker production behavior.
-- M4.1 intentionally defines the event names but does not yet emit them from runtime lifecycle points. Event wiring begins in M4.2.
-
-## In progress
 
 ### M4.2 - SessionStart integration
 
-- [ ] Emit `SessionStart` once for each newly created MCP session/server instance.
-- [ ] Keep the event payload bounded and free of secrets/tool arguments.
-- [ ] Resolve the current active project only for hook context/cwd and minimal event metadata.
-- [ ] Hook failure or malformed configuration must never prevent stdio/HTTP MCP session startup.
-- [ ] Add stdio/HTTP-safe unit coverage and cross-platform CI verification.
+- [x] Emit `SessionStart` once for each newly created MCP server/session instance after the runtime context is ready.
+- [x] Keep the payload bounded to transport/remote/active-project metadata; no secrets or unrestricted session state are copied.
+- [x] Resolve the current active project only for hook cwd/context, falling back safely when persisted session state cannot be read.
+- [x] Hook failure or malformed configuration never prevents stdio/HTTP MCP server creation.
+- [x] Added cross-platform coverage for active-project cwd, bounded metadata, session-state failure fallback, and hook-failure isolation.
 
-## Planned next
+Implementation notes:
+
+- `fd75e655` added the SessionStart integration helper.
+- `3c5f68b7` wired it into shared MCP server creation.
+- `4401806c` / `e5a735c5` added SessionStart and lifecycle integration coverage.
 
 ### M4.3 - Tool lifecycle hooks
 
-- [ ] Add `PreToolUse` / `PostToolUse` at the shared MCP tool boundary rather than duplicating wiring inside every handler.
-- [ ] Keep payloads bounded to tool name/project/success/duration metadata by default.
-- [ ] Preserve the M4.1 best-effort/non-veto contract.
+- [x] Added `PreToolUse` / `PostToolUse` around the shared MCP tool registration boundary rather than duplicating hook logic inside individual handlers.
+- [x] Payloads are bounded to tool name, remote/project identity, success state, and duration plus a requested project id when present.
+- [x] Raw tool arguments/results and tool-returned secrets are not copied to lifecycle hooks.
+- [x] Hook/config failures remain best-effort and cannot veto or alter an otherwise healthy MCP tool result.
+- [x] The wrapper covers Core tools while preserving the existing worker/agent registration order and normal result semantics.
+
+Implementation notes:
+
+- `7d2a996b` wired lifecycle hooks at the shared MCP tool boundary.
+- `802bda0c` normalized macOS real-path aliases in the lifecycle test.
+- `9ce650b8` gave Windows real-Git agent integration tests an appropriate hosted-runner timeout budget; CI run `34977212167` passed Ubuntu, Windows, and macOS.
 
 ### M4.4 - Subagent lifecycle hooks
 
-- [ ] Add `SubagentStart` when a durable Web worker actually enters its accepted/running lifecycle.
-- [ ] Add `SubagentStop` once when the worker reaches or is forced into a final/retired lifecycle state.
-- [ ] Keep durable worker state as the source of truth; hooks are notifications only.
+- [x] Emit `SubagentStart` only after a durable worker successfully transitions into `running`.
+- [x] Emit `SubagentStop` only after a durable worker reaches `completed`, `failed`, or `cancelled`.
+- [x] Duplicate running/finalization calls do not create duplicate lifecycle events.
+- [x] Durable worker state is written first and remains the source of truth; hook failure never rolls back or changes worker state.
+- [x] Subagent hook payloads contain bounded worker/project/status metadata and never include the worker task, completion summary, or capability token.
+- [x] Added tests for start/stop ordering, duplicate suppression, terminal statuses, payload redaction, and hook failure isolation.
 
-### M4.5 - Ponytail-style integration
+Implementation notes:
 
-- [ ] Add Ponytail-compatible behavior only after generic hook timing/payload/failure semantics are stable.
+- `00f240b7` added durable subagent lifecycle emission support.
+- `a564470d` integrated it with worker transitions.
+- `88f1072a` added lifecycle regression coverage; CI run `34977859202` passed Ubuntu, Windows, and macOS.
+
+### M4.5 - Ponytail-style worker integration
+
+- [x] Added a small instruction-layer Ponytail adapter instead of turning the generic hook engine into a coding-policy engine.
+- [x] Browser workers default to `FULL` mode and receive the policy through the existing launch/bootstrap task path.
+- [x] The first non-empty task line may override the worker with `ponytail lite|full|ultra|off` or `/ponytail lite|full|ultra|off`.
+- [x] `OFF` strips the directive and sends the normal task without Ponytail guidance; later incidental mentions of `ponytail` are not reinterpreted as directives.
+- [x] Initial launch and browser recovery share the same adapter path, so recovered workers receive the same mode semantics.
+- [x] The durable worker record keeps the original unmodified task; Ponytail remains launch-time instruction context and never becomes worker-state authority.
+- [x] Active modes preserve validation, security, accessibility, meaningful edge cases, error handling, and explicit user requirements while preferring reuse, native/standard facilities, direct solutions, minimal coherent diffs, and focused checks.
+- [x] Added focused mode/parser/bootstrap/recovery coverage.
+
+Implementation notes:
+
+- `300304ff` added `src/agents/ponytail.ts`.
+- `822837e8` applies the adapter at the common browser launch/recovery path.
+- `e20a4e02` and `3b775556` added launch and mode coverage.
+- `83cfca0d` updated the hook design to record the instruction-layer separation.
+- The first integration CI exposed two pre-existing tests that asserted the raw task passed unchanged to the browser driver; `d02627cc` and `acb9d8c2` updated those assertions to the new intentional bootstrap contract.
+
+## Planned next
 
 ### M5 - Plugins
 
-- [ ] Separate optional Plugins connector.
-- [ ] External MCP discovery/configuration.
-- [ ] Failure isolation from Core.
+- [ ] Separate optional Plugins connector from Core.
+- [ ] Add external MCP/plugin discovery and configuration without widening the stable Core tool surface.
+- [ ] Keep plugin failure isolated from Core and worker correctness.
+- [ ] Define the smallest concrete M5 units before implementation rather than building speculative plugin infrastructure.
 
 ## Update policy
 
