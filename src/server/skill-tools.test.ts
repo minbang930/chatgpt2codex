@@ -60,7 +60,7 @@ afterEach(async () => {
 });
 
 describe("Agent Skills MCP tools", () => {
-  it("installs a local skill, lists metadata, views the body on demand, updates, and removes it", async () => {
+  it("installs, activates, lists, views, updates, deactivates, and removes a local skill", async () => {
     const workspace = await temp("chatgpt2codex-skill-tools-workspace-");
     const stateDir = await temp("chatgpt2codex-skill-tools-state-");
     const source = path.join(workspace, "skill-source");
@@ -81,9 +81,33 @@ describe("Agent Skills MCP tools", () => {
     const listed = await tool.skill_list?.({});
     expect(listed?.isError).not.toBe(true);
     expect(listed?.structuredContent?.skills).toEqual([
-      expect.objectContaining({ name: "reviewer", description: "Review code carefully", scope: "global", managed: true }),
+      expect.objectContaining({
+        name: "reviewer",
+        description: "Review code carefully",
+        scope: "global",
+        managed: true,
+        active: false,
+      }),
     ]);
     expect(JSON.stringify(listed?.structuredContent)).not.toContain("First revision.");
+
+    const activated = await tool.skill_activate?.({ name: "reviewer", activationScope: "global" });
+    expect(activated?.isError).not.toBe(true);
+    expect(activated?.structuredContent).toMatchObject({
+      name: "reviewer",
+      activationScope: "global",
+      activeSkillNames: ["reviewer"],
+    });
+    expect(activated?.structuredContent?.content).toContain("First revision.");
+
+    const listedActive = await tool.skill_list?.({});
+    expect(listedActive?.structuredContent?.skills).toEqual([
+      expect.objectContaining({
+        name: "reviewer",
+        active: true,
+        activationScopes: ["global"],
+      }),
+    ]);
 
     const viewed = await tool.skill_view?.({ name: "reviewer" });
     expect(viewed?.isError).not.toBe(true);
@@ -95,10 +119,31 @@ describe("Agent Skills MCP tools", () => {
     const viewedAgain = await tool.skill_view?.({ name: "reviewer" });
     expect(viewedAgain?.structuredContent?.content).toContain("Second revision.");
 
+    const deactivated = await tool.skill_deactivate?.({ name: "reviewer", activationScope: "global" });
+    expect(deactivated?.isError).not.toBe(true);
+    expect(deactivated?.structuredContent?.activeSkillNames).toEqual([]);
+
     const removed = await tool.skill_remove?.({ name: "reviewer", scope: "global" });
     expect(removed?.isError).not.toBe(true);
     const after = await tool.skill_list?.({});
     expect(after?.structuredContent?.skills).toEqual([]);
+  });
+
+  it("rejects activating a skill whose full instructions exceed the activation budget", async () => {
+    const workspace = await temp("chatgpt2codex-skill-tools-large-workspace-");
+    const stateDir = await temp("chatgpt2codex-skill-tools-large-state-");
+    const source = path.join(workspace, "large-skill");
+    await writeSkill(source, "large-reviewer", "Large review skill", "x".repeat(8_100));
+
+    const server = new McpServer({ name: "skill-tools-large-test", version: "1" });
+    registerSkillTools(server, ctx(workspace, stateDir));
+    const tool = handlers(server);
+    expect((await tool.skill_install?.({ source, scope: "global" }))?.isError).not.toBe(true);
+
+    const activated = await tool.skill_activate?.({ name: "large-reviewer", activationScope: "global" });
+    expect(activated?.isError).toBe(true);
+    expect(String(activated?.structuredContent?.error)).toMatch(/activation.*8000|8000.*activation/i);
+    expect(String(activated?.structuredContent?.error)).toMatch(/skill_view/i);
   });
 
   it("does not expose a local source outside the workspace through skill_install", async () => {
