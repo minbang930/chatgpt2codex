@@ -4,15 +4,16 @@ Implementation status for `dev/custom-runtime`.
 
 ## Current status
 
-Overall phase: **M5 - Extensions**
+Overall phase: **Implementation roadmap complete through M5**
 
-Active unit: **M5.5 - External MCP plugins**
+Active unit: **Post-M5 stabilization / live integration validation**
 
 Detailed design documents:
 
 - `docs/WINDOWS-COMPUTER-USE-DESIGN.md`
 - `docs/HOOKS-DESIGN.md`
 - `docs/SKILLS-DESIGN.md`
+- `docs/PLUGINS-DESIGN.md`
 
 ## Completed
 
@@ -278,16 +279,35 @@ Representative implementation commits: `88ac2517`, `e2fbed65`, `54cd0ac1`, `b018
 
 Final M5.4 code CI: `35002217812` (Ubuntu, macOS, Windows all passed, including Windows native/UIA/activity-indicator and launcher build coverage).
 
+#### M5.5 - External MCP plugins
+
+- [x] Added runtime-owned versioned `plugins.json` with a hard cap of 16 configured plugins.
+- [x] Added local-only `plugin_register`, `plugin_set_enabled`, and `plugin_remove`; remote ChatGPT sessions cannot add or arm new network endpoints.
+- [x] Added read-only `plugin_list`; registration is disabled by default and listing does not make network calls.
+- [x] Plugin authentication headers store environment-variable names only; credential values are resolved in memory and are never persisted in plugin configuration.
+- [x] Endpoint validation allows HTTPS and loopback HTTP only and rejects embedded URL credentials, query strings, and fragments.
+- [x] Added bounded on-demand `plugin_discover` using the MCP Streamable HTTP client with enabled-only connections, timeouts, schema/catalog limits, and per-plugin error isolation.
+- [x] Added fixed `plugin_call` proxy instead of dynamically registering external schemas into Core; calls require an explicit plugin id and exact remote tool name.
+- [x] Plugin call arguments/results are bounded and plugin failures remain local to the invocation.
+- [x] Worker plugin inheritance remains disabled: worker mirrors still come only from `WORKER_CORE_TOOL_NAMES`, and no worker plugin proxy is registered.
+- [x] Added optional explicit plugin `skillSources` declarations for HTTPS Git sources; declarations are inert and never install/activate automatically.
+- [x] Plugin-associated skills continue through the normal `skill_install` path and therefore reuse M5.1-M5.4 provenance, scanning, activation, resource, and script-disable boundaries.
+- [x] Added cross-platform plugin registry, discovery, invocation, failure-isolation, and skill-source regression coverage.
+
+Representative implementation commits: `e3ca6afc`, `f578645d`, `62ee8fd9`, `7558bde5`, `a84fb368`, `fb8c3a28`, `cb524aff`, `36804fc6`, `6d45b0f4`, `41d0b826`, `318900e4`, `ada4f3fa`.
+
+Final M5.5 code CI: `35007895907` (Ubuntu, macOS, Windows all passed, including Windows native/UIA/activity-indicator and launcher build coverage).
+
 ## Planned next
 
-### M5.5 - External MCP plugins
+The milestone plan in `docs/CUSTOM-RUNTIME-PLAN.md` ends at M5. No new feature milestone has been added implicitly.
 
-- [ ] Add a separate optional Plugins connector/configuration surface rather than merging external servers into Core registration.
-- [ ] Support bounded external MCP server discovery/configuration with explicit enabled/disabled state.
-- [ ] Keep plugin connection/startup/runtime failure isolated from the Core MCP server and coding tools.
-- [ ] Keep browser workers from inheriting external plugin tools automatically; any worker plugin access requires an explicit allowlist/capability contract.
-- [ ] Allow optional plugin-provided skill roots only through explicit manifest/configuration and the existing Skill safety boundaries.
-- [ ] Add cross-platform lifecycle/error-isolation coverage before marking M5 complete.
+Post-roadmap work should therefore be stabilization and real integration validation rather than widening scope automatically:
+
+- [ ] Run one live external MCP smoke test against a deliberately configured endpoint: local registration -> enable -> discovery -> explicit `plugin_call` -> disable/remove.
+- [ ] Run a declared plugin skill-source smoke test through the existing `skill_install` / `skill_activate` path.
+- [ ] Re-run representative main-agent + browser-worker flows after plugin configuration exists and verify workers still do not receive plugin tools.
+- [ ] Keep CI green and fix integration defects discovered by those smoke tests before defining any new milestone.
 
 ## Update policy
 
