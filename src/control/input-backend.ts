@@ -1,6 +1,6 @@
 import { DomainError, ErrorCode } from "../types.js";
 import type { ResolvedTargetPreview } from "./queue.js";
-import { showComputerUseClickPulse, withComputerUseActivity } from "./activity-indicator.js";
+import { showComputerUseAutomationPointer, showComputerUseClickPulse, withComputerUseActivity } from "./activity-indicator.js";
 import * as macInput from "./mac-input.js";
 import * as winInput from "./win-native.js";
 import * as winUia from "./win-uia.js";
@@ -65,6 +65,7 @@ export async function clickAtPoint(appName: string, x: number, y: number): Promi
   if (process.platform === "darwin") return macInput.clickAtPoint(appName, x, y);
   if (process.platform === "win32") {
     return withComputerUseActivity(async () => {
+      await showComputerUseAutomationPointer(650);
       await winInput.clickAtPoint(appName, x, y);
       await showComputerUseClickPulse(x, y);
     });

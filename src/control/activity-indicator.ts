@@ -14,9 +14,10 @@ interface ActivityDriver {
 
 interface HelperRequest {
   id: number;
-  op: "show" | "hide" | "status" | "armCancel" | "disarmCancel" | "pulse" | "shutdown";
+  op: "show" | "hide" | "status" | "armCancel" | "disarmCancel" | "pulse" | "pointer" | "shutdown";
   x?: number;
   y?: number;
+  durationMs?: number;
 }
 
 interface HelperResponse {
@@ -91,6 +92,7 @@ public sealed class ComputerUseOverlayForm : Form {
     bool rippleActive;
     Point ripplePoint;
     long rippleStartedAt;
+    long pointerVisibleUntil;
     const double ActivityPeriodSeconds = 1.6;
     const double RippleDurationSeconds = 0.62;
 
@@ -123,7 +125,7 @@ public sealed class ComputerUseOverlayForm : Form {
         DoubleBuffered = true;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
         animationTimer = new System.Windows.Forms.Timer();
-        animationTimer.Interval = 50;
+        animationTimer.Interval = 33;
         animationTimer.Tick += delegate {
             if (rippleActive && RippleProgress() >= 1.0) rippleActive = false;
             UpdateWindowRegion();
@@ -210,6 +212,51 @@ public sealed class ComputerUseOverlayForm : Form {
         Invalidate();
     }
 
+    bool PointerActive() {
+        return Stopwatch.GetTimestamp() < pointerVisibleUntil;
+    }
+
+    Point PointerClientPoint() {
+        var screenPoint = Cursor.Position;
+        return new Point(screenPoint.X - Bounds.Left, screenPoint.Y - Bounds.Top);
+    }
+
+    bool PointerOnThisScreen() {
+        var point = Cursor.Position;
+        return PointerActive() && Bounds.Contains(point.X, point.Y);
+    }
+
+    Rectangle PointerHaloRect() {
+        var point = PointerClientPoint();
+        int radius = Scale(18);
+        return new Rectangle(point.X - radius, point.Y - radius, radius * 2, radius * 2);
+    }
+
+    Region PointerHaloRegion() {
+        var outerRect = PointerHaloRect();
+        using (var outerPath = new GraphicsPath()) {
+            outerPath.AddEllipse(outerRect);
+            var ring = new Region(outerPath);
+            int ringWidth = Scale(5);
+            var innerRect = Rectangle.Inflate(outerRect, -ringWidth, -ringWidth);
+            if (innerRect.Width > 1 && innerRect.Height > 1) {
+                using (var innerPath = new GraphicsPath()) {
+                    innerPath.AddEllipse(innerRect);
+                    ring.Exclude(innerPath);
+                }
+            }
+            return ring;
+        }
+    }
+
+    public void ShowAutomationPointer(int durationMs) {
+        int bounded = Math.Max(120, Math.Min(1500, durationMs));
+        long ticks = (long)Math.Round((bounded / 1000.0) * Stopwatch.Frequency);
+        pointerVisibleUntil = Stopwatch.GetTimestamp() + ticks;
+        UpdateWindowRegion();
+        Invalidate();
+    }
+
     Rectangle BadgeRect() {
         int width = Scale(228);
         int height = Scale(28);
@@ -242,6 +289,9 @@ public sealed class ComputerUseOverlayForm : Form {
         }
         if (rippleActive) {
             using (var rippleRegion = RippleRingRegion()) next.Union(rippleRegion);
+        }
+        if (PointerOnThisScreen()) {
+            using (var pointerRegion = PointerHaloRegion()) next.Union(pointerRegion);
         }
         var previous = Region;
         Region = next;
@@ -321,6 +371,17 @@ public sealed class ComputerUseOverlayForm : Form {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             using (var pen = new Pen(Color.FromArgb(alpha, 75, 180, 255), Math.Max(1, Scale(2)))) {
                 e.Graphics.DrawEllipse(pen, RippleRect(progress));
+            }
+        }
+
+        if (PointerOnThisScreen()) {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            var halo = PointerHaloRect();
+            using (var outer = new Pen(Color.FromArgb(210, 70, 175, 255), Math.Max(1, Scale(3))))
+            using (var inner = new Pen(Color.FromArgb(150, 205, 235, 255), Math.Max(1, Scale(1)))) {
+                e.Graphics.DrawEllipse(outer, halo);
+                var innerRect = Rectangle.Inflate(halo, -Scale(4), -Scale(4));
+                if (innerRect.Width > 1 && innerRect.Height > 1) e.Graphics.DrawEllipse(inner, innerRect);
             }
         }
     }
@@ -497,6 +558,17 @@ public static class ComputerUseOverlayHost {
         });
     }
 
+    public static void ShowAutomationPointer(int durationMs) {
+        var target = dispatcher;
+        if (target == null || target.IsDisposed) return;
+        Invoke(delegate {
+            foreach (var form in forms) {
+                var overlay = form as ComputerUseOverlayForm;
+                if (overlay != null) overlay.ShowAutomationPointer(durationMs);
+            }
+        });
+    }
+
     public static void Hide() {
         var target = dispatcher;
         if (target == null || target.IsDisposed) return;
@@ -547,6 +619,7 @@ while (-not $done -and ($line = [Console]::In.ReadLine()) -ne $null) {
       'armCancel' { [ComputerUseOverlayHost]::ArmCancel(); $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }
       'disarmCancel' { [ComputerUseOverlayHost]::DisarmCancel(); $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }
       'pulse' { [ComputerUseOverlayHost]::PulseAt([int]$payload.x, [int]$payload.y); $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }
+      'pointer' { [ComputerUseOverlayHost]::ShowAutomationPointer([int]$payload.durationMs); $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }
       'shutdown' {
         [ComputerUseOverlayHost]::Shutdown()
         $result = @{ id=$id; ok=$true; visible=$false }
@@ -685,7 +758,7 @@ async function startHelper(): Promise<ChildProcessWithoutNullStreams> {
 
 async function requestHelper(
   op: HelperRequest["op"],
-  payload: Pick<HelperRequest, "x" | "y"> = {},
+  payload: Pick<HelperRequest, "x" | "y" | "durationMs"> = {},
 ): Promise<HelperResponse> {
   const child = await startHelper();
   const id = nextRequestId++;
@@ -847,6 +920,12 @@ export async function showComputerUseClickPulse(x: number, y: number): Promise<v
   if (process.platform !== "win32" || testDriver !== undefined) return;
   if (!Number.isFinite(x) || !Number.isFinite(y)) return;
   await requestHelper("pulse", { x: Math.round(x), y: Math.round(y) }).catch(() => undefined);
+}
+
+export async function showComputerUseAutomationPointer(durationMs = 650): Promise<void> {
+  if (process.platform !== "win32" || testDriver !== undefined) return;
+  const bounded = Math.max(120, Math.min(1500, Math.round(durationMs)));
+  await requestHelper("pointer", { durationMs: bounded }).catch(() => undefined);
 }
 
 export async function withComputerUseActivity<T>(fn: () => Promise<T>): Promise<T> {

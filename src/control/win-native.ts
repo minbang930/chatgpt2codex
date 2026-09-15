@@ -143,6 +143,7 @@ using System.Threading;
 public static class ChatGpt2CodexWinInput {
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
     [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public InputUnion U; }
     [StructLayout(LayoutKind.Explicit)] public struct InputUnion {
         [FieldOffset(0)] public MOUSEINPUT mi;
@@ -180,6 +181,7 @@ public static class ChatGpt2CodexWinInput {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int command);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
     [DllImport("user32.dll")] public static extern uint SendInput(uint count, INPUT[] inputs, int size);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint flags);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hWnd);
@@ -302,9 +304,29 @@ public static class ChatGpt2CodexWinInput {
         if (!GetWindowRect(hWnd, out rect)) throw new InvalidOperationException("could not read target app window bounds");
         return rect;
     }
+    static void MovePointerSmooth(int x, int y) {
+        POINT start;
+        if (!GetCursorPos(out start)) {
+            if (!SetCursorPos(x, y)) throw new InvalidOperationException("could not move pointer");
+            return;
+        }
+        int dx = x - start.X;
+        int dy = y - start.Y;
+        double distance = Math.Sqrt((double)dx * dx + (double)dy * dy);
+        int steps = Math.Max(5, Math.Min(16, (int)Math.Ceiling(distance / 70.0)));
+        for (int i = 1; i <= steps; i++) {
+            double t = (double)i / steps;
+            double eased = t * t * (3.0 - (2.0 * t));
+            int nextX = start.X + (int)Math.Round(dx * eased);
+            int nextY = start.Y + (int)Math.Round(dy * eased);
+            if (!SetCursorPos(nextX, nextY)) throw new InvalidOperationException("could not move pointer");
+            if (i < steps) Thread.Sleep(12);
+        }
+    }
+
     public static void Click(string appName, int x, int y) {
         Activate(appName);
-        if (!SetCursorPos(x, y)) throw new InvalidOperationException("could not move pointer");
+        MovePointerSmooth(x, y);
         var inputs = new INPUT[2];
         inputs[0].type = INPUT_MOUSE; inputs[0].U.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
         inputs[1].type = INPUT_MOUSE; inputs[1].U.mi.dwFlags = MOUSEEVENTF_LEFTUP;
