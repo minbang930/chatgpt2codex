@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **Implementation roadmap complete through M5**
 
-Active unit: **Post-M5 stabilization / plugin skill-source smoke validation**
+Active unit: **Post-M5 stabilization / plugin-config main-agent + browser-worker isolation validation**
 
 Detailed design documents:
 
@@ -307,7 +307,11 @@ Post-roadmap work should therefore be stabilization and real integration validat
 
 - [x] Run one live external MCP smoke test against a deliberately configured endpoint: local registration -> enable -> discovery -> explicit `plugin_call` -> disable/remove.
   - Verified by loopback Streamable HTTP MCP integration through the actual Core plugin tool handlers in commit `5fbc010b`; CI `35011189776` passed on Ubuntu, macOS, and Windows.
-- [ ] Run a declared plugin skill-source smoke test through the existing `skill_install` / `skill_activate` path.
+- [x] Run a declared plugin skill-source smoke test through the existing `skill_install` / `skill_activate` path.
+  - Verified in commit `c99bee63`; CI `35013285118` passed on Ubuntu, macOS, and Windows.
+  - The test registers an inert plugin `skillSources` declaration, confirms no install/activation occurs automatically, then explicitly routes the returned declaration through the normal `skill_install` path.
+  - A test-only Git URL rewrite maps the declared HTTPS source to a temporary local repository, so the production Git clone/install path, resolved-commit provenance, `external-git` trust classification, static security scan, and `skill_activate` are all exercised deterministically without depending on a public Git service.
+  - A marker script inside the fixture remains unexecuted across registration, install, security inspection, and activation.
 - [ ] Re-run representative main-agent + browser-worker flows after plugin configuration exists and verify workers still do not receive plugin tools.
 - [ ] Keep CI green and fix integration defects discovered by those smoke tests before defining any new milestone.
 
