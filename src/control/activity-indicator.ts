@@ -44,7 +44,7 @@ const MAX_STDERR = 6_000;
  * from win-native.ts is intentional: a cosmetic indicator can fail/restart
  * without disturbing the trusted SendInput helper or changing authorization.
  *
- * The overlay uses translucent topmost glow bands plus one shaped interaction
+ * The overlay uses three nested translucent glow rings plus one shaped interaction
  * overlay per Windows display. Glow intensity breathes while geometry stays
  * fixed; the primary-display badge remains intentionally static. Every window is
  * TOOLWINDOW + NOACTIVATE + TRANSPARENT, returns HTTRANSPARENT for hit-tests,
@@ -74,7 +74,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
 
-public sealed class ComputerUseGlowBandForm : Form {
+public sealed class ComputerUseGlowRingForm : Form {
     const int WS_EX_TRANSPARENT = 0x20;
     const int WS_EX_TOOLWINDOW = 0x80;
     const int WS_EX_LAYERED = 0x80000;
@@ -86,17 +86,22 @@ public sealed class ComputerUseGlowBandForm : Form {
     const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
 
     readonly double baseOpacity;
+    readonly int logicalThickness;
+    int dpi = 96;
 
     [DllImport("user32.dll")]
     static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+    [DllImport("user32.dll")]
+    static extern uint GetDpiForWindow(IntPtr hWnd);
 
-    public ComputerUseGlowBandForm(Rectangle bounds, double opacity) {
-        baseOpacity = Math.Max(0.01, Math.Min(0.80, opacity));
+    public ComputerUseGlowRingForm(Rectangle bounds, int thickness, double opacity) {
+        logicalThickness = Math.Max(1, thickness);
+        baseOpacity = Math.Max(0.005, Math.Min(0.30, opacity));
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         TopMost = true;
-        BackColor = Color.FromArgb(0, 126, 230);
+        BackColor = Color.FromArgb(0, 120, 240);
         Opacity = baseOpacity;
         Bounds = bounds;
         TabStop = false;
@@ -112,16 +117,48 @@ public sealed class ComputerUseGlowBandForm : Form {
         }
     }
 
+    int Scale(int logicalPixels) {
+        return Math.Max(1, (int)Math.Round(logicalPixels * Math.Max(96, dpi) / 96.0));
+    }
+
+    void UpdateRingRegion() {
+        int width = Math.Max(1, ClientSize.Width);
+        int height = Math.Max(1, ClientSize.Height);
+        int thickness = Math.Max(1, Math.Min(Scale(logicalThickness), Math.Min(width, height) / 2));
+        var next = new Region(new Rectangle(0, 0, width, height));
+        var inner = new Rectangle(
+            thickness,
+            thickness,
+            Math.Max(0, width - (2 * thickness)),
+            Math.Max(0, height - (2 * thickness))
+        );
+        if (inner.Width > 0 && inner.Height > 0) next.Exclude(inner);
+        var previous = Region;
+        Region = next;
+        if (previous != null) previous.Dispose();
+    }
+
     protected override void OnHandleCreated(EventArgs e) {
         base.OnHandleCreated(e);
+        try {
+            var value = GetDpiForWindow(Handle);
+            if (value >= 96) dpi = (int)value;
+        } catch { dpi = 96; }
+        UpdateRingRegion();
         try { SetWindowDisplayAffinity(Handle, WDA_EXCLUDEFROMCAPTURE); } catch { }
     }
 
+    protected override void OnSizeChanged(EventArgs e) {
+        base.OnSizeChanged(e);
+        if (IsHandleCreated) UpdateRingRegion();
+    }
+
     public void SetPulse(double pulse) {
-        // Glow breathes through luminance/opacity only. Geometry never changes,
-        // avoiding the hard expanding-border look of the previous indicator.
-        double multiplier = 0.88 + (0.18 * Math.Max(0.0, Math.Min(1.0, pulse)));
-        Opacity = Math.Max(0.01, Math.Min(0.82, baseOpacity * multiplier));
+        // Geometry stays fixed. Only a very small luminance/opacity breath is
+        // applied so the edge reads as ambient light rather than a moving line.
+        double bounded = Math.Max(0.0, Math.Min(1.0, pulse));
+        double multiplier = 0.84 + (0.24 * bounded);
+        Opacity = Math.Max(0.005, Math.Min(0.32, baseOpacity * multiplier));
     }
 
     protected override void WndProc(ref Message m) {
@@ -547,7 +584,7 @@ public static class ComputerUseOverlayHost {
             double seconds = (double)Stopwatch.GetTimestamp() / Stopwatch.Frequency;
             double pulse = (Math.Sin((seconds / 2.6) * Math.PI * 2.0) + 1.0) / 2.0;
             foreach (var form in forms) {
-                var glow = form as ComputerUseGlowBandForm;
+                var glow = form as ComputerUseGlowRingForm;
                 if (glow != null) glow.SetPulse(pulse);
             }
         };
@@ -566,27 +603,17 @@ public static class ComputerUseOverlayHost {
     }
 
     static void AddGlowBands(Rectangle bounds) {
-        // Adjacent translucent strips approximate a soft Codex-like bloom
-        // without expanding/contracting hard geometry. The falloff reaches
-        // roughly 33 px inward at 100% scale and fades rapidly toward content.
-        int[] widths = new int[] { 2, 2, 3, 4, 5, 7, 10 };
-        double[] opacities = new double[] { 0.50, 0.36, 0.25, 0.16, 0.10, 0.055, 0.025 };
-        int offset = 0;
-        for (int i = 0; i < widths.Length; i++) {
-            int band = widths[i];
-            double opacity = opacities[i];
-            Rectangle[] strips = new Rectangle[] {
-                new Rectangle(bounds.Left, bounds.Top + offset, bounds.Width, band),
-                new Rectangle(bounds.Left, bounds.Bottom - offset - band, bounds.Width, band),
-                new Rectangle(bounds.Left + offset, bounds.Top, band, bounds.Height),
-                new Rectangle(bounds.Right - offset - band, bounds.Top, band, bounds.Height),
-            };
-            foreach (var strip in strips) {
-                var glow = new ComputerUseGlowBandForm(strip, opacity);
-                forms.Add(glow);
-                glow.Show();
-            }
-            offset += band;
+        // Three nested full-screen rings create a symmetric edge halo on every
+        // side. The wide low-opacity bloom carries the light inward, a medium
+        // ring adds body, and the tiny core highlight remains deliberately dim.
+        // Because every layer is one ring rather than four edge windows, the
+        // left/top and right/bottom geometry cannot diverge or clip differently.
+        int[] thicknesses = new int[] { 36, 18, 3 };
+        double[] opacities = new double[] { 0.035, 0.060, 0.075 };
+        for (int i = 0; i < thicknesses.Length; i++) {
+            var glow = new ComputerUseGlowRingForm(bounds, thicknesses[i], opacities[i]);
+            forms.Add(glow);
+            glow.Show();
         }
     }
 
