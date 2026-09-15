@@ -1,0 +1,425 @@
+from pathlib import Path
+
+# --- cancellation state module ---
+cancel = Path('src/control/cancel.ts')
+cancel.write_text(r'''import { DomainError, ErrorCode } from "../types.js";
+
+const DEFAULT_CANCEL_LATCH_MS = 4_000;
+
+let generation = 0;
+let lastCancelledAt = 0;
+let lastReason = "escape";
+let cancelLatchMs = DEFAULT_CANCEL_LATCH_MS;
+const waiters = new Set<() => void>();
+
+function cancelledError(): DomainError {
+  return new DomainError(ErrorCode.CONTROL_CANCELLED, "Computer Use cancelled by the local user (Esc)", {
+    reason: lastReason,
+  });
+}
+
+/** Called only by the trusted local Windows activity-helper path. */
+export function signalComputerUseCancel(reason = "escape"): void {
+  generation += 1;
+  lastCancelledAt = Date.now();
+  lastReason = reason;
+  for (const waiter of [...waiters]) waiter();
+}
+
+export function computerUseCancelGeneration(): number {
+  return generation;
+}
+
+export function isComputerUseRecentlyCancelled(now = Date.now()): boolean {
+  return lastCancelledAt > 0 && now - lastCancelledAt < cancelLatchMs;
+}
+
+export function wasComputerUseCancelledSince(startGeneration: number): boolean {
+  return generation !== startGeneration;
+}
+
+export function assertComputerUseNotRecentlyCancelled(): void {
+  if (isComputerUseRecentlyCancelled()) throw cancelledError();
+}
+
+export function assertComputerUseNotCancelledSince(startGeneration: number): void {
+  if (wasComputerUseCancelledSince(startGeneration)) throw cancelledError();
+}
+
+/** A delay used by screenshot waitMs that wakes immediately on local Esc. */
+export async function waitForComputerUseDelay(ms: number, startGeneration = generation): Promise<void> {
+  if (ms <= 0) return;
+  assertComputerUseNotCancelledSince(startGeneration);
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      waiters.delete(onCancel);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onCancel = () => {
+      if (generation !== startGeneration) finish(cancelledError());
+    };
+    const timer = setTimeout(() => finish(), ms);
+    timer.unref?.();
+    waiters.add(onCancel);
+  });
+}
+
+export function __resetComputerUseCancelForTests(options: { latchMs?: number } = {}): void {
+  generation = 0;
+  lastCancelledAt = 0;
+  lastReason = "escape";
+  cancelLatchMs = options.latchMs ?? DEFAULT_CANCEL_LATCH_MS;
+  waiters.clear();
+}
+''', encoding='utf-8')
+
+# --- error code ---
+p = Path('src/types.ts')
+s = p.read_text(encoding='utf-8')
+old = '  CONTROL_KILLED = "CONTROL_KILLED",\n'
+new = '  CONTROL_KILLED = "CONTROL_KILLED",\n  CONTROL_CANCELLED = "CONTROL_CANCELLED",\n'
+if old not in s:
+    raise SystemExit('types CONTROL_KILLED marker missing')
+p.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+# --- activity helper: keyboard hook + cancel signal polling ---
+p = Path('src/control/activity-indicator.ts')
+s = p.read_text(encoding='utf-8')
+s = s.replace(
+    'import { buildSafeChildEnv } from "../exec/command-runner.js";\n',
+    'import { buildSafeChildEnv } from "../exec/command-runner.js";\nimport { signalComputerUseCancel } from "./cancel.js";\n',
+    1,
+)
+s = s.replace(
+    '  op: "show" | "hide" | "status" | "shutdown";',
+    '  op: "show" | "hide" | "status" | "armCancel" | "disarmCancel" | "shutdown";',
+    1,
+)
+s = s.replace(
+    '  [int]$ParentPid = 0\n)',
+    '  [int]$ParentPid = 0,\n  [string]$CancelFile = \'\'\n)',
+    1,
+)
+s = s.replace('using System.Drawing.Drawing2D;\n', 'using System.Drawing.Drawing2D;\nusing System.IO;\n', 1)
+s = s.replace(
+    '    Rectangle BadgeRect() {\n        int width = Scale(132);',
+    '    Rectangle BadgeRect() {\n        int width = Scale(228);',
+    1,
+)
+s = s.replace('                    "Computer Use",', '                    "Computer Use  |  Esc to cancel",', 1)
+
+host_fields = '    static bool visible;\n    static int parentPid;\n'
+host_replacement = r'''    static bool visible;
+    static int parentPid;
+    static string cancelFile;
+    static IntPtr keyboardHook = IntPtr.Zero;
+    static LowLevelKeyboardProc keyboardProc;
+    static bool cancelRaised;
+
+    const int WH_KEYBOARD_LL = 13;
+    const int WM_KEYDOWN = 0x0100;
+    const int WM_KEYUP = 0x0101;
+    const int WM_SYSKEYDOWN = 0x0104;
+    const int WM_SYSKEYUP = 0x0105;
+    const int VK_ESCAPE = 0x1B;
+
+    delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError=true)]
+    static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc callback, IntPtr hMod, uint threadId);
+    [DllImport("user32.dll", SetLastError=true)]
+    static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [DllImport("user32.dll")]
+    static extern IntPtr CallNextHookEx(IntPtr hook, int nCode, IntPtr wParam, IntPtr lParam);
+    [DllImport("kernel32.dll", CharSet=CharSet.Auto, SetLastError=true)]
+    static extern IntPtr GetModuleHandle(string moduleName);
+
+    static IntPtr KeyboardHookProc(int nCode, IntPtr wParam, IntPtr lParam) {
+        if (nCode >= 0) {
+            int message = wParam.ToInt32();
+            int vk = Marshal.ReadInt32(lParam);
+            if (vk == VK_ESCAPE && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN || message == WM_KEYUP || message == WM_SYSKEYUP)) {
+                if (!cancelRaised && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)) {
+                    cancelRaised = true;
+                    try {
+                        if (!String.IsNullOrWhiteSpace(cancelFile)) File.WriteAllText(cancelFile, DateTime.UtcNow.Ticks.ToString());
+                    } catch { }
+                }
+                return new IntPtr(1);
+            }
+        }
+        return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
+    }
+
+    static void ArmEscapeHookCore() {
+        cancelRaised = false;
+        if (keyboardHook != IntPtr.Zero) return;
+        keyboardProc = KeyboardHookProc;
+        var module = GetModuleHandle(null);
+        keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, keyboardProc, module, 0);
+        if (keyboardHook == IntPtr.Zero) throw new InvalidOperationException("could not install local Esc cancellation hook");
+    }
+
+    static void DisarmEscapeHookCore() {
+        cancelRaised = false;
+        if (keyboardHook == IntPtr.Zero) return;
+        try { UnhookWindowsHookEx(keyboardHook); } catch { }
+        keyboardHook = IntPtr.Zero;
+    }
+'''
+if host_fields not in s:
+    raise SystemExit('activity host fields marker missing')
+s = s.replace(host_fields, host_replacement, 1)
+
+old = '    public static void EnsureStarted(int ownerPid) {\n        ComputerUseOverlayForm.EnableProcessDpiAwareness();'
+new = '    public static void EnsureStarted(int ownerPid, string signalPath) {\n        ComputerUseOverlayForm.EnableProcessDpiAwareness();\n        cancelFile = signalPath;'
+if old not in s:
+    raise SystemExit('activity EnsureStarted marker missing')
+s = s.replace(old, new, 1)
+
+old = '''    public static void Show(int ownerPid) {\n        EnsureStarted(ownerPid);\n        Invoke(ShowCore);\n    }'''
+new = '''    public static void Show(int ownerPid, string signalPath) {\n        EnsureStarted(ownerPid, signalPath);\n        Invoke(ShowCore);\n    }\n\n    public static void ArmCancel() {\n        Invoke(ArmEscapeHookCore);\n    }\n\n    public static void DisarmCancel() {\n        var target = dispatcher;\n        if (target == null || target.IsDisposed) return;\n        Invoke(DisarmEscapeHookCore);\n    }'''
+if old not in s:
+    raise SystemExit('activity Show marker missing')
+s = s.replace(old, new, 1)
+
+# Parent-death path and explicit shutdown path both remove the hook.
+s = s.replace(
+    '                HideCore();\n                Application.ExitThread();',
+    '                DisarmEscapeHookCore();\n                HideCore();\n                Application.ExitThread();',
+    1,
+)
+s = s.replace(
+    '                HideCore();\n                Application.ExitThread();\n            }));',
+    '                DisarmEscapeHookCore();\n                HideCore();\n                Application.ExitThread();\n            }));',
+    1,
+)
+
+s = s.replace('[ComputerUseOverlayHost]::EnsureStarted($ParentPid)', '[ComputerUseOverlayHost]::EnsureStarted($ParentPid, $CancelFile)', 1)
+s = s.replace(
+    "      'show' { [ComputerUseOverlayHost]::Show($ParentPid); $result = @{ id=$id; ok=$true; visible=$true } }",
+    "      'show' { [ComputerUseOverlayHost]::Show($ParentPid, $CancelFile); $result = @{ id=$id; ok=$true; visible=$true } }",
+    1,
+)
+s = s.replace(
+    "      'status' { $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }",
+    "      'status' { $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }\n      'armCancel' { [ComputerUseOverlayHost]::ArmCancel(); $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }\n      'disarmCancel' { [ComputerUseOverlayHost]::DisarmCancel(); $result = @{ id=$id; ok=$true; visible=[ComputerUseOverlayHost]::IsVisible() } }",
+    1,
+)
+
+marker = 'let stderrTail = "";\n'
+insertion = '''let stderrTail = "";\nconst cancelSignalFile = path.join(os.tmpdir(), "chatgpt2codex", `computer-use-cancel-${process.pid}.signal`);\nlet cancelPollTimer: NodeJS.Timeout | undefined;\nlet cancelPollBusy = false;\n'''
+if marker not in s:
+    raise SystemExit('activity stderr marker missing')
+s = s.replace(marker, insertion, 1)
+
+old = '["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-ParentPid", String(process.pid)],'
+new = '["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-ParentPid", String(process.pid), "-CancelFile", cancelSignalFile],'
+if old not in s:
+    raise SystemExit('activity spawn marker missing')
+s = s.replace(old, new, 1)
+
+native_driver_marker = 'const nativeDriver: ActivityDriver = {\n  async show() {'
+cancel_helpers = r'''async function clearNativeCancelSignal(): Promise<void> {
+  await fs.unlink(cancelSignalFile).catch(() => undefined);
+}
+
+function stopNativeCancelPolling(): void {
+  if (!cancelPollTimer) return;
+  clearInterval(cancelPollTimer);
+  cancelPollTimer = undefined;
+  cancelPollBusy = false;
+}
+
+function startNativeCancelPolling(): void {
+  if (process.platform !== "win32" || testDriver !== undefined || cancelPollTimer) return;
+  void clearNativeCancelSignal();
+  cancelPollTimer = setInterval(() => {
+    if (cancelPollBusy) return;
+    cancelPollBusy = true;
+    void fs.readFile(cancelSignalFile, "utf8").then(async () => {
+      await clearNativeCancelSignal();
+      signalComputerUseCancel("escape");
+      await forceHideComputerUseActivity();
+    }).catch(() => undefined).finally(() => {
+      cancelPollBusy = false;
+    });
+  }, 75);
+  cancelPollTimer.unref?.();
+}
+
+async function armNativeCancel(): Promise<void> {
+  if (process.platform !== "win32" || testDriver !== undefined) return;
+  await clearNativeCancelSignal();
+  await requestHelper("armCancel");
+  startNativeCancelPolling();
+}
+
+async function disarmNativeCancel(): Promise<void> {
+  stopNativeCancelPolling();
+  if (process.platform !== "win32" || testDriver !== undefined) return;
+  if (helper && helper.exitCode === null && !helper.killed) {
+    await requestHelper("disarmCancel").catch(() => undefined);
+  }
+  await clearNativeCancelSignal();
+}
+
+const nativeDriver: ActivityDriver = {
+  async show() {'''
+if native_driver_marker not in s:
+    raise SystemExit('native driver marker missing')
+s = s.replace(native_driver_marker, cancel_helpers, 1)
+
+begin_marker = '  activeCount += 1;\n  await queueTransition(syncVisibility);\n  let released = false;'
+begin_repl = '  const wasInactive = activeCount === 0;\n  activeCount += 1;\n  await queueTransition(syncVisibility);\n  if (wasInactive) await armNativeCancel().catch(() => undefined);\n  let released = false;'
+if begin_marker not in s:
+    raise SystemExit('begin activity marker missing')
+s = s.replace(begin_marker, begin_repl, 1)
+
+release_marker = '    cancelHideTimer();\n    hideTimer = setTimeout(() => {'
+release_repl = '    await disarmNativeCancel();\n    cancelHideTimer();\n    hideTimer = setTimeout(() => {'
+if release_marker not in s:
+    raise SystemExit('release marker missing')
+s = s.replace(release_marker, release_repl, 1)
+
+force_marker = '''export async function forceHideComputerUseActivity(): Promise<void> {\n  cancelHideTimer();\n  activeCount = 0;\n  suppressCount = 0;\n  await queueTransition(async () => setVisible(false));\n}'''
+force_repl = '''export async function forceHideComputerUseActivity(): Promise<void> {\n  cancelHideTimer();\n  activeCount = 0;\n  suppressCount = 0;\n  await disarmNativeCancel();\n  await queueTransition(async () => setVisible(false));\n}'''
+if force_marker not in s:
+    raise SystemExit('force hide marker missing')
+s = s.replace(force_marker, force_repl, 1)
+
+stop_marker = 'export async function stopWindowsActivityIndicatorHelper(): Promise<void> {\n  cancelHideTimer();'
+stop_repl = 'export async function stopWindowsActivityIndicatorHelper(): Promise<void> {\n  cancelHideTimer();\n  await disarmNativeCancel();'
+if stop_marker not in s:
+    raise SystemExit('stop helper marker missing')
+s = s.replace(stop_marker, stop_repl, 1)
+p.write_text(s, encoding='utf-8')
+
+# --- cancellable screenshot wait ---
+p = Path('src/control/capture.ts')
+s = p.read_text(encoding='utf-8')
+s = s.replace('import { setTimeout as delay } from "node:timers/promises";\n', '', 1)
+s = s.replace(
+    'import { withComputerUseActivity, withComputerUseIndicatorSuppressed } from "./activity-indicator.js";\n',
+    'import { withComputerUseActivity, withComputerUseIndicatorSuppressed } from "./activity-indicator.js";\nimport { computerUseCancelGeneration, waitForComputerUseDelay } from "./cancel.js";\n',
+    1,
+)
+old = '    if (input.waitMs && input.waitMs > 0) {\n      await delay(Math.min(input.waitMs, 30_000));\n    }'
+new = '    const cancelGeneration = computerUseCancelGeneration();\n    if (input.waitMs && input.waitMs > 0) {\n      await waitForComputerUseDelay(Math.min(input.waitMs, 30_000), cancelGeneration);\n    }'
+if old not in s:
+    raise SystemExit('capture wait marker missing')
+s = s.replace(old, new, 1)
+p.write_text(s, encoding='utf-8')
+
+# --- reject immediate follow-up CU calls after Esc; hide on kill ---
+p = Path('src/control/tools.ts')
+s = p.read_text(encoding='utf-8')
+s = s.replace(
+    'import { executeApprovedAction } from "./executor.js";\n',
+    'import { executeApprovedAction } from "./executor.js";\nimport { forceHideComputerUseActivity } from "./activity-indicator.js";\nimport { assertComputerUseNotRecentlyCancelled } from "./cancel.js";\n',
+    1,
+)
+old = '    const { projectId, root } = await requireControlLease(ctx);\n'
+new = '    const { projectId, root } = await requireControlLease(ctx);\n    assertComputerUseNotRecentlyCancelled();\n'
+if old not in s:
+    raise SystemExit('screenshot lease marker missing')
+s = s.replace(old, new, 1)
+action_marker = '    const { projectId } = await requireControlLease(ctx);\n\n    if (await isKilled(ctx.stateDir)) {'
+action_repl = '    const { projectId } = await requireControlLease(ctx);\n    assertComputerUseNotRecentlyCancelled();\n\n    if (await isKilled(ctx.stateDir)) {'
+if action_marker not in s:
+    raise SystemExit('request action marker missing')
+s = s.replace(action_marker, action_repl, 1)
+old = '    await setKill(ctx.stateDir);\n    await ctx.ledger.append({ type: "control.kill", projectId, reason: input.reason });'
+new = '    await setKill(ctx.stateDir);\n    await forceHideComputerUseActivity();\n    await ctx.ledger.append({ type: "control.kill", projectId, reason: input.reason });'
+if old not in s:
+    raise SystemExit('kill marker missing')
+s = s.replace(old, new, 1)
+p.write_text(s, encoding='utf-8')
+
+# --- executor cancellation checks ---
+p = Path('src/control/executor.ts')
+s = p.read_text(encoding='utf-8')
+s = s.replace(
+    'import * as desktopInput from "./input-backend.js";\n',
+    'import * as desktopInput from "./input-backend.js";\nimport { computerUseCancelGeneration, isComputerUseRecentlyCancelled, wasComputerUseCancelledSince } from "./cancel.js";\n',
+    1,
+)
+start_marker = 'export async function executeApprovedAction(ctx: ToolContext, record: ControlActionRecord): Promise<void> {\n  if (await isKilled(ctx.stateDir)) {'
+start_repl = '''export async function executeApprovedAction(ctx: ToolContext, record: ControlActionRecord): Promise<void> {\n  const cancelGeneration = computerUseCancelGeneration();\n  const cancelled = () => isComputerUseRecentlyCancelled() || wasComputerUseCancelledSince(cancelGeneration);\n  const markCancelled = async () => {\n    await ctx.ledger.append({\n      type: "control.action.cancelled",\n      actionId: record.actionId,\n      appName: record.appName,\n      reason: "escape",\n    });\n    await markDone(ctx.stateDir, record.actionId, { ok: false, error: "cancelled-by-user" });\n  };\n\n  if (cancelled()) {\n    await markCancelled();\n    return;\n  }\n\n  if (await isKilled(ctx.stateDir)) {'''
+if start_marker not in s:
+    raise SystemExit('executor start marker missing')
+s = s.replace(start_marker, start_repl, 1)
+old = '  const evidenceBefore = await captureActionEvidence(ctx, record, "before");\n  try {'
+new = '  const evidenceBefore = await captureActionEvidence(ctx, record, "before");\n  if (cancelled()) {\n    await markCancelled();\n    return;\n  }\n  try {'
+if old not in s:
+    raise SystemExit('executor evidence marker missing')
+s = s.replace(old, new, 1)
+old = '    let axSummary: Record<string, unknown> | undefined;\n    let windowPoint: { x: number; y: number } | undefined;\n\n    if (record.kind === "click") {'
+new = '    let axSummary: Record<string, unknown> | undefined;\n    let windowPoint: { x: number; y: number } | undefined;\n\n    if (cancelled()) throw new Error("cancelled-by-user");\n\n    if (record.kind === "click") {'
+if old not in s:
+    raise SystemExit('executor actuation marker missing')
+s = s.replace(old, new, 1)
+old = '    const evidenceAfter = await captureActionEvidence(ctx, record, "after");'
+new = '    if (cancelled()) throw new Error("cancelled-by-user");\n    const evidenceAfter = await captureActionEvidence(ctx, record, "after");'
+if old not in s:
+    raise SystemExit('executor after marker missing')
+s = s.replace(old, new, 1)
+old = '    const message = record.kind === "type" ? "type-failed" : redact(rawMessage);'
+new = '    const message = cancelled() || rawMessage === "cancelled-by-user" ? "cancelled-by-user" : record.kind === "type" ? "type-failed" : redact(rawMessage);'
+if old not in s:
+    raise SystemExit('executor catch marker missing')
+s = s.replace(old, new, 1)
+p.write_text(s, encoding='utf-8')
+
+# --- tests ---
+test = Path('src/control/cancel.test.ts')
+test.write_text(r'''import { afterEach, describe, expect, it } from "vitest";
+import { ErrorCode } from "../types.js";
+import {
+  __resetComputerUseCancelForTests,
+  assertComputerUseNotRecentlyCancelled,
+  computerUseCancelGeneration,
+  signalComputerUseCancel,
+  waitForComputerUseDelay,
+  wasComputerUseCancelledSince,
+} from "./cancel.js";
+
+describe("control/local Esc cancellation", () => {
+  afterEach(() => __resetComputerUseCancelForTests());
+
+  it("increments a transient generation and rejects immediate follow-up control", () => {
+    __resetComputerUseCancelForTests({ latchMs: 5_000 });
+    const before = computerUseCancelGeneration();
+    signalComputerUseCancel("escape");
+    expect(wasComputerUseCancelledSince(before)).toBe(true);
+    try {
+      assertComputerUseNotRecentlyCancelled();
+      throw new Error("expected cancellation");
+    } catch (error) {
+      expect((error as { code?: string }).code).toBe(ErrorCode.CONTROL_CANCELLED);
+    }
+  });
+
+  it("interrupts screenshot-style waits without waiting for the full delay", async () => {
+    const before = computerUseCancelGeneration();
+    const started = Date.now();
+    const pending = waitForComputerUseDelay(5_000, before);
+    setTimeout(() => signalComputerUseCancel("escape"), 20);
+    await expect(pending).rejects.toMatchObject({ code: ErrorCode.CONTROL_CANCELLED });
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+});
+''', encoding='utf-8')
+
+ci = Path('.github/workflows/ci.yml')
+c = ci.read_text(encoding='utf-8')
+old = 'src/control/win-native.test.ts src/control/win-uia.test.ts src/control/activity-indicator.test.ts'
+new = 'src/control/win-native.test.ts src/control/win-uia.test.ts src/control/activity-indicator.test.ts src/control/cancel.test.ts'
+if old not in c:
+    raise SystemExit('CI control tests marker missing')
+ci.write_text(c.replace(old, new, 1), encoding='utf-8')
