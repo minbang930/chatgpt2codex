@@ -1,0 +1,28 @@
+name: M3.5.10.1 Windows helper CI temporary
+
+on:
+  push:
+    branches: [dev/custom-runtime]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/custom-runtime
+          fetch-depth: 0
+      - name: Apply cold-start CI patch
+        run: python scripts/m3_5_10_1_ci_cold_start_patch.py
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm scripts/m3_5_10_1_ci_cold_start_patch.py
+          git add .github/workflows/ci.yml src/control/win-native.ts src/control/win-uia.ts src/control/activity-indicator.ts src/control/win-native.test.ts src/control/win-uia.test.ts src/control/activity-indicator.test.ts
+          git commit -m "ci: serialize Windows native helper cold starts"
+          git push origin HEAD:dev/custom-runtime
