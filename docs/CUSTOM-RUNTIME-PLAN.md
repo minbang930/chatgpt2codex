@@ -16,7 +16,7 @@ The fork must preserve the original project's reliable Core path and add only th
 - Avoid provider-internal conversation/request identity coupling (`wfr_`, hidden turn ownership, etc.).
 - Prefer explicit local IDs, durable local state, Git isolation, and handshakes we control.
 - Add one coherent capability at a time, with tests before moving to the next slice.
-- New worker/browser/plugin failures must not break the normal single-agent file/shell/git path.
+- New worker/browser/skill/plugin failures must not break the normal single-agent file/shell/git path.
 - A worker must never reuse or mutate the main ChatGPT session's global active-project/lease state.
 - Windows is the only active target for new Computer Use work. Existing macOS/Linux code may remain, but new M3 design/verification must not expand just to preserve cross-platform parity.
 
@@ -72,8 +72,15 @@ chatgpt2codex Custom Runtime
     |
     +-- Hook Engine
     |
+    +-- Agent Skills
+    |   +-- SKILL.md registry + progressive disclosure
+    |   +-- project/global scope
+    |   +-- Git/local install provenance
+    |   +-- browser-worker instruction integration
+    |
     +-- Optional Plugins connector
         +-- external MCP servers
+        +-- optional plugin-provided skills
 ```
 
 ## Worker lifecycle
@@ -237,7 +244,7 @@ The visible activity border is UX only; it must never become part of authorizati
 
 ## Hooks
 
-Later, add a small lifecycle hook engine inspired by Codex-style hooks. Initial candidates:
+The M4 lifecycle engine supports:
 
 - `SessionStart`
 - `PreToolUse`
@@ -245,24 +252,39 @@ Later, add a small lifecycle hook engine inspired by Codex-style hooks. Initial 
 - `SubagentStart`
 - `SubagentStop`
 
-Hooks may run local commands or local/MCP handlers, but Core operation must remain usable when hooks are absent or fail safely.
+Hooks are best-effort local extension points. Core operation remains usable when hooks are absent or fail. Ponytail-style coding guidance is kept at the worker instruction layer rather than turning generic hooks into a policy engine.
 
-This can later support Ponytail-style behavior without hard-coding those rules into Core.
+## Agent Skills and plugins
 
-## Plugins
+M5 is an **Extensions** phase rather than only an external-MCP phase.
 
-Keep plugins separate from Core.
+Portable Agent Skills use the conventional `SKILL.md` package model. Installed skills are discovered through lightweight metadata and loaded progressively only when relevant. Initial scopes are:
+
+```text
+Project: <project>/.agents/skills/
+Global:  <stateDir>/skills/
+```
+
+Project skills override same-named global skills. Skill discovery/loading must remain bounded and must not execute bundled scripts merely because a directory was discovered.
+
+External Git/local installs must record source/ref/resolved-commit provenance and copy/export reviewed content into a managed skill directory rather than using a mutable checkout as live instruction state.
+
+External MCP plugins remain separate from Core:
 
 ```text
 ChatGPT2Codex Core
   -> stable, fixed tool surface
+
+Agent Skills
+  -> optional portable instructions/resources
+  -> progressive disclosure
 
 ChatGPT2Codex Plugins
   -> optional external MCP tools
   -> schema may change as plugins are installed/removed
 ```
 
-This separation reduces the chance that plugin discovery/schema changes destabilize the Core coding tools.
+This separation reduces the chance that skill/plugin discovery or schema changes destabilize Core coding tools. See `docs/SKILLS-DESIGN.md` for the detailed M5 contract.
 
 ## Milestones
 
@@ -360,14 +382,46 @@ No browser worker yet.
 ### M4 - Hooks
 
 - Local lifecycle hook engine.
-- Start with session/tool/subagent events only.
-- Add Ponytail-compatible behavior only after the core hook semantics are stable.
+- Session/tool/subagent lifecycle events.
+- Ponytail-compatible worker guidance after generic hook semantics are stable.
 
-### M5 - Plugins
+### M5 - Extensions
+
+#### M5.1 - Agent Skills foundation
+
+- `SKILL.md` metadata parser.
+- Safe bounded local loader.
+- Global/project skill roots and project-over-global precedence.
+- Collision diagnostics and on-demand full skill loading.
+- No network install or executable skill content yet.
+
+#### M5.2 - Skill management
+
+- `skill_list` / `skill_view` progressive-disclosure MCP surface.
+- Git/local install, remove, and update.
+- project/global target scope.
+- source/ref/resolved-commit provenance.
+
+#### M5.3 - Skill activation
+
+- Bounded skill metadata catalog for the main ChatGPT agent.
+- Explicit full-skill activation/view.
+- Selected-skill integration into browser-worker bootstrap/recovery.
+- Keep durable worker task unchanged.
+
+#### M5.4 - Skill resources and security
+
+- Bounded `references/`, `templates/`, and `assets/` access.
+- External-source static scan/trust reporting.
+- Executable `scripts/` disabled by default; any future execution requires a separate reviewed/approved contract.
+
+#### M5.5 - External MCP plugins
 
 - Separate optional Plugins connector.
 - External MCP discovery/configuration.
 - Plugin failure isolation from Core.
+- Optional plugin-provided skills through explicit configuration/manifest boundaries.
+- No automatic worker access to plugin tools.
 
 ## Explicit non-goals for early milestones
 
@@ -379,7 +433,8 @@ No browser worker yet.
 - Letting workers call normal `project_select` against the global Core session.
 - Letting workers push remotes by default.
 - Maintaining both a CDP driver and an extension/bridge path before real-world evidence justifies the extra browser integration.
-- Building a plugin marketplace before Core multi-agent behavior is stable.
+- Building a skill/plugin marketplace before local install/activation behavior is stable.
+- Automatically executing third-party skill scripts or package-manager install instructions during discovery.
 - Expanding M3 to macOS/Linux parity when Windows is the only required Computer Use target.
 
 ## Development rule
