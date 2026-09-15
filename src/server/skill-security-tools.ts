@@ -5,8 +5,13 @@ import { readSkillProvenance } from "../skills/install.js";
 import { loadRegisteredSkill } from "../skills/registry.js";
 import { describeSkillTrust, scanSkillText } from "../skills/security.js";
 import { resolveActiveProject } from "../workspace/active.js";
+import { addToolCallProof } from "./tool-proof.js";
 
 const skillNameSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
+
+function result(tool: string, value: ReturnType<typeof makeResult>) {
+  return { ...value, structuredContent: addToolCallProof(value.structuredContent, tool, value.isError !== true) };
+}
 
 export function registerSkillSecurityTools(server: McpServer, ctx: ToolContext): void {
   server.registerTool(
@@ -20,13 +25,18 @@ export function registerSkillSecurityTools(server: McpServer, ctx: ToolContext):
     async (input) => {
       const project = await resolveActiveProject(ctx).catch(() => undefined);
       const loaded = await loadRegisteredSkill({ stateDir: ctx.stateDir, projectRoot: project?.root, name: input.name });
-      if (!loaded.skill) return makeResult({ error: `Skill not found: ${input.name}` }, `Skill not found: ${input.name}`, true);
+      if (!loaded.skill) {
+        return result("skill_security_status", makeResult({ error: `Skill not found: ${input.name}` }, `Skill not found: ${input.name}`, true));
+      }
       const provenance = await readSkillProvenance(loaded.skill.baseDir);
       const trust = describeSkillTrust(provenance);
       const securityScan = scanSkillText(loaded.skill.content);
-      return makeResult(
-        { name: loaded.skill.name, installedScope: loaded.skill.scope, trust, securityScan },
-        `Inspected Agent Skill '${loaded.skill.name}'.`,
+      return result(
+        "skill_security_status",
+        makeResult(
+          { name: loaded.skill.name, installedScope: loaded.skill.scope, trust, securityScan },
+          `Inspected Agent Skill '${loaded.skill.name}'.`,
+        ),
       );
     },
   );
