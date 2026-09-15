@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **M5 - Extensions**
 
-Active unit: **M5.3 - Skill activation (next)**
+Active unit: **M5.4 - Skill resources and security (next)**
 
 Detailed design documents:
 
@@ -243,20 +243,37 @@ Representative implementation commits: `ab7183a0`, `ddf742ea`, `5df8f883`, `46bd
 
 Final M5.2 code CI: `34995875346` (Ubuntu, macOS, Windows all passed).
 
+#### M5.3 - Skill activation
+
+- [x] Added persistent runtime-owned skill activation state with independent global and active-project selection layers.
+- [x] Added `skill_activate` and `skill_deactivate`; activation returns the selected bounded `SKILL.md` to the main ChatGPT agent immediately.
+- [x] `skill_list` now exposes a bounded catalog with active-state metadata instead of exposing every skill body.
+- [x] Catalog limits: 32 entries, approximately 6,000 metadata characters total, and 500 description characters per entry.
+- [x] Effective activation is deterministic and capped at 3 skill names, 8,000 characters per `SKILL.md`, and 24,000 activated instruction characters combined.
+- [x] Project-over-global package precedence is re-applied when activated instructions are loaded.
+- [x] Activated instructions are appended only at browser-worker launch/recovery time; the durable worker task is never rewritten.
+- [x] Initial launch and recovery use the same activation adapter and re-read current activation state.
+- [x] Missing/stale optional activation content is skipped rather than fabricating durable worker failure.
+- [x] Skill activation does not alter worker capability tokens, worker tool allowlists, Computer Use access, or external plugin access.
+- [x] Added activation-state, precedence, stale-entry, main-agent lifecycle, oversized-skill, initial-worker, and recovery-worker coverage.
+
+Representative implementation commits: `5de3de2e`, `208e8bc5`, `aa435211`, `dfa469af`, `a0207c9b`, `59e37eb6`.
+
+Final M5.3 code CI: `34998597354` (Ubuntu, macOS, Windows all passed).
+
 ## Planned next
 
-### M5.3 - Skill activation
+### M5.4 - Skill resources and security
 
-- [ ] Expose a bounded installed-skill catalog to the main ChatGPT agent without injecting every `SKILL.md` body.
-- [ ] Define explicit skill selection/activation semantics for the main agent.
-- [ ] Add selected skills to the existing browser-worker bootstrap path.
-- [ ] Preserve the original durable worker task; activated skill instructions remain launch-time context only.
-- [ ] Apply deterministic context/catalog count and character budgets.
-- [ ] Keep worker plugin/tool capabilities unchanged; skills are instructions/resources, not new authorization.
+- [ ] Add bounded reads for non-executable `references/`, `templates/`, and `assets/` resources.
+- [ ] Keep `scripts/` non-executable by default; do not add a script runner in this unit.
+- [ ] Surface external-source provenance/trust status to discovery/view/activation flows.
+- [ ] Add conservative static checks for obvious secret-exfiltration, persistence/prompt-injection, destructive, and agent-config modification patterns before external-skill activation.
+- [ ] Define explicit blocking/warning semantics without allowing scanner failures to grant capability or execute content.
+- [ ] Keep external MCP/plugin authorization deferred to M5.5.
 
-Later M5 units:
+Later M5 unit:
 
-- M5.4: support resources + external-skill security/trust checks.
 - M5.5: separate external MCP Plugins connector and optional plugin-provided skills.
 
 ## Update policy
