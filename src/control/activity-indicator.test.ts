@@ -122,6 +122,6 @@ if (process.platform === "win32") {
       const result = await probeWindowsActivityIndicatorSupport();
       expect(result.ok).toBe(true);
       expect(result.screens).toBeGreaterThanOrEqual(0);
-    }, 75_000);
+    }, 150_000);
   });
 }

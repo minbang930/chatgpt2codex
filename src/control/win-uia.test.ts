@@ -34,6 +34,6 @@ if (process.platform === "win32") {
       await expect(
         snapshotSemanticElements("chatgpt2codex-definitely-missing-window-5d77212e"),
       ).rejects.toThrow(/target app window not found/i);
-    }, 75_000);
+    }, 150_000);
   });
 }

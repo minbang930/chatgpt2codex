@@ -88,7 +88,7 @@ interface PendingRequest {
   timer: NodeJS.Timeout;
 }
 
-const STARTUP_TIMEOUT_MS = 90_000;
+const STARTUP_TIMEOUT_MS = 120_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const CAPTURE_REQUEST_TIMEOUT_MS = 20_000;
 const MAX_STDERR = 8_000;

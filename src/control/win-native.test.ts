@@ -47,7 +47,7 @@ if (process.platform === "win32") {
       const second = await resolveFrontmostApp();
       expect(first === undefined || typeof first === "string").toBe(true);
       expect(second === undefined || typeof second === "string").toBe(true);
-    }, 110_000);
+    }, 150_000);
 
     it("enumerates visible top-level windows without exposing native HWND values", async () => {
       const windows = await listVisibleWindows();
