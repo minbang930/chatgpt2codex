@@ -13,6 +13,7 @@ import {
 } from "../skills/activation.js";
 import { installSkill, readSkillProvenance, removeSkill, updateSkill } from "../skills/install.js";
 import { discoverSkillRegistry, loadRegisteredSkill } from "../skills/registry.js";
+import { describeSkillTrust, scanSkillText } from "../skills/security.js";
 import type { SkillMetadata, SkillScope } from "../skills/types.js";
 import { resolveActiveProject } from "../workspace/active.js";
 import { requireProjectLease } from "../workspace/lease-guard.js";
@@ -82,7 +83,7 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
     {
       title: "List Agent Skills",
       description:
-        "List a bounded catalog of installed Agent Skills using lightweight name/description/scope metadata. Project skills override global skills with the same name. Use this early when specialized instructions may help, then call skill_activate for the relevant skill instead of loading every SKILL.md.",
+        "List a bounded catalog of installed Agent Skills using lightweight name/description/scope/trust metadata. Project skills override global skills with the same name. Use this early when specialized instructions may help, then call skill_activate for the relevant skill instead of loading every SKILL.md.",
       annotations: readOnly,
       _meta: meta("Listing Agent Skills...", "Agent Skills listed"),
       inputSchema: { query: z.string().max(200).optional() },
@@ -108,13 +109,17 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
           const cost = catalogCost(skill, clipped.description);
           if (catalogChars + cost > MAX_SKILL_CATALOG_CHARS) break;
           const provenance = await readSkillProvenance(skill.baseDir);
+          const trust = describeSkillTrust(provenance);
           skills.push({
             name: skill.name,
             description: clipped.description,
             ...(clipped.descriptionTruncated ? { descriptionTruncated: true } : {}),
             scope: skill.scope,
-            managed: provenance !== null,
-            sourceKind: provenance?.sourceKind,
+            managed: trust.managed,
+            sourceKind: trust.sourceKind,
+            trustLevel: trust.level,
+            external: trust.external,
+            resolvedCommit: trust.resolvedCommit,
             active: activeNames.has(skill.name),
             activationScopes: [
               ...(globalActive.has(skill.name) ? ["global"] : []),
@@ -155,7 +160,7 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
     "skill_view",
     {
       title: "View Agent Skill",
-      description: "Load the full SKILL.md for one installed skill only when its instructions are needed. Viewing does not activate the skill for workers.",
+      description: "Load one installed SKILL.md with trust and static security metadata. Viewing does not activate the skill for workers.",
       annotations: readOnly,
       _meta: meta("Loading Agent Skill...", "Agent Skill loaded"),
       inputSchema: { name: skillNameSchema },
@@ -172,6 +177,9 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
           throw new DomainError(ErrorCode.PROJECT_NOT_FOUND, `Skill not found: ${input.name}`);
         }
         const provenance = await readSkillProvenance(loaded.skill.baseDir);
+        const trust = describeSkillTrust(provenance);
+        const securityScan = scanSkillText(loaded.skill.content);
+        const contentBlocked = trust.external && securityScan.blockingFindings > 0;
         return ok(
           "skill_view",
           makeResult(
@@ -179,12 +187,16 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
               name: loaded.skill.name,
               description: loaded.skill.description,
               scope: loaded.skill.scope,
-              content: loaded.skill.content,
-              managed: provenance !== null,
-              sourceKind: provenance?.sourceKind,
+              ...(contentBlocked ? { contentBlocked: true } : { content: loaded.skill.content }),
+              managed: trust.managed,
+              sourceKind: trust.sourceKind,
+              trust,
+              securityScan,
               diagnostics: loaded.diagnostics.slice(0, 20),
             },
-            `Loaded SKILL.md for ${loaded.skill.name}.`,
+            contentBlocked
+              ? `External Agent Skill '${loaded.skill.name}' has blocking security findings; its instruction body was withheld.`
+              : `Loaded SKILL.md for ${loaded.skill.name}.`,
           ),
         );
       } catch (error) {
@@ -198,7 +210,7 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
     {
       title: "Activate Agent Skill",
       description:
-        "Explicitly activate one installed Agent Skill and return its bounded instructions for the main agent to follow now. Global activation applies across projects; project activation is tied to the active project. Activated skills are also supplied to later browser workers without granting any additional tools or permissions.",
+        "Explicitly activate one installed Agent Skill and return its bounded instructions for the main agent to follow now. External Git skills must pass static security checks first. Global activation applies across projects; project activation is tied to the active project. Activated skills are also supplied to later browser workers without granting any additional tools or permissions.",
       annotations: localWrite,
       _meta: meta("Activating Agent Skill...", "Agent Skill activated"),
       inputSchema: {
@@ -228,6 +240,9 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
           activationScope,
           projectId: project?.projectId,
         });
+        const provenance = await readSkillProvenance(loaded.skill.baseDir);
+        const trust = describeSkillTrust(provenance);
+        const securityScan = scanSkillText(loaded.skill.content);
         return ok(
           "skill_activate",
           makeResult(
@@ -238,6 +253,8 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
               activationScope,
               activeProjectId: project?.projectId,
               activeSkillNames: activation.names,
+              trust,
+              securityScan,
               content: loaded.skill.content,
             },
             `Activated Agent Skill '${loaded.skill.name}' (${activationScope}). Follow the returned SKILL.md instructions for the current task where applicable.`,
@@ -295,7 +312,7 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
     {
       title: "Install Agent Skill",
       description:
-        "Install one SKILL.md-based Agent Skill from an HTTPS Git repository or a local directory inside the configured workspace. If the source contains multiple skills, provide skillName. Installs are snapshots and never execute skill scripts.",
+        "Install one SKILL.md-based Agent Skill from an HTTPS Git repository or a local directory inside the configured workspace. External Git snapshots must pass bounded static security checks before installation. If the source contains multiple skills, provide skillName. Installs never execute skill scripts.",
       annotations: networkWrite,
       _meta: meta("Installing Agent Skill...", "Agent Skill installed"),
       inputSchema: {
@@ -317,6 +334,7 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
           skillName: input.skillName,
           ref: input.ref,
         });
+        const trust = describeSkillTrust(installed.provenance);
         return ok(
           "skill_install",
           makeResult(
@@ -329,6 +347,7 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
               requestedRef: installed.provenance.requestedRef,
               resolvedCommit: installed.provenance.resolvedCommit,
               installedAt: installed.provenance.installedAt,
+              trust,
             },
             `Installed Agent Skill '${installed.skill.name}' in ${installed.skill.scope} scope.`,
           ),
@@ -344,7 +363,7 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
     {
       title: "Update Agent Skill",
       description:
-        "Refresh a managed Agent Skill from the source recorded at install time. Unmanaged/manual skills are never overwritten.",
+        "Refresh a managed Agent Skill from the source recorded at install time. External Git snapshots must pass bounded static security checks before replacement. Unmanaged/manual skills are never overwritten.",
       annotations: networkWrite,
       _meta: meta("Updating Agent Skill...", "Agent Skill updated"),
       inputSchema: { name: skillNameSchema, scope: scopeSchema },
@@ -359,6 +378,7 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
           scope: input.scope,
           name: input.name,
         });
+        const trust = describeSkillTrust(updated.provenance);
         return ok(
           "skill_update",
           makeResult(
@@ -371,6 +391,7 @@ export function registerSkillTools(server: McpServer, ctx: ToolContext): void {
               resolvedCommit: updated.provenance.resolvedCommit,
               installedAt: updated.provenance.installedAt,
               updatedAt: updated.provenance.updatedAt,
+              trust,
             },
             `Updated Agent Skill '${updated.skill.name}'.`,
           ),
