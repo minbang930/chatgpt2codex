@@ -1,0 +1,28 @@
+name: M3.5.4 Esc cancellation temporary
+
+on:
+  push:
+    branches: [dev/custom-runtime]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/custom-runtime
+          fetch-depth: 0
+      - name: Apply M3.5.4 patch
+        run: python scripts/m3_esc_cancel_patch.py
+      - name: Commit M3.5.4
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/m3-esc-cancel-tmp.yml scripts/m3_esc_cancel_patch.py
+          git add src/types.ts src/control/cancel.ts src/control/activity-indicator.ts src/control/capture.ts src/control/tools.ts src/control/executor.ts src/control/cancel.test.ts .github/workflows/ci.yml
+          git commit -m "feat: add local Esc cancellation for Windows Computer Use"
+          git push origin HEAD:dev/custom-runtime
