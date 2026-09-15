@@ -5,6 +5,7 @@ import { installAgentNotificationPiggyback } from "../agents/piggyback.js";
 import { emitSessionStartHook } from "../hooks/session-start.js";
 import { installToolLifecycleHooks } from "../hooks/tool-lifecycle.js";
 import { registerAgentTools } from "./agent-tools.js";
+import { registerSkillSecurityTools } from "./skill-security-tools.js";
 import { registerSkillTools } from "./skill-tools.js";
 import { registerTools } from "./tools.js";
 import { registerWebAgentTools } from "./web-agent-tools.js";
@@ -28,6 +29,7 @@ export async function createServer(ctx: ToolContext): Promise<McpServer> {
   registerWebAgentTools(server, ctx);
   registerWorkerTools(server, ctx);
   registerSkillTools(server, ctx);
+  registerSkillSecurityTools(server, ctx);
 
   // Install lifecycle hooks only after every tool surface has registered so a
   // single wrapper covers Core, agent, Web-agent, worker, and extension tools
