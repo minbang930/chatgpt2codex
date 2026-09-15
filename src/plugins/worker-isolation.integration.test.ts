@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WORKER_CORE_TOOL_NAMES, dispatchWorkerCoreTool } from "../agents/dispatcher.js";
 import { registerPlugin } from "./registry.js";
-import { createServer } from "../server/mcp-server.js";
+import { createServer, createWorkerServer } from "../server/mcp-server.js";
 import type { ToolContext } from "../types.js";
 
 const tempDirs: string[] = [];
@@ -38,6 +38,11 @@ async function makeCtx(): Promise<ToolContext> {
     },
     remote: true,
   };
+}
+
+function registeredToolNames(server: Awaited<ReturnType<typeof createServer>>): string[] {
+  const tools = (server as unknown as { _registeredTools?: Record<string, unknown> })._registeredTools ?? {};
+  return Object.keys(tools).sort();
 }
 
 afterEach(async () => {
@@ -86,7 +91,7 @@ describe("plugin / browser-worker isolation boundary", () => {
     }
   });
 
-  it("documents that the shared remote catalog still lists the main-agent plugin proxies", async () => {
+  it("builds a worker-only catalog while the main catalog keeps plugin proxies", async () => {
     const ctx = await makeCtx();
     await registerPlugin({
       stateDir: ctx.stateDir,
@@ -96,17 +101,20 @@ describe("plugin / browser-worker isolation boundary", () => {
       enabled: true,
     });
 
-    const server = await createServer(ctx);
-    const handler = (server.server as unknown as {
-      _requestHandlers?: Map<
-        string,
-        (request: { method: string; params: Record<string, never> }) => Promise<{ tools: Array<{ name: string }> }>
-      >;
-    })._requestHandlers?.get("tools/list");
-    const listed = await handler?.({ method: "tools/list", params: {} });
-    const names = listed?.tools.map((tool) => tool.name) ?? [];
+    const mainServer = await createServer(ctx);
+    const mainNames = registeredToolNames(mainServer);
+    expect(mainNames).toEqual(expect.arrayContaining(["plugin_list", "plugin_discover", "plugin_call"]));
 
-    expect(names).toEqual(expect.arrayContaining(["plugin_list", "plugin_discover", "plugin_call"]));
-    expect(names.some((name) => name.startsWith("worker_plugin_"))).toBe(false);
+    const workerServer = await createWorkerServer(ctx);
+    const workerNames = registeredToolNames(workerServer);
+    const expectedWorkerNames = [
+      "worker_finish",
+      ...WORKER_CORE_TOOL_NAMES.map((name) => `worker_${name}`),
+    ].sort();
+
+    expect(workerNames).toEqual(expectedWorkerNames);
+    expect(workerNames.some((name) => name.startsWith("plugin_"))).toBe(false);
+    expect(workerNames.some((name) => name.startsWith("agent_"))).toBe(false);
+    expect(workerNames).not.toContain("project_select");
   });
 });
