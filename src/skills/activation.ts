@@ -113,6 +113,15 @@ export async function getActivatedSkillSelection(
   };
 }
 
+async function assertInstalledSkillActivationSafe(stateDir: string, name: string, projectId?: string): Promise<void> {
+  const projectRoot = projectId ? await resolveProjectRootForSkillActivation(stateDir, projectId) : undefined;
+  const loaded = await loadRegisteredSkill({ stateDir, projectRoot, name });
+  if (!loaded.skill) return;
+  const provenance = await readSkillProvenance(loaded.skill.baseDir);
+  const trust = describeSkillTrust(provenance);
+  assertExternalSkillSecurity(trust, scanSkillText(loaded.skill.content), "skill activation");
+}
+
 export async function activateSkillName(params: {
   stateDir: string;
   name: string;
@@ -120,6 +129,7 @@ export async function activateSkillName(params: {
   projectId?: string;
 }): Promise<ActivatedSkillSelection> {
   const name = skillNameSchema.parse(params.name);
+  await assertInstalledSkillActivationSafe(params.stateDir, name, params.projectId);
   const state = await readSkillActivationState(params.stateDir);
   if (params.activationScope === "project") {
     if (!params.projectId) {
