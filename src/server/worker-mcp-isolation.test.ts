@@ -219,9 +219,12 @@ describe("browser-worker MCP transport isolation", () => {
     expect(workerNames.some((name) => name.startsWith("plugin_"))).toBe(false);
     expect(workerNames).not.toContain("project_select");
 
-    await expect(
-      workerClient.callTool({ name: "plugin_list", arguments: {} }),
-    ).rejects.toThrow(/not found|unknown tool/i);
+    const denied = (await workerClient.callTool({
+      name: "plugin_list",
+      arguments: {},
+    })) as { isError?: boolean; content?: Array<{ type?: string; text?: string }> };
+    expect(denied.isError).toBe(true);
+    expect(denied.content?.[0]?.text).toMatch(/not found|unknown tool/i);
   }, 30_000);
 
   it("binds OAuth resource audiences to their exact main/worker endpoints", async () => {
