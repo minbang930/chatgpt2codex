@@ -119,10 +119,16 @@ function appSuggestionExpression(appName: string): string {
       '[role="listbox"], [role="menu"], [role="dialog"], [data-radix-popper-content-wrapper], [data-floating-ui-portal]'
     )).filter(visible);
     const selector = '[role="option"], [role="menuitem"], [role="menuitemradio"], [data-radix-collection-item], button';
-    const candidates = roots
+    const standardCandidates = roots
       .flatMap((root) => Array.from(root.querySelectorAll(selector)))
       .filter(visible);
-    const exactCandidate = candidates.find((element) => {
+
+    // Current ChatGPT @ app picker is a role-less .popover whose clickable
+    // rows are role-less .__menu-item elements. Keep this bounded to those
+    // visible rows rather than scanning/clicking arbitrary page text.
+    const popoverCandidates = Array.from(document.querySelectorAll('.popover .__menu-item')).filter(visible);
+    const candidates = Array.from(new Set([...standardCandidates, ...popoverCandidates]));
+    const hasExactLabel = (element) => {
       const labels = [
         element.textContent,
         element.getAttribute('aria-label'),
@@ -134,11 +140,14 @@ function appSuggestionExpression(appName: string): string {
         ]),
       ];
       return labels.some((label) => normalize(label) === expectedText);
-    });
-    const prefixMatches = exactCandidate
-      ? []
-      : candidates.filter((element) => normalize(element.textContent).startsWith(expectedText + ' '));
-    const candidate = exactCandidate ?? (prefixMatches.length === 1 ? prefixMatches[0] : undefined);
+    };
+    const exactMatches = candidates.filter(hasExactLabel);
+    const prefixMatches = exactMatches.length === 0
+      ? candidates.filter((element) => normalize(element.textContent).startsWith(expectedText + ' '))
+      : [];
+    const candidate = exactMatches.length === 1
+      ? exactMatches[0]
+      : (prefixMatches.length === 1 ? prefixMatches[0] : undefined);
     if (!(candidate instanceof HTMLElement)) return { ok: false };
     candidate.click();
     return { ok: true, text: String(candidate.textContent || '').trim() };
