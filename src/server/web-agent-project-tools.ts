@@ -24,12 +24,12 @@ function meta(invoking: string, invoked: string) {
   };
 }
 
-async function activeProject(ctx: ToolContext, write: boolean) {
+async function activeProject(ctx: ToolContext, workerMutation: boolean) {
   const active = await resolveActiveProject(ctx);
   if (!active) {
     throw new DomainError(ErrorCode.PROJECT_NOT_SELECTED, "No active project; call project_select first");
   }
-  if (write) await requireProjectLease(ctx, active.projectId, "write");
+  if (workerMutation) await requireProjectLease(ctx, active.projectId, "worker");
   return active;
 }
 
@@ -50,7 +50,7 @@ export function registerWebAgentProjectTools(server: McpServer, ctx: ToolContext
     {
       title: "Set ChatGPT Project worker route",
       description:
-        "Persist the ChatGPT Project URL used for future Web workers of the active local project. This affects browser placement only, not worker permissions.",
+        "Persist the ChatGPT Project URL used for future Web workers of the active local project. This is worker orchestration state only and does not grant parent project-write authority.",
       annotations: localState,
       _meta: meta("Saving worker project route...", "Worker project route saved"),
       inputSchema: { url: z.string().url(), label: z.string().min(1).max(200).optional() },
