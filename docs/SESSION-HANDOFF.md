@@ -9,7 +9,7 @@ Operational handoff for continuing `chatgpt2codex` across ChatGPT sessions. Read
 - Upstream: `ezBuilder/chatgpt2codex`
 - Goal: stable ChatGPT-Web-driven coding runtime without depending on local Codex quota while preserving the original Core authorization/project/file/shell/git path.
 
-The original M0-M5 roadmap is complete. Do not invent an M6 automatically; finish stabilization/live integration validation first.
+The original M0-M5 roadmap is complete. Do not invent an M6 automatically; continue stabilization/integration work first.
 
 ## How to work with the user
 
@@ -20,7 +20,7 @@ The user prefers implementation-first progress.
 - Work one coherent unit at a time.
 - Per unit: **implement -> focused tests/CI -> fix failures -> update progress/handoff docs**.
 - Prefer concrete state/change/commit/CI reports over speculative explanation.
-- Windows is the active platform target for live validation; preserve Ubuntu/macOS CI.
+- Windows/VMware is the active live-validation target; preserve Ubuntu/macOS CI.
 - If a live step must be performed by the user, give exact ready-to-run/setup steps and the expected result.
 
 ## Persistent engineering boundaries
@@ -41,7 +41,7 @@ The user prefers implementation-first progress.
 `src/agents/ponytail.ts` is an instruction-layer coding policy, not an authorization mechanism.
 
 - default: `full`
-- task-local: `ponytail lite|full|ultra|off` or slash variants
+- task-local: `ponytail lite|full|ultra/off` or slash variants
 - durable worker task remains unchanged; adaptation is applied only to browser-worker instructions
 - prefer reuse/native/direct solutions and minimal coherent diffs without weakening validation/security/error handling/accessibility/data integrity.
 
@@ -49,25 +49,23 @@ The user prefers implementation-first progress.
 
 ### External MCP / Skills
 
-1. Actual Core plugin lifecycle:
-   `plugin_register -> enable -> discover -> plugin_call -> disable -> denied call -> remove`.
+1. Core plugin lifecycle: `plugin_register -> enable -> discover -> plugin_call -> disable -> denied call -> remove`.
    - commit `5fbc010b`
    - CI `35011189776` green on Ubuntu/macOS/Windows.
-2. Plugin `skillSources` declaration through normal external Git Skill lifecycle:
-   `declaration -> explicit skill_install -> Git provenance/security scan -> skill_activate`.
+2. Plugin `skillSources` declaration through normal external Git Skill lifecycle.
    - commit `c99bee63`
    - CI `35013285118` green.
    - declaration remains inert and fixture scripts remain unexecuted.
-3. Plugin configuration vs worker capability registration:
+3. Plugin configuration vs worker capability registration.
    - no `worker_plugin_*`
    - worker mirrors remain exactly derived from `WORKER_CORE_TOOL_NAMES`
-   - dispatcher rejects plugin tools before worker capability use.
+   - dispatcher rejects plugin tools before worker capability use
    - commit `f849dff0`
    - CI `35014499804` green.
 
 ### Hard worker MCP server isolation
 
-The shared remote catalog gap was closed server-side.
+The shared remote catalog gap is closed server-side.
 
 ```text
 main ChatGPT app
@@ -81,14 +79,14 @@ worker ChatGPT app
   -> isolated worktree
 ```
 
-Properties already regression-tested:
+Properties regression-tested:
 
 - dedicated worker-only `McpServer` factory;
 - worker catalog excludes unprefixed plugin/main tools, Skills, Agent Manager, Computer Use, and ordinary file/shell/git tools;
 - `/mcp` retains main-agent plugin proxies;
 - OAuth audiences are exact-matched between `/mcp` and `/mcp/worker`;
-- MCP sessions are role-bound (`main|worker`) so session IDs cannot cross routes;
-- worker token/session cannot be replayed into the main endpoint and vice versa;
+- MCP sessions are role-bound (`main|worker`);
+- cross-route token/session replay is rejected;
 - existing opaque `workerToken` remains the per-worker repository authority.
 
 Implementation/test HEAD for this boundary: `87f497f0`.
@@ -96,65 +94,77 @@ CI `35017393064`: Ubuntu/macOS/Windows all green.
 
 ### ChatGPT message-level worker app routing
 
-The Chrome/CDP browser-worker driver now explicitly selects the worker custom app before submitting the task message.
+The Chrome/CDP browser-worker driver explicitly selects the worker custom app before submitting the task message.
 
 Current behavior in `src/agents/chrome-cdp.ts`:
 
 1. open mapped ChatGPT Project or standalone ChatGPT;
 2. wait for the composer;
 3. type `@ChatGPT To Codex Worker`;
-4. select the exact matching app from ChatGPT's visible app picker;
-5. append the worker bootstrap + scoped capability;
-6. submit only after worker-app selection succeeds.
+4. select the matching app from ChatGPT's app picker;
+5. verify the selected inline app entity;
+6. append worker bootstrap + scoped capability;
+7. submit.
 
 Important properties:
 
 - Default worker app display name: `ChatGPT To Codex Worker`.
 - Override exact installed name with `CHATGPT2CODEX_WORKER_APP_NAME`.
-- If the worker app is missing from the `@` picker, launch **fails closed before task submission**. It does not fall back to the main `/mcp` app.
-- Initial launch and recovery use the same browser driver and therefore the same routing rule.
-- The bootstrap still requires `workerToken` on every `worker_*` call; selecting the app does not grant repository authority by itself.
+- If the worker app is missing, launch fails closed before task submission; it never silently falls back to the main `/mcp` app.
+- Initial launch and recovery use the same browser driver/routing rule.
+- App selection does not grant repository authority; `workerToken` is still required on every worker call.
 - Main-agent app remains independent on `/mcp`.
 
-Implementation/test commits:
+Initial routing implementation/test commits:
 
 - `236994e7` - browser-worker worker-app selection/routing
 - `8b0b8b07` - message-routing tests
-- `1a50605f` - corrected test fake to distinguish suggestion DOM from composer readiness
+- `1a50605f` - corrected test fake
+- CI `35022343381` green on Ubuntu/macOS/Windows.
 
-Code CI `35022343381`: **success on Ubuntu, macOS, and Windows**, including Windows native/UIA/activity-indicator/build/launcher pipeline.
+### Live ChatGPT worker-app stabilization and validation
 
-Setup/runbook:
+Real VMware/ChatGPT validation exposed several UI details that deterministic tests had not modeled:
+
+- ChatGPT app rows include a subtitle, so candidate matching cannot require whole-row exact text.
+  - `415b8e3` / `5c886bb`
+- ChatGPT can show an app as selected while the old detection logic reports failure.
+  - `8ccb755` / `1022fc1` / `c956c3d`
+- A real DOM diagnostic showed the selected app is represented **inside `#prompt-textarea` as an inline `<a>` element**, not only as an external chip.
+  - diagnostic helper: `904ab967`
+  - actual fix: `6179841e`
+  - regression test: `f081c065`
+  - CI `35045017337` green on Ubuntu/macOS/Windows, including Windows native input/UIA/activity-indicator/build/launcher jobs.
+
+Real live setup/validation completed successfully:
+
+- Main app remains `ChatGPT To Codex -> <public-origin>/mcp`.
+- Worker app is `ChatGPT To Codex Worker -> <public-origin>/mcp/worker` and completed OAuth.
+- Worker app is visible in the dedicated worker Chrome profile's `@` picker.
+- Manual tool-list sanity check showed the expected worker-only catalog.
+- `c2c-smoke` was initialized with a first Git commit so an isolated worktree could be created.
+- Dedicated worker Chrome profile was logged into ChatGPT once and then reused.
+- The same pending durable worker `wrk_3fb5f6f7-43a7-47e5-9da1-5db1a90b086b` was retried after UI-routing fixes rather than replaced.
+- Final live run automatically selected the worker app, read the README, reported the first heading as `# c2c-smoke`, made no file changes, and completed through `worker_finish`.
+
+This closes the primary real connected-worker-app evidence gap. Do **not** claim that a separate live `running -> lost target -> recoverRunningBrowserWorker` recovery scenario has been tested; only same-pending-worker relaunch/retry was exercised live. Recovery still shares the same driver in code/CI.
+
+Setup/runbooks:
 
 - `docs/CHATGPT-WORKER-APP-SETUP.md`
 - `docs/CHATGPT-PROJECT-WORKER-ROUTING.md`
 
-The required ChatGPT configuration is two custom apps against the same public origin:
-
-```text
-ChatGPT To Codex        -> <public-origin>/mcp
-ChatGPT To Codex Worker -> <public-origin>/mcp/worker
-```
-
-Both use the existing Owner Token OAuth flow. If the worker app has a different display name, set `CHATGPT2CODEX_WORKER_APP_NAME` to that exact name.
-
 ## Active unit
 
-**Live-validate the real connected ChatGPT worker custom app in the user's dedicated worker Chrome profile.**
+**Post-live-smoke stabilization cleanup.**
 
-This is the remaining evidence gap. CI proves the server boundary and deterministic CDP routing logic, but this session does not have the user's local ChatGPT worker Chrome/runtime control surface, so do not claim live UI success yet.
+The primary browser-worker custom-app path is now proven in the real user environment. Before defining any new milestone, handle only concrete stabilization follow-ups discovered by live use.
 
-Live validation should prove all of the following simultaneously:
+Known follow-up observations:
 
-1. `ChatGPT To Codex Worker` is connected to `<public-origin>/mcp/worker` and visible in the dedicated worker profile's `@` picker.
-2. A representative `agent_spawn` / `agent_launch` causes the browser driver to select that worker app and submit the task.
-3. Worker can call `worker_project_rules` and another allowed `worker_*` tool using the scoped token.
-4. Worker completes through `worker_finish`; durable `agent_result` remains correct.
-5. Worker does not receive main plugin proxies, ordinary main file/shell/git tools, Computer Use, Skills, or Agent Manager from its worker app.
-6. Parent/main ChatGPT app stays on `/mcp` and keeps its normal configured plugin surface.
-7. Recovery of the same durable worker follows the same worker-app selection path.
-
-Do not weaken this by using timing heuristics, "next connection is worker", first-call role inference, or prompt compliance. The explicit worker app + `/mcp/worker` OAuth/catalog boundary is the intended design.
+1. A separate live running-worker recovery smoke (`running` worker with lost/stopped browser target -> recovery) has not yet been exercised end-to-end, although initial launch/retry and recovery use the same driver path in code.
+2. During some manual tests, the parent MCP lease was temporarily raised to `full-write`; a remote session could not restore `control` because `control` re-grant is intentionally local-authority-only. Treat this as a UX/operational follow-up, not as permission to weaken the authorization boundary.
+3. Keep CI green and fix only integration defects before considering broader scope.
 
 ## Remaining stabilization work
 
@@ -164,9 +174,11 @@ In order unless a real defect changes priority:
 2. **Completed:** plugin skill-source -> normal Skill lifecycle (`c99bee63`, CI `35013285118`).
 3. **Completed:** plugin vs worker capability registration (`f849dff0`, CI `35014499804`).
 4. **Completed:** hard worker MCP server/catalog/OAuth boundary (`87f497f0`, CI `35017393064`).
-5. **Completed in code/CI:** browser driver explicitly selects dedicated worker app per task message (`236994e7` / `1a50605f`, CI `35022343381`).
-6. **Active:** live user-environment smoke of the connected worker custom app and representative launch/recovery flow.
-7. Keep CI green and fix any live integration defect before considering a new milestone.
+5. **Completed:** browser driver selects the dedicated worker app per task message (`236994e7` onward).
+6. **Completed live:** real `ChatGPT To Codex Worker` connection and representative pending-worker launch/retry through `worker_finish`; final DOM-routing fix `6179841e`, regression `f081c065`, CI `35045017337`.
+7. **Optional live follow-up:** running-worker recovery smoke through the same worker app.
+8. Review the lease-restoration UX exposed during manual testing without weakening local-only `control` authority.
+9. Keep CI green and fix integration defects before defining any new milestone.
 
 ## Source-of-truth documents
 
@@ -186,6 +198,6 @@ In order unless a real defect changes priority:
 3. Check actual `dev/custom-runtime` HEAD.
 4. Check latest CI for that HEAD.
 5. If docs and repo disagree, trust repo and update docs.
-6. If they match, continue the active unit immediately.
+6. If they match, continue the active stabilization unit immediately.
 
 A future user message consisting only of **`SESSION-HANDOFF.md 읽고 이어서 진행해`** should be enough to resume.
