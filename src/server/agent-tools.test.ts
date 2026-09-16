@@ -168,7 +168,19 @@ describe("MCP agent tools", () => {
     expect((result?.structuredContent?.result as { summary?: string } | undefined)?.summary).toBe("Worker task complete");
   });
 
-  it("requires a full-write-capable lease for agent_spawn", async () => {
+  it("allows a control lease to prepare an isolated worker", async () => {
+    const server = await createServer(await makeCtx("control"));
+    const tool = handlers(server);
+    const spawned = await tool.agent_spawn?.({ task: "Worker-scoped edit" });
+
+    expect(spawned?.isError).not.toBe(true);
+    expect(spawned?.structuredContent).toMatchObject({
+      status: "pending",
+      launchState: "prepared",
+    });
+  });
+
+  it("rejects presets without worker orchestration authority for agent_spawn", async () => {
     const server = await createServer(await makeCtx("tests-only"));
     const tool = handlers(server);
     const spawned = await tool.agent_spawn?.({ task: "Should not start" });
