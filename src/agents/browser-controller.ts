@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { DomainError, ErrorCode } from "../types.js";
+import type { WorkerExecutionIntent } from "./execution-settings.js";
 import { getWorker } from "./store.js";
 
 const DIR_MODE = 0o700;
@@ -59,6 +60,7 @@ export interface BrowserWorkerLaunchInput {
   task: string;
   workerToken: string;
   skillContext?: string;
+  executionIntent?: WorkerExecutionIntent;
   route: BrowserWorkerRoute;
 }
 
