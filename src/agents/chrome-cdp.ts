@@ -145,6 +145,63 @@ function appSuggestionExpression(appName: string): string {
   })()`;
 }
 
+function selectedWorkerAppExpression(appName: string): string {
+  const encoded = JSON.stringify(appName);
+  return `(() => {
+    const composer = document.querySelector('#prompt-textarea');
+    if (!(composer instanceof HTMLElement)) return false;
+    const expectedText = String(${encoded}).replace(/\\s+/g, ' ').trim().toLocaleLowerCase();
+    const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLocaleLowerCase();
+    const visible = (element) => {
+      if (!(element instanceof HTMLElement)) return false;
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const suggestionRootSelector = '[role="listbox"], [role="menu"], [role="dialog"], [data-radix-popper-content-wrapper], [data-floating-ui-portal]';
+    let scope = composer.closest('form');
+    if (!(scope instanceof HTMLElement)) {
+      scope = composer.parentElement;
+      for (let depth = 0; depth < 4 && scope?.parentElement; depth += 1) {
+        scope = scope.parentElement;
+      }
+    }
+    if (!(scope instanceof HTMLElement)) return false;
+    const elements = Array.from(scope.querySelectorAll('*')).filter(visible);
+    return elements.some((element) => {
+      if (!(element instanceof HTMLElement)) return false;
+      if (element === composer || composer.contains(element)) return false;
+      if (element.closest(suggestionRootSelector)) return false;
+      const labels = [
+        element.textContent,
+        element.getAttribute('aria-label'),
+        element.getAttribute('title'),
+      ];
+      return labels.some((label) => normalize(label) === expectedText);
+    });
+  })()`;
+}
+
+function clearTypedAppQueryExpression(appName: string): string {
+  const encoded = JSON.stringify(`@${appName}`);
+  return `(() => {
+    const composer = document.querySelector('#prompt-textarea');
+    if (!(composer instanceof HTMLElement)) return false;
+    const expected = ${encoded};
+    const current = composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement
+      ? composer.value
+      : (composer.textContent || '');
+    if (current.trim() !== expected) return false;
+    if (composer instanceof HTMLTextAreaElement || composer instanceof HTMLInputElement) {
+      composer.value = '';
+    } else {
+      composer.textContent = '';
+    }
+    composer.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  })()`;
+}
+
 function submittedExpression(): string {
   return `(() => {
     const composer = document.querySelector('#prompt-textarea');
@@ -201,6 +258,21 @@ async function waitForComposer(
   return false;
 }
 
+async function workerAppIsSelected(connection: CdpConnection, appName: string): Promise<boolean> {
+  const evaluated = await connection.send("Runtime.evaluate", {
+    expression: selectedWorkerAppExpression(appName),
+    returnByValue: true,
+  });
+  return resultValue(evaluated) === true;
+}
+
+async function clearTypedAppQuery(connection: CdpConnection, appName: string): Promise<void> {
+  await connection.send("Runtime.evaluate", {
+    expression: clearTypedAppQueryExpression(appName),
+    returnByValue: true,
+  }).catch(() => undefined);
+}
+
 async function selectWorkerApp(
   connection: CdpConnection,
   appName: string,
@@ -218,6 +290,11 @@ async function selectWorkerApp(
 
   await connection.send("Input.insertText", { text: `@${appName}` });
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (await workerAppIsSelected(connection, appName)) {
+      await clearTypedAppQuery(connection, appName);
+      return;
+    }
+
     const selected = await connection.send("Runtime.evaluate", {
       expression: appSuggestionExpression(appName),
       returnByValue: true,
@@ -225,9 +302,15 @@ async function selectWorkerApp(
     const selectedValue = resultValue(selected) as { ok?: boolean } | undefined;
     if (selectedValue?.ok === true) {
       await sleepMs(50);
+      await clearTypedAppQuery(connection, appName);
       return;
     }
+
     await sleepMs(pollMs);
+    if (await workerAppIsSelected(connection, appName)) {
+      await clearTypedAppQuery(connection, appName);
+      return;
+    }
   }
 
   throw new DomainError(
