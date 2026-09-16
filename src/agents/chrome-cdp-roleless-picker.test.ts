@@ -82,7 +82,7 @@ class RolelessPickerConnection implements CdpConnection {
       };
     }
     if (expression.includes("rect.width > 0")) return { result: { value: true } };
-    if (expression.includes("inlineSelectedApp")) return { result: { value: false } };
+    if (expression.includes("inlineSelectedApp")) return { result: { value: this.row.clicked } };
     if (expression.includes("composer.focus();")) return { result: { value: true } };
     if (expression.includes("current.trim().length === 0")) return { result: { value: true } };
     return { result: { value: undefined } };
