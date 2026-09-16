@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **M6 - Worker Execution Configuration**
 
-Active unit: **M6.2 - Durable per-worker intent**
+Active unit: **M6.3 - ChatGPT Web model/reasoning set-and-verify adapter**
 
 Primary operational handoff: `docs/SESSION-HANDOFF.md`.
 
@@ -115,104 +115,46 @@ Implementation/test HEAD `87f497f0`; CI `35017393064` green.
 - [x] Current role-less `.popover .__menu-item` picker support.
 - [x] Narrow stale plain-text Worker-app mention cleanup.
 - [x] Fail-closed behavior when the dedicated Worker app is unavailable.
+- [x] Post-click selected-entity verification prevents false-positive picker clicks from being accepted as success.
 
-Relevant commits: `415b8e3`, `5c886bb`, `6179841e`, `f081c065`, `95375f7`, `2f00ae9`, `878aa3d`, `5b16988d`, `62844fa6`.
-
-Stale-draft regression CI `35051793885` green. Live clean initial Worker-app selection was proven after manually clearing the earlier stale diagnostic draft; do not claim that the automatic stale-draft branch itself was separately live-smoked.
+Relevant commits: `415b8e3`, `5c886bb`, `6179841e`, `95375f7`, `5b16988d`, `7c3bf2c4`, `ae3b5b8b`, `9d036fcf`, `02ab05c3`.
 
 ### Connected Worker-app initial completion path
 
 - [x] Dedicated Worker app completed OAuth and exposes only the worker catalog.
-- [x] Fresh initial-selection worker `wrk_777c1c14-8f66-462a-a95c-774db8f05c6b` transitioned to `running` through the Worker app.
-- [x] Same worker confirmed README heading `# c2c-smoke`, made no file changes, called `worker_finish`, produced an `agent_wait` completion event, and returned the durable result through `agent_result`.
+- [x] Fresh worker transitioned to `running` through the Worker app, called `worker_finish`, produced an `agent_wait` event, and returned the durable result through `agent_result`.
 
 ### Control-preserving Worker orchestration
 
-- [x] Added dedicated `worker` lease capability.
-- [x] `control = read + control + worker`.
-- [x] `full-write = read + verify + write + image + remote + worker`.
-- [x] `control` still denies parent direct write/verify/image/remote.
-- [x] `full-write` still denies desktop control.
-- [x] `agent_spawn`, `agent_launch`, and Worker Project route mutations require `worker` instead of generic `write`.
-- [x] Worker edits remain scoped to opaque `workerToken` + isolated worktree.
+- [x] Dedicated `worker` lease capability separates worker orchestration from parent direct-write authority.
+- [x] `control = read + control + worker`; `full-write = read + verify + write + image + remote + worker`.
+- [x] Parent remained on `control` during a live `agent_spawn -> agent_launch -> agent_wait -> agent_result` smoke.
 
-Implementation: `9fd2a6b`, `6d7ce6f`, `6fe7f5c`, `f32ad00`, `de6926d`; tests `b303e47`, `2f9ad59`, `2537462`.
-CI `35053101356` green across Ubuntu/macOS/Windows including Windows helper/build jobs.
-
-- [x] Live VMware smoke kept the parent on `control` for `agent_spawn -> agent_launch -> agent_wait -> agent_result` without switching to `full-write`; README `# c2c-smoke`, no project changes.
+CI `35053101356` green across Ubuntu/macOS/Windows.
 
 ### True running-worker browser recovery — live complete
 
-- [x] Spawned/launched recovery worker `wrk_7270a415-1519-4f9e-905c-5d221c63266a` and left durable state `running`.
-- [x] Manually closed only its Worker browser tab.
-- [x] `agent_status` reconciled durable `running` + browser `failed`, `recoverable=true`, attempt `1`.
-- [x] Re-launched the same workerId; response reported `recovered=true`, browser attempt `2`.
-- [x] Worker reached durable `completed` without completion fallback; browser became `stopped`.
-- [x] Final `agent_result` confirmed README heading `# c2c-smoke`, marker cleanup, no commit/push, and no remaining issues.
-
-This live smoke proves the actual `running -> target loss -> reconcile -> same-worker recovery -> completed` path rather than only the initial launch/retry path.
+- [x] Worker `wrk_7270a415-1519-4f9e-905c-5d221c63266a` was live-recovered after only its Worker browser tab was manually closed.
+- [x] Durable worker stayed `running`, browser reconciled to `failed`, attempt 2 reused the same workerId, and completion remained normal/durable.
+- [x] Terminal workers no longer advertise `recoverable=true`; recovery is offered only for durable `running` workers with browser `failed/stopped`.
 
 ### Rolling local control authorization — code/CI and live coexistence complete
 
-Goal: the user should not need to notice or manually refresh the short control lease TTL during ordinary use after locally authorizing Computer Use once.
+- [x] Durable `controlLease` is separate from the normal active lease.
+- [x] Local control authorization survives normal preset changes and transparently renews only `read`, `control`, and `worker` authority.
+- [x] Remote `/mcp` still cannot mint control and renewal never clears the desktop-control kill switch.
+- [x] Live VMware: `c2c-smoke` was switched to `full-write`, then Notepad screenshot succeeded using the existing local control authorization without re-selecting `control`.
 
-- [x] Added reusable rolling lease-window helper in `src/workspace/project-select.ts` while leaving generic `requireLease()` expiry semantics intact.
-- [x] Added durable `controlLease` to `sessions.json` as a separate local-control authorization lane.
-- [x] A locally granted active control lease is promoted into the durable control lane automatically.
-- [x] Older sessions containing only an active control lease are migrated in memory so upgrades do not immediately require a new local arm.
-- [x] Normal project preset changes preserve the durable control authorization, including switching the active project lease to `full-write`.
-- [x] `requireProjectLease()` uses the normal active lease first, then falls back to durable local control only for `read`, `control`, and `worker`.
-- [x] Expired durable control authorization transparently renews and emits `control.lease.renewed`.
-- [x] The durable control lane never grants `write`, `verify`, `image`, or `remote`.
-- [x] Explicit empty-session reset clears the durable local grant.
-- [x] Remote `/mcp` still cannot mint `preset=control`; the existing remote guard remains intact.
-- [x] Renewal never clears the desktop-control kill switch; a fresh local grant is still required after a kill.
-- [x] Added tests for renewal, backward migration, preservation across preset changes, active `full-write` + durable `control` coexistence, and non-control expiry remaining `LEASE_REQUIRED`.
-- [x] Live VMware after pull/build/restart: selected `c2c-smoke` as `full-write`, then captured a Notepad screenshot using the existing local control grant without a new `project_select preset=control` call.
-
-Implementation/test sequence: `04b4809`, `7e2e5fc`, `34d6968`, `e927e2b`, `58bb0aa`, `fa31065`, `8222d74`, `0aa28b3`, final narrowing fix `8fab58a`.
-
-Code CI `35090954861` on `8fab58afd2828d11d8898697bc828dda4ed694da`: **green on macOS, Ubuntu, and Windows**, including Windows Agent tests, native input helper, UIA helper, activity indicator helper, build, and launcher build.
-
-The live coexistence smoke proves that normal preset changes do not revoke local control authorization. The exact 30-minute wall-clock expiry/renewal path remains code/CI-proven but has not been separately waited out and observed live; it can be verified naturally during ordinary use.
-
-### Terminal Worker recovery-status UX — complete
-
-- [x] `browser.recoverable` now requires durable worker status `running` in addition to browser state `failed` or `stopped`.
-- [x] Durable `completed`, `failed`, and `cancelled` workers therefore no longer advertise recovery merely because the browser session is terminal.
-- [x] Existing running-worker target-loss semantics remain unchanged (`running` + `failed/stopped` => recoverable).
-- [x] Added regression coverage for a durable completed worker with browser `stopped` returning `recoverable=false`.
-
-Implementation: `63e22692`; test: `3c745d3d`.
-CI `35093400146`: **green on macOS, Ubuntu, and Windows**.
-
-### Post-picker Worker-app selected-entity verification — complete
-
-- [x] A successful picker-row click is no longer treated as proof that the Worker app was selected.
-- [x] After a click reports success, `selectWorkerApp()` explicitly re-runs selected-entity detection before clearing the exact typed query or returning success.
-- [x] If the click does not materialize the selected Worker-app entity, the flow keeps polling and ultimately fails closed rather than submitting the bootstrap under an unverified app state.
-- [x] The exact typed `@ChatGPT To Codex Worker` query is not cleared after a false-positive click.
-- [x] Regression coverage includes click-success-without-selected-entity failure, role-less picker selection, subtitle-bearing app rows, existing selected-app recovery, and stale-draft behavior.
-
-Implementation: `7c3bf2c4`; tests: `ae3b5b8b`, `9d036fcf`, `02ab05c3`.
-CI `35095515554`: **green on macOS, Ubuntu, and Windows**, including Windows Agent/native input/UIA/activity indicator/build/launcher jobs.
+Code CI `35090954861` green on macOS, Ubuntu, and Windows. The exact 30-minute wall-clock expiry remains a non-blocking natural-use observation.
 
 ### Direct Windows named-tunnel hostname reuse — code/CI and live complete
 
-- [x] `start-chatgpt.ps1` now understands both persistent `PUBLIC_HOSTNAME` and `CHATGPT2CODEX_PUBLIC_HOSTNAME`, not only the inherited process environment.
-- [x] When web exposure/named-tunnel use is already requested and no explicit/environment hostname exists, the script reuses the hostname saved by the current native launcher in `%LOCALAPPDATA%\ChatGPT To Codex\settings.ini`.
-- [x] Legacy `%APPDATA%\ChatGPT To Codex\settings.json` `PublicHostname` remains a fallback for older tray setups.
-- [x] Saved UI settings do not enable public exposure by themselves; they are consulted only after `-ExposeWeb`, `CHATGPT2CODEX_EXPOSE_WEB=1`, or named-tunnel credentials/name already request a tunnel.
-- [x] Host values are normalized from full URLs to hostnames before tunnel/public-URL construction.
-- [x] The script never copies or persists Cloudflare tunnel tokens; existing token/name lookup and security boundaries remain unchanged.
-- [x] Direct launch with only `-ActiveProjectRoot` now uses that project as the workspace when `-Workspace` was not explicitly supplied, avoiding a startup registry mismatch.
-- [x] Local health waiting now detects early server exit and includes the server stderr tail instead of hiding the root cause behind a generic timeout.
-- [x] Added Windows CI coverage for hostname resolution, direct-script wiring, startup workspace resolution, early server-exit diagnostics, and PowerShell parse validity.
-- [x] Live VMware smoke passed with no manual `-PublicHostname`: saved hostname reuse was reported, the active project was adopted as workspace, and the script reached `ChatGPT To Codex is ready`.
+- [x] `start-chatgpt.ps1` reuses saved launcher hostname only when web/named-tunnel exposure is already requested.
+- [x] Direct launch with only `-ActiveProjectRoot` derives a compatible workspace.
+- [x] Early server exit surfaces stderr instead of only a generic readiness timeout.
+- [x] Live VMware launch reached `ChatGPT To Codex is ready` without manually supplying `-PublicHostname`.
 
-Hostname reuse implementation sequence: `04b18cde`, `9d141c4f`, `8679301f`, parser/test fixes `0aa70eab`, `946dcc8f`.
-Startup-context/diagnostic follow-up: `1a661d77`, `4ff97762`, `f52cad27`, cleanup `c4672019`.
-CI `35111157222` on `c4672019d2ddb482924b341de1969f6613aeb922`: **green on macOS, Ubuntu, and Windows**, including the Windows hostname resolver, startup-context test, Agent/native input/UIA/activity indicator/build/launcher jobs.
+CI `35111157222` green on macOS, Ubuntu, and Windows.
 
 ## M6 - Worker Execution Configuration
 
@@ -227,32 +169,47 @@ Design/source of truth: `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
 - [x] Added versioned atomic persistence at `<stateDir>/agents/worker-execution-settings.json` for one global default and optional project overrides.
 - [x] Missing settings state preserves the legacy unmanaged/current-ChatGPT behavior.
 - [x] Added main-agent-only `worker_execution_settings_get`, `worker_execution_settings_set`, and `worker_execution_settings_clear`.
-- [x] Scope `set` is replacement semantics; `clear` removes the selected scope.
-- [x] Global/project mutations reuse the existing active project's `worker` capability; no new authorization primitive was added.
+- [x] Global/project mutations reuse the existing `worker` capability; no new authorization primitive was added.
 - [x] The new settings tools are not registered on `/mcp/worker`.
-- [x] Existing browser launch/bootstrap code is unchanged in M6.1.
-- [x] Added storage/resolution, invalid-state/value, clearing, authorization, and tool-contract regressions.
+- [x] Existing browser launch/bootstrap code remained unchanged in M6.1.
 
 Implementation sequence: `f3a763f0`, `418495d1`, `19a4ff65`, `451dab05`, `ff568723`, `fdc9c6af`.
+Full CI `35125045144` on code HEAD `fdc9c6af07821870dfd2ca02b83563ea696be590`: **green on macOS, Ubuntu, and Windows**.
 
-Full CI `35125045144` on code HEAD `fdc9c6af07821870dfd2ca02b83563ea696be590`: **green on macOS, Ubuntu, and Windows**, including typecheck, settings/agent tests, Windows native input/UIA/activity indicator/hostname/startup-context tests, build, and launcher build.
+### M6.2 - Durable per-worker intent — complete
 
-M6.1 exit criterion is satisfied. No ChatGPT model/reasoning picker automation was added.
+- [x] `agent_spawn` accepts an optional normalized `execution` override without changing existing callers.
+- [x] Global/project/per-worker execution preferences are resolved **before** durable worker creation.
+- [x] The resolved/requested/source metadata is persisted as optional `WorkerRecord.executionIntent` before browser launch.
+- [x] Older worker JSON and workers created with no execution settings remain readable and retain no `executionIntent` field.
+- [x] Resolution remains per field, so worker/project/global values can compose deterministically.
+- [x] Later global/project default changes do not mutate an already-created worker's execution intent.
+- [x] Initial launch and running-worker recovery reuse the same durable worker record and do not re-resolve mutable defaults.
+- [x] Lifecycle regression proves an intent survives default changes, initial browser launch, target failure, and same-worker recovery unchanged.
+- [x] MCP regression proves a per-worker `agent_spawn.execution` override wins over project/global defaults and is durable before launch.
+- [x] M6.2 does not yet automate or verify the ChatGPT model/reasoning UI; that begins in M6.3.
 
-### M6.2 - Durable per-worker intent — active
+Implementation/test sequence: `b234c58f`, `ff13722c`, `9e5de414`, `da5a10ca`, `c3017969`, `ecb1f076`.
 
-- [ ] Extend `agent_spawn` with an optional execution override.
-- [ ] Resolve global/project/per-worker settings at worker creation time.
-- [ ] Persist the resolved execution intent in the durable worker record before browser launch.
-- [ ] Keep older worker records readable.
-- [ ] Prove later global/project setting changes do not change an existing worker's stored intent.
-- [ ] Ensure recovery reads stored intent rather than mutable defaults.
+Full CI `35129481274` on code HEAD `ecb1f0764f6fd4080012e202304ea09c4d2a2a7a`: **green on macOS, Ubuntu, and Windows**, including typecheck, new durable-intent/agent tests, existing agent/skills/plugins/hooks tests, Windows native input/UIA/activity-indicator/hostname/startup-context tests, build, and Windows launcher build.
+
+M6.2 exit criterion is satisfied: every explicitly configured new worker has stable durable execution intent before browser launch, and recovery cannot silently re-resolve changed defaults.
+
+### M6.3 - ChatGPT Web model/reasoning set-and-verify adapter — active
+
+- [ ] Inspect the current live ChatGPT model/reasoning UI in the dedicated worker profile before finalizing selector/label mapping.
+- [ ] Add a narrow browser execution-settings adapter for bounded observation and application.
+- [ ] Consume `WorkerRecord.executionIntent` on both initial launch and recovery.
+- [ ] Verify observed state after any UI interaction; a click alone is not success.
+- [ ] Default explicit requests to fail closed when unsupported or unverifiable.
+- [ ] Ensure no worker bootstrap can be submitted while explicit execution intent remains unverified.
+- [ ] Add fake-CDP regressions for unsupported values, false-positive clicks, stale/ambiguous UI state, and verification failure.
 
 ## Current queue
 
-- [ ] Implement M6.2 only, then focused tests + full cross-platform CI + doc/handoff update before M6.3.
-- [ ] Naturally cross the original 30-minute local-control TTL during normal use and confirm no `LEASE_REQUIRED` regression. Code/CI already covers renewal; this remains non-blocking.
-- [ ] Keep existing Worker MCP/app/control isolation green while M6 evolves.
+- [ ] Implement M6.3 only, taking the actual current dedicated-worker ChatGPT UI as evidence before freezing selectors/labels.
+- [ ] Naturally cross the original 30-minute local-control TTL during normal use and confirm no `LEASE_REQUIRED` regression; this remains non-blocking.
+- [ ] Keep Worker MCP/app/control isolation green while M6 evolves.
 
 ## Update policy
 
