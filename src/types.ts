@@ -39,9 +39,11 @@ export type ProjectRegistryEntry = Project;
 /**
  * Lease preset controlling the ceiling of permitted mutating operations.
  * `control` is the Option B human-confirmed desktop-control preset: it grants
- * only `read` + `control` capabilities (never write/image/remote) and is
- * only reachable when the install-time `CHATGPT2CODEX_CONTROL` feature flag
- * is enabled (src/control/policy.ts isControlEnabled).
+ * `read` + `control` plus bounded worker orchestration, but never direct
+ * project write/image/remote capabilities. Worker code edits remain scoped to
+ * runtime-managed isolated worktrees behind opaque worker capabilities.
+ * `control` is only reachable when the install-time `CHATGPT2CODEX_CONTROL`
+ * feature flag is enabled (src/control/policy.ts isControlEnabled).
  */
 export type LeasePreset = "read-only" | "tests-only" | "full-write" | "image-only" | "control";
 
