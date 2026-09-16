@@ -185,9 +185,19 @@ The live coexistence smoke proves that normal preset changes do not revoke local
 Implementation: `63e22692`; test: `3c745d3d`.
 CI `35093400146`: **green on macOS, Ubuntu, and Windows**.
 
+### Post-picker Worker-app selected-entity verification — complete
+
+- [x] A successful picker-row click is no longer treated as proof that the Worker app was selected.
+- [x] After a click reports success, `selectWorkerApp()` explicitly re-runs selected-entity detection before clearing the exact typed query or returning success.
+- [x] If the click does not materialize the selected Worker-app entity, the flow keeps polling and ultimately fails closed rather than submitting the bootstrap under an unverified app state.
+- [x] The exact typed `@ChatGPT To Codex Worker` query is not cleared after a false-positive click.
+- [x] Regression coverage includes click-success-without-selected-entity failure, role-less picker selection, subtitle-bearing app rows, existing selected-app recovery, and stale-draft behavior.
+
+Implementation: `7c3bf2c4`; tests: `ae3b5b8b`, `9d036fcf`, `02ab05c3`.
+CI `35095515554`: **green on macOS, Ubuntu, and Windows**, including Windows Agent/native input/UIA/activity indicator/build/launcher jobs.
+
 ## Current stabilization queue
 
-- [ ] Harden post-picker Worker-app selection: after candidate click, explicitly verify the selected inline Worker-app entity before clearing the exact typed query and returning success.
 - [ ] Improve direct `start-chatgpt.ps1` named-tunnel/public-hostname reuse UX. Do not assume the user's hostname storage mechanism; inspect the live launch path first.
 - [ ] Naturally cross the original 30-minute local-control TTL during normal use and confirm no `LEASE_REQUIRED` regression. Code/CI already covers renewal; no forced wait is required.
 - [ ] Keep CI green and fix integration defects before defining any new milestone.
