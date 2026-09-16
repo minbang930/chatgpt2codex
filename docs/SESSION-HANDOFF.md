@@ -8,22 +8,57 @@ Operational handoff for continuing `chatgpt2codex` across ChatGPT sessions. Veri
 - Active branch: `dev/custom-runtime`
 - Upstream: `ezBuilder/chatgpt2codex`
 - Goal: stable ChatGPT-Web-driven coding runtime without depending on local Codex quota while preserving Core authorization/project/file/shell/git boundaries.
-- The original M0-M5 roadmap is complete. Do not invent an M6 automatically; continue stabilization/integration work first.
+
+## Current phase
+
+The original M0-M5 roadmap and the blocking post-M5 stabilization work are complete enough to begin the next milestone.
+
+The only previous stabilization item left open is a **non-blocking natural-use observation**: eventually cross the original 30-minute local-control TTL during ordinary use and confirm there is no `LEASE_REQUIRED` regression. Renewal is already covered by code/CI, so do not delay M6 or force a 30-minute wait just to close this observation.
+
+### Active milestone: M6 - Worker Execution Configuration
+
+Design/source of truth:
+
+- `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`
+
+Purpose: let the runtime explicitly control and verify the ChatGPT Web model and reasoning effort used by browser workers instead of silently inheriting whatever state the dedicated worker Chrome profile currently has.
+
+M6 implementation order:
+
+1. **M6.1 - Execution settings foundation**
+2. **M6.2 - Durable per-worker execution intent**
+3. **M6.3 - ChatGPT Web model/reasoning set-and-verify adapter**
+4. **M6.4 - Status/diagnostics**
+5. **M6.5 - Live validation**
+
+Do one unit at a time. Do not jump directly to UI automation before M6.1/M6.2 establish configuration and durable-state contracts.
 
 ## How to work with the user
 
-The user prefers implementation-first progress. When the user says `진행해`, `이어가자`, `해줘`, or otherwise authorizes the next unit, inspect the current repo/CI and do the work in the same turn. Work one coherent unit at a time: implement -> focused tests/CI -> fix failures -> update progress/handoff docs. Windows/VMware is the active live-validation target while Ubuntu/macOS CI must stay healthy.
+The user prefers implementation-first progress.
+
+- When the user says `진행해`, `이어가자`, `해줘`, or otherwise authorizes the next unit, inspect current repo/CI and do the repo work in the same turn.
+- Do not repeatedly ask permission for already-authorized work.
+- Work one coherent unit at a time.
+- Per unit: **implement -> focused tests/CI -> fix failures -> update progress/handoff/design docs**.
+- Prefer concrete state/change/commit/CI reports over speculative explanation.
+- Windows/VMware is the active live-validation target while Ubuntu/macOS CI must stay healthy.
+- If a live step must be performed by the user, give exact ready-to-run/setup steps and the expected result.
 
 ## Persistent engineering boundaries
+
+These are already-proven contracts. Do not weaken or redesign them merely to simplify M6.
 
 - Durable worker state is the source of truth for worker lifecycle/results.
 - Full-write workers use isolated Git branches/worktrees and scoped opaque worker capabilities.
 - Browser-worker repository authority is derived only from `WORKER_CORE_TOOL_NAMES` plus `worker_finish`.
 - `/mcp/worker` exposes the worker-only catalog and has a distinct exact OAuth resource audience from `/mcp`.
 - The dedicated `ChatGPT To Codex Worker` custom app must be selected fail-closed; never silently fall back to the main app.
+- Worker app selection uses post-click selected-entity verification; a picker click alone is not success.
+- Main and worker MCP sessions/tokens cannot be replayed across routes.
 - Windows Computer Use reuses the existing control/policy/audit plane.
 - Remote `/mcp` must never be able to mint or arm `preset=control`.
-- The desktop-control kill switch is independent from lease renewal. Renewal must never clear a kill; a fresh local control grant is still required to resume after a kill.
+- The desktop-control kill switch is independent from lease renewal. Renewal must never clear a kill; a fresh local control grant is still required after a kill.
 - Hooks are best-effort observational extensions, not authorization.
 - Agent Skills use bounded discovery/install/activation/security paths; skill scripts never execute automatically.
 - External MCP plugins remain main-agent extensions; browser workers do not inherit plugin access.
@@ -34,170 +69,130 @@ The user prefers implementation-first progress. When the user says `진행해`, 
 `src/agents/ponytail.ts` is an instruction-layer coding policy, not an authorization mechanism.
 
 - default: `full`
-- task-local: `ponytail lite|full|ultra/off` or slash variants
+- task-local: `ponytail lite|full|ultra|off` or slash variants
 - durable worker task remains unchanged; adaptation is applied only to browser-worker instructions
 - never simplify away validation/security/error handling/accessibility/data integrity/user requirements.
 
-## Completed stabilization evidence
+## Completed implementation/live-validation baseline
 
-### External MCP / Skills
+### M0-M5
 
-- Core plugin lifecycle live-smoked: `5fbc010b`, CI `35011189776` green.
-- Plugin `skillSources` through the normal Git Skill lifecycle: `c99bee63`, CI `35013285118` green.
-- Plugin configuration does not expand worker capability registration: `f849dff0`, CI `35014499804` green.
+- M0 baseline/cross-platform CI complete.
+- M1 durable multi-agent runtime and isolated worktrees complete.
+- M2 ChatGPT Web worker runtime, recovery, worker-scoped Core routing, and worker custom app complete.
+- M3 Windows Computer Use complete with live VMware validation.
+- M4 Hooks/Ponytail integration complete.
+- M5 Agent Skills and external MCP plugin extension model complete.
 
-### Hard worker MCP isolation
+Detailed history remains in `docs/CUSTOM-RUNTIME-PROGRESS.md`.
 
-Main and worker transports are separate:
+### Worker MCP/app isolation
 
 ```text
-main ChatGPT app   -> /mcp        -> normal main-agent Core catalog
-worker ChatGPT app -> /mcp/worker -> worker_finish + worker_* mirrors only
+main ChatGPT app   -> /mcp         -> normal main-agent Core catalog
+worker ChatGPT app -> /mcp/worker  -> worker_finish + worker_* mirrors only
 ```
 
-The worker catalog excludes unprefixed plugins, Skills, Agent Manager, Computer Use, and ordinary file/shell/git tools. OAuth resource audiences are exact-matched, sessions are role-bound, and cross-route token/session replay is rejected. The opaque `workerToken` remains per-worker repository authority. Implementation/test HEAD for this boundary: `87f497f0`; CI `35017393064` green.
+Worker catalog excludes ordinary main file/shell/git tools, plugins, Skills, Agent Manager, and Computer Use. OAuth audiences and MCP sessions are role-bound. The opaque `workerToken` remains the authority for a specific worker/worktree.
 
 ### Browser Worker app routing
 
-Current `src/agents/chrome-cdp.ts` behavior:
+Current browser worker path:
 
 1. open mapped ChatGPT Project or standalone ChatGPT;
 2. wait for composer;
-3. preserve a genuine selected Worker-app inline entity, otherwise clear only an exact stale plain-text `@ChatGPT To Codex Worker` draft;
-4. type/select `@ChatGPT To Codex Worker` from the current role-less app picker;
-5. after a picker click, explicitly verify the selected inline app entity before clearing the exact query or treating selection as successful;
-6. append worker bootstrap + scoped capability and submit only after selected-entity verification.
+3. handle only the exact stale Worker-app draft case;
+4. type/select `@ChatGPT To Codex Worker` from the current app picker;
+5. verify the selected inline Worker-app entity;
+6. append bootstrap + scoped capability;
+7. submit only after verified Worker-app selection.
 
-Important stabilization commits include initial routing `236994e7`, subtitle-aware matching `415b8e3`/`5c886bb`, selected-state fixes `8ccb755`/`1022fc1`/`c956c3d`, actual inline selected-app detection `6179841e` + `f081c065`, role-less picker support `95375f7` + `2f00ae9` + `878aa3d`, exact stale-draft handling `5b16988d` + `62844fa6`, and post-picker selected-entity verification `7c3bf2c4` with regressions `ae3b5b8b`/`9d036fcf`/`02ab05c3`. CI `35095515554` is green on macOS, Ubuntu, and Windows.
+False-positive clicks fail closed rather than submitting under an unverified app state.
 
-A picker-row click is not authoritative by itself: a false-positive click that does not materialize the Worker-app selected entity now keeps polling and then fails closed without submitting the worker bootstrap. The exact typed Worker-app query is only cleared after verified selection.
+### Live Worker path
 
-Do not overstate the live stale-draft evidence: the runtime has been updated with the automatic stale-draft fix and code/CI coverage is green, while the earlier stale condition in the live profile was manually cleared before the clean initial-selection smoke.
+Representative live workers proved:
 
-### Connected Worker-app live validation
+- initial Worker-app selection -> `running` -> `worker_finish` -> `agent_wait` -> `agent_result`;
+- parent remained on `control` during worker orchestration without switching to `full-write`;
+- true running-worker recovery after manually closing only the worker browser tab;
+- same durable workerId recovered in browser attempt 2 and completed normally;
+- worker result remained durable and no completion fallback was fabricated.
 
-- Main app: `ChatGPT To Codex -> <public-origin>/mcp`.
-- Worker app: `ChatGPT To Codex Worker -> <public-origin>/mcp/worker`.
-- Dedicated worker Chrome profile is logged in once and reused.
-- Fresh initial-selection worker `wrk_777c1c14-8f66-462a-a95c-774db8f05c6b` completed `agent_launch -> running -> worker_finish -> agent_wait -> agent_result`, confirmed README heading `# c2c-smoke`, and made no project changes.
+### Rolling local control authorization
 
-### Control-preserving worker orchestration
+The short control lease UX is hidden behind durable local authorization after the user locally arms control once.
 
-Worker orchestration is distinct from direct parent write authority:
+- local control authorization survives ordinary preset changes;
+- expired control authorization renews transparently for the capabilities control legitimately owns;
+- it never grants `write`, `verify`, `image`, or `remote`;
+- remote `/mcp` still cannot grant control;
+- renewal never clears the kill switch.
 
-```text
-control    = read + control + worker
-full-write = read + verify + write + image + remote + worker
-```
+The exact 30-minute wall-clock expiry path is code/CI-proven and remains a natural-use observation only.
 
-`control` still does not grant direct project write/verify/image/remote. `full-write` still does not grant desktop control. `agent_spawn`, `agent_launch`, and worker Project route mutations require the dedicated `worker` capability. Worker edits remain behind the worker's opaque capability in its isolated worktree.
+### Direct Windows launcher / named tunnel
 
-Implementation: `9fd2a6b`, `6d7ce6f`, `6fe7f5c`, `f32ad00`, `de6926d`; regression coverage `b303e47`, `2f9ad59`, `2537462`; CI `35053101356` green. Live VMware validation kept the parent on `control` for `agent_spawn -> agent_launch -> agent_wait -> agent_result`; README `# c2c-smoke`, no file changes, no `full-write` reselection.
+Direct `start-chatgpt.ps1` launch can reuse the native launcher's saved public hostname when named-tunnel/web exposure is already requested. It also correctly derives startup workspace from `-ActiveProjectRoot` when needed and surfaces early server-start stderr instead of only a generic health timeout. Live VMware validation reached `ChatGPT To Codex is ready` without manually supplying `-PublicHostname`.
 
-### True running-worker browser recovery — live proven
+## M6 invariant summary
 
-Live worker: `wrk_7270a415-1519-4f9e-905c-5d221c63266a`.
+The runtime currently does **not** own model/reasoning selection. M6 fixes that without changing worker authorization.
 
-Observed sequence:
-
-```text
-browser attempt 1 / durable running
--> Worker browser tab manually closed
--> agent_status reconciliation
-   durable=running, browser=failed, recoverable=true
--> same workerId agent_launch
-   recovered=true, browser attempt=2
--> worker completed normally through worker_finish
--> durable=completed, browser=stopped, completionFallback=false
--> agent_result: README heading # c2c-smoke, remainingIssues=[]
-```
-
-The smoke task created `.recovery-smoke-marker` on its first run and deleted it on recovery. `changedFiles: [".recovery-smoke-marker"]` in the final worker result is worker-reported touched-file metadata, not proof of a remaining dirty file. The worker explicitly reported marker deletion and no commit/push.
-
-### Persistent rolling local control authorization
-
-The 30-minute control lease UX is now hidden after the owner has locally armed control once for the project.
-
-Design:
-
-- `sessions.json` persists a separate `controlLease` lane representing local Computer Use authorization.
-- A locally created active `control` lease is automatically promoted into `controlLease`.
-- Older sessions that only contain an active control lease are migrated in memory into the durable control lane, so upgrading does not force an immediate re-arm.
-- Changing the normal project preset, including to `full-write`, preserves the local control authorization instead of silently revoking it.
-- `requireProjectLease()` tries the normal active lease first, then the durable control lane for only the capabilities that `control` legitimately grants (`read`, `control`, `worker`).
-- An expired durable control lease is transparently rolled to a fresh lease window and persisted with ledger event `control.lease.renewed`.
-- `write`, `verify`, `image`, and `remote` are never obtained from the durable control lane.
-- Explicit empty-session reset clears the durable local grant.
-- Remote `/mcp` still cannot grant `preset=control` because the existing remote guard remains unchanged.
-- Lease renewal never clears the Computer Use kill switch.
-
-Implementation sequence: `04b4809`, `7e2e5fc`, `34d6968`, `e927e2b`, `58bb0aa`, `fa31065`, `8222d74`, `0aa28b3`, final type-narrowing fix `8fab58a`.
-
-CI `35090954861` for code HEAD `8fab58afd2828d11d8898697bc828dda4ed694da` passed on macOS, Ubuntu, and Windows, including Windows agent, native input, UIA, activity indicator, build, and launcher jobs.
-
-Live VMware coexistence smoke after pull/build/restart also passed: the user selected `c2c-smoke` as `full-write`, then captured a Notepad screenshot using the previously granted local control authorization without calling `project_select preset=control` again. This proves the local control lane survives an ordinary active-preset change. The exact 30-minute wall-clock expiry/renewal path is covered in code/CI but has not yet been separately waited out and observed live.
-
-Security meaning: users no longer need to care about the short lease expiry during ordinary use, but ChatGPT still cannot self-elevate into control. Local arming remains the root authorization event, and the kill switch remains authoritative.
-
-### Terminal Worker browser recovery status UX
-
-`agent_status` no longer reports a terminal durable worker as recoverable merely because its browser session is `stopped` or `failed`.
-
-`browser.recoverable` is now true only when both conditions hold:
+Required precedence:
 
 ```text
-durable worker status = running
-AND
-browser status = failed | stopped
+per-worker override
+    > project default
+    > global default
+    > no explicit preference / current ChatGPT state
 ```
 
-A durable `completed`, `failed`, or `cancelled` worker therefore reports `recoverable=false`. The actual running-worker recovery behavior remains unchanged.
+Required durable behavior:
 
-Implementation: `63e22692` (`fix: report browser recovery only for running workers`); regression coverage: `3c745d3d` (`test: hide recovery after durable completion`). CI `35093400146` passed on macOS, Ubuntu, and Windows.
+- resolve explicit execution intent when the worker is created;
+- persist that resolved intent with the durable worker;
+- recovery reuses the same persisted intent even if global/project defaults later change.
 
-### Post-picker Worker-app verification
+Required browser behavior:
 
-`selectWorkerApp()` now requires observable selected-app state after a picker click before it can clear the typed query or return success. A click result of `{ ok: true }` is only an interaction signal, not proof of selected identity.
+```text
+observe current model/reasoning
+ -> apply requested change if needed
+ -> observe again
+ -> verify requested == observed
+ -> only then select Worker app and submit bootstrap
+```
 
-Implementation: `7c3bf2c4`. Regression coverage: `ae3b5b8b`, `9d036fcf`, `02ab05c3`. CI `35095515554` passed on macOS, Ubuntu, and Windows, including Windows Agent/native input/UIA/activity indicator/build/launcher jobs.
-
-This preserves the existing selected-chip/inline-anchor, role-less picker, subtitle row, and stale-draft paths while closing the false-positive click path.
-
-### Direct Windows launcher / named-tunnel reuse — live proven
-
-Direct `start-chatgpt.ps1` launch now reuses the native launcher's saved hostname instead of requiring the user to manually supply `PUBLIC_HOSTNAME` each time. It also handles the startup project/workspace relationship and surfaces early server-start failures directly.
-
-Behavior:
-
-- explicit `-PublicHostname` / persistent environment values still take precedence;
-- when web/named-tunnel use is already requested, the script can read the current launcher's Base64 `PublicHostname` from `%LOCALAPPDATA%\ChatGPT To Codex\settings.ini`, with the legacy roaming JSON as fallback;
-- saved hostname alone does not silently enable web exposure;
-- when `-Workspace` is omitted but `-ActiveProjectRoot` is provided, the active project itself becomes the workspace, so startup selection can actually find it;
-- if the local server exits before `/healthz` becomes ready, the launcher reports the process exit and stderr tail rather than only a generic health timeout.
-
-Implementation sequence for hostname reuse: `04b18cde`, `9d141c4f`, `8679301f`, `0aa70eab`, `946dcc8f`. Startup-context/diagnostic follow-up: `1a661d77`, `4ff97762`, `f52cad27`, cleanup `c4672019`.
-
-CI `35111157222` on `c4672019d2ddb482924b341de1969f6613aeb922` is green on macOS, Ubuntu, and Windows, including the Windows hostname resolver and startup-context tests plus Agent/native input/UIA/activity indicator/build/launcher jobs.
-
-Live VMware validation is complete. The user ran the previously failing command with only `-ActiveProjectRoot "C:\Dev\c2c-smoke" -ActiveProjectPreset control`, observed saved-hostname reuse, then after the startup-context fix reran it and reached `ChatGPT To Codex is ready` without manually supplying `-PublicHostname`.
+A model/reasoning picker click is not proof of success. Explicit settings should fail closed by default if they cannot be verified. Details and implementation units are in `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
 
 ## Active unit
 
-**Post-live-smoke stabilization cleanup.** The primary Worker-app path, control-preserving worker orchestration, true browser-target recovery, rolling local control authorization, terminal recovery-status semantics, post-picker selected-entity verification, and direct Windows launcher/named-tunnel reuse are implemented and code/CI validated. Browser recovery, control/full-write coexistence, and direct launcher reuse are also proven in the live VMware environment.
+**M6.1 - Execution settings foundation.**
 
-Remaining integration cleanup, in practical priority order:
+Before writing code, inspect the current worker record schema, Agent Manager spawn path, browser session schema, MCP registration/lease patterns, and `src/agents/chrome-cdp.ts`.
 
-1. Let ordinary live use naturally cross the original 30-minute control TTL and confirm no `LEASE_REQUIRED` regression; code/CI already covers renewal, so no forced wait is required.
-2. Keep CI green and fix integration defects before defining any new milestone.
+M6.1 should add only:
+
+- normalized worker execution preference/intent types;
+- versioned global/project settings persistence;
+- fixed main-agent get/set/clear settings tools;
+- deterministic precedence/resolution helpers;
+- focused compatibility/validation tests.
+
+M6.1 must **not** automate the ChatGPT model/reasoning UI yet.
+
+Exit criterion: worker execution settings can be configured and resolved deterministically without changing existing browser launch behavior.
 
 ## Runtime/update note
 
-`start-chatgpt.ps1` builds only when `dist/cli.js` is missing, not whenever `src` is newer. After pulling source changes that touch TypeScript runtime code on the VM, run `npm run build` before restarting. PowerShell-only launcher changes do not require a TypeScript rebuild. A direct project-specific local arm can now use `start-chatgpt.ps1 -ActiveProjectRoot <project> -ActiveProjectPreset control` without separately supplying the already-saved public hostname.
+`start-chatgpt.ps1` builds only when `dist/cli.js` is missing, not whenever `src` is newer. After pulling source changes that touch TypeScript runtime code on the VM, run `npm run build` before restarting. PowerShell-only launcher changes do not require a TypeScript rebuild.
 
 ## Source-of-truth documents
 
-- `docs/CUSTOM-RUNTIME-PROGRESS.md` - milestone/unit status and validation history.
-- `docs/CUSTOM-RUNTIME-PLAN.md` - architecture and roadmap.
+- `docs/WORKER-EXECUTION-CONFIG-DESIGN.md` - M6 detailed design and execution order.
+- `docs/CUSTOM-RUNTIME-PROGRESS.md` - milestone/stabilization history and verification evidence.
+- `docs/CUSTOM-RUNTIME-PLAN.md` - architecture/roadmap.
 - `docs/CHATGPT-WORKER-APP-SETUP.md` - two-app configuration.
 - `docs/CHATGPT-PROJECT-WORKER-ROUTING.md` - Project placement vs message-level Worker-app routing.
 - `docs/PLUGINS-DESIGN.md` - external MCP plugin boundary.
@@ -205,13 +200,18 @@ Remaining integration cleanup, in practical priority order:
 - `docs/HOOKS-DESIGN.md` - Hooks semantics.
 - `docs/WINDOWS-COMPUTER-USE-DESIGN.md` - Windows Computer Use boundary.
 
+## Handoff maintenance rule
+
+Update this file whenever an M6 unit completes, the active unit changes, an execution-setting contract changes, or live validation changes the next session's operational context. Keep detailed chronological evidence in `CUSTOM-RUNTIME-PROGRESS.md` and detailed M6 design decisions in `WORKER-EXECUTION-CONFIG-DESIGN.md`.
+
 ## New-session start procedure
 
 1. Read this file.
-2. Read current/planned sections in `docs/CUSTOM-RUNTIME-PROGRESS.md`.
+2. Read `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
 3. Check actual `dev/custom-runtime` HEAD.
 4. Check latest CI for that HEAD.
-5. If docs and repo disagree, trust repo and update docs.
-6. Continue the active stabilization unit immediately.
+5. Read the current-status/current-queue portion of `docs/CUSTOM-RUNTIME-PROGRESS.md`.
+6. If docs and repo disagree, trust repo and correct the docs.
+7. If they match, implement **M6.1 only** and take it through focused tests + full CI before moving to M6.2.
 
-A future user message consisting only of `SESSION-HANDOFF.md 읽고 이어서 진행해` should be enough to resume.
+A future user message consisting only of **`SESSION-HANDOFF.md 읽고 M6 이어서 진행해`** should be enough to resume.
