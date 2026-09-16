@@ -38,22 +38,32 @@ const ProjectsFileSchema = z.object({
 
 type ProjectsFile = z.infer<typeof ProjectsFileSchema>;
 
-/** Session document shape (active project, mode, lease) — PRD §6, §7. */
+const LeaseSchema = z.object({
+  projectId: z.string(),
+  leaseId: z.string(),
+  projectRoot: z.string(),
+  preset: z.enum(["read-only", "tests-only", "full-write", "image-only", "control"]),
+  issuedAt: z.number().int().nonnegative(),
+  expiresAt: z.number().int().nonnegative(),
+});
+
+const ControlLeaseSchema = LeaseSchema.extend({ preset: z.literal("control") });
+
+/**
+ * Session document shape (active project, mode, lease) — PRD §6, §7.
+ *
+ * `controlLease` is the durable local-control authorization lane. Remote MCP
+ * callers cannot mint it because preset=control is rejected before session
+ * mutation. Keeping it separate from `lease` lets normal project presets
+ * change without forcing the owner to re-arm Computer Use every time.
+ */
 const SessionSchema = z.object({
   version: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
   activeProjectId: z.string().nullable(),
   mode: z.enum(["observe", "read", "edit", "verify", "danger"]),
-  lease: z
-    .object({
-      projectId: z.string(),
-      leaseId: z.string(),
-      projectRoot: z.string(),
-      preset: z.enum(["read-only", "tests-only", "full-write", "image-only", "control"]),
-      issuedAt: z.number().int().nonnegative(),
-      expiresAt: z.number().int().nonnegative(),
-    })
-    .nullable(),
+  lease: LeaseSchema.nullable(),
+  controlLease: ControlLeaseSchema.nullable().default(null),
 });
 
 export type SessionDocument = z.infer<typeof SessionSchema>;
@@ -75,7 +85,18 @@ function emptySession(): SessionDocument {
     activeProjectId: null,
     mode: "observe",
     lease: null,
+    controlLease: null,
   };
+}
+
+function recordOf(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+function leasePreset(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const preset = (value as { preset?: unknown }).preset;
+  return typeof preset === "string" ? preset : undefined;
 }
 
 export class Store {
@@ -164,13 +185,45 @@ export class Store {
         `Store: ${SESSIONS_FILE} failed validation: ${parsed.error.message}`,
       );
     }
+
+    // Backward-compatible migration: before controlLease existed, any active
+    // control lease could only have been granted locally. Treat it as the
+    // durable local authorization without forcing the owner to re-arm after
+    // upgrading the runtime.
+    if (!parsed.data.controlLease && parsed.data.lease?.preset === "control") {
+      return { ...parsed.data, controlLease: parsed.data.lease };
+    }
     return parsed.data;
   }
 
   async setSession(s: unknown): Promise<void> {
+    const incoming = recordOf(s);
+    const current = await this.getSession();
+    const incomingLease = incoming.lease;
+    const explicitControlLease = Object.prototype.hasOwnProperty.call(incoming, "controlLease")
+      ? incoming.controlLease
+      : undefined;
+
+    let controlLease: unknown;
+    if (explicitControlLease !== undefined) {
+      controlLease = explicitControlLease;
+    } else if (leasePreset(incomingLease) === "control") {
+      // Only local project_select/startup can successfully create this preset.
+      controlLease = incomingLease;
+    } else if (incoming.activeProjectId === null && incomingLease === null) {
+      // Explicit session reset (e.g. init) clears the durable local grant.
+      controlLease = null;
+    } else {
+      // Normal preset/project changes must not silently revoke local Computer
+      // Use authorization. A grant for another project remains dormant until
+      // that project is active again.
+      controlLease = current.controlLease;
+    }
+
     const merged = {
       ...emptySession(),
-      ...(typeof s === "object" && s !== null ? s : {}),
+      ...incoming,
+      controlLease,
     };
     // updatedAt is always server-recomputed, never trusted from caller input.
     merged.updatedAt = Date.now();
