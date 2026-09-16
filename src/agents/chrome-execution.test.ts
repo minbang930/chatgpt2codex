@@ -7,6 +7,7 @@ interface FakeOptions {
   modelAvailable?: boolean;
   modelClickMaterializes?: boolean;
   sliderKeyboardMaterializes?: boolean;
+  sliderIgnoredKeyUps?: number;
   sliderMax?: number;
   selectedModel?: string;
   sliderValue?: number;
@@ -24,6 +25,7 @@ class FakeExecutionConnection implements CdpConnection {
   private controlEvaluations = 0;
   private sliderEvaluations = 0;
   private sliderFocused = false;
+  private sliderArrowKeyUps = 0;
 
   constructor(private readonly options: FakeOptions = {}) {
     this.selectedModel = options.selectedModel ?? "GPT-5.6 Luna";
@@ -107,9 +109,13 @@ class FakeExecutionConnection implements CdpConnection {
         this.sliderFocused = false;
         return {};
       }
+      if (key === "ArrowRight" || key === "ArrowLeft") {
+        this.sliderArrowKeyUps += 1;
+      }
       if (
         this.sliderFocused
         && (this.options.sliderKeyboardMaterializes ?? true)
+        && this.sliderArrowKeyUps > (this.options.sliderIgnoredKeyUps ?? 0)
         && (key === "ArrowRight" || key === "ArrowLeft")
       ) {
         const max = this.options.sliderMax ?? 3;
@@ -184,6 +190,29 @@ describe("agents/chrome-execution", () => {
         && call.params?.type === "keyUp"
         && call.params?.key === "ArrowRight",
     )).toHaveLength(1);
+  });
+
+  it("retries a dropped medium-to-high slider key step before failing closed", async () => {
+    const connection = new FakeExecutionConnection({
+      selectedModel: "GPT-5.6 Sol",
+      sliderValue: 1,
+      sliderIgnoredKeyUps: 1,
+    });
+
+    await expect(applyWorkerExecutionIntent(
+      connection,
+      intent({ reasoningEffort: "high", fallbackPolicy: "fail-closed" }),
+      noSleep,
+    )).resolves.toEqual({
+      verified: true,
+      observedReasoningEffort: "high",
+    });
+    expect(connection.sliderValue).toBe(2);
+    expect(connection.calls.filter(
+      (call) => call.method === "Input.dispatchKeyEvent"
+        && call.params?.type === "keyUp"
+        && call.params?.key === "ArrowRight",
+    )).toHaveLength(2);
   });
 
   it("recognizes the current role-less neutral composer pill without relying on a label", async () => {
