@@ -60,6 +60,11 @@ jobs:
         shell: pwsh
         run: ./scripts/test-windows-public-hostname.ps1
 
+      - name: Windows startup context test
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: ./scripts/test-windows-startup-context.ps1
+
       - name: Build
         run: npm run build
 
