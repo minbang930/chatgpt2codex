@@ -10,6 +10,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$publicHostnameHelper = Join-Path $Root "scripts\windows-public-hostname.ps1"
+if (-not (Test-Path -LiteralPath $publicHostnameHelper)) {
+    throw "Missing Windows public-hostname helper: $publicHostnameHelper"
+}
+. $publicHostnameHelper
+
 $machinePath = [System.Environment]::GetEnvironmentVariable("PATH", "Machine")
 $userPath = [System.Environment]::GetEnvironmentVariable("PATH", "User")
 $nodePath = Join-Path $env:ProgramFiles "nodejs"
@@ -40,6 +46,36 @@ $Workspace = [System.IO.Path]::GetFullPath($Workspace)
 # scopes here instead of depending only on the launcher's inherited environment.
 $cloudflaredName = Get-EffectiveEnvironmentValue "CLOUDFLARED_TUNNEL_NAME"
 $cloudflaredToken = Get-EffectiveEnvironmentValue "CLOUDFLARED_TUNNEL_TOKEN"
+
+# Direct PowerShell launches should behave like the Windows tray/launcher when a
+# named tunnel is already configured. Prefer an explicit/env hostname, then reuse
+# the hostname saved by the current launcher (settings.ini) or legacy tray
+# (settings.json). Only consult saved UI settings when web exposure is already
+# requested by -ExposeWeb, CHATGPT2CODEX_EXPOSE_WEB, or named-tunnel credentials;
+# merely having an old saved hostname must not turn loopback mode into web mode.
+if ($PublicHostname) {
+    $PublicHostname = Normalize-ChatGPT2CodexPublicHostname $PublicHostname
+}
+if (-not $PublicHostname) {
+    $PublicHostname = Normalize-ChatGPT2CodexPublicHostname (Get-EffectiveEnvironmentValue "PUBLIC_HOSTNAME")
+}
+if (-not $PublicHostname) {
+    $PublicHostname = Normalize-ChatGPT2CodexPublicHostname (Get-EffectiveEnvironmentValue "CHATGPT2CODEX_PUBLIC_HOSTNAME")
+}
+$reuseSavedPublicHostname = -not $PublicHostname -and (
+    $ExposeWeb -or
+    $env:CHATGPT2CODEX_EXPOSE_WEB -eq "1" -or
+    $cloudflaredToken -or
+    $cloudflaredName
+)
+if ($reuseSavedPublicHostname) {
+    $resolvedPublicHostname = Resolve-ChatGPT2CodexPublicHostname -ExplicitValue $PublicHostname
+    if ($resolvedPublicHostname) {
+        $PublicHostname = $resolvedPublicHostname
+        Write-Host "[chatgpt2codex] reusing saved public hostname: $PublicHostname"
+    }
+}
+
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "chatgpt2codex"
 New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 $cfOut = Join-Path $tempRoot "cloudflared.out.log"
@@ -321,7 +357,7 @@ try {
         Write-Host "[chatgpt2codex] 1/3 starting public tunnel..."
         if ($cloudflaredToken -or $cloudflaredName) {
             if (-not $PublicHostname) {
-                throw "PUBLIC_HOSTNAME is required with CLOUDFLARED_TUNNEL_TOKEN or CLOUDFLARED_TUNNEL_NAME."
+                throw "A public hostname is required with CLOUDFLARED_TUNNEL_TOKEN or CLOUDFLARED_TUNNEL_NAME. Set -PublicHostname/PUBLIC_HOSTNAME (or CHATGPT2CODEX_PUBLIC_HOSTNAME), or save the owned fixed domain in ChatGPT To Codex settings."
             }
             $publicUrl = "https://$PublicHostname"
             if ($cloudflaredToken) {
