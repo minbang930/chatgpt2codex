@@ -154,9 +154,8 @@ function selectedWorkerAppExpression(appName: string): string {
     const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLocaleLowerCase();
     const visible = (element) => {
       if (!(element instanceof HTMLElement)) return false;
-      const rect = element.getBoundingClientRect();
       const style = window.getComputedStyle(element);
-      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      return element.getClientRects().length > 0 && style.visibility !== 'hidden' && style.display !== 'none';
     };
     const suggestionRootSelector = '[role="listbox"], [role="menu"], [role="dialog"], [data-radix-popper-content-wrapper], [data-floating-ui-portal]';
     let scope = composer.closest('form');
@@ -286,6 +285,11 @@ async function selectWorkerApp(
   });
   if (resultValue(focused) !== true) {
     throw new DomainError(ErrorCode.WORKSPACE_NOT_READY, "ChatGPT worker composer could not be focused");
+  }
+
+  if (await workerAppIsSelected(connection, appName)) {
+    await clearTypedAppQuery(connection, appName);
+    return;
   }
 
   await connection.send("Input.insertText", { text: `@${appName}` });
