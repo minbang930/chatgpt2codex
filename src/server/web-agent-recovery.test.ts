@@ -6,10 +6,11 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { BrowserWorkerDriver, BrowserWorkerLaunchInput } from "../agents/browser-controller.js";
-import { getBrowserWorkerSession } from "../agents/browser-controller.js";
+import { BrowserWorkerController, getBrowserWorkerSession } from "../agents/browser-controller.js";
 import { launchPreparedBrowserWorker } from "../agents/browser-launch.js";
 import { verifyWorkerCapability } from "../agents/capability.js";
 import { getAgentStatus, spawnAgent } from "../agents/manager.js";
+import { completeWorker } from "../agents/store.js";
 import { registerAgentTools } from "./agent-tools.js";
 import { registerWebAgentTools } from "./web-agent-tools.js";
 import type { Lease, ToolContext } from "../types.js";
@@ -174,5 +175,41 @@ describe("Web worker target recovery", () => {
       browser: { status: "running", recoverable: false },
     });
     expect(await verifyWorkerCapability(ctx.stateDir, token)).toMatchObject({ workerId: worker.workerId });
+  });
+
+  it("does not advertise recovery after the durable worker has completed", async () => {
+    const ctx = await makeCtx();
+    const project = ctx.registry[0]!;
+    const worker = await spawnAgent(ctx.stateDir, {
+      project: { projectId: project.projectId, root: project.root },
+      task: "Finish before status inspection",
+    });
+    const driver: BrowserWorkerDriver = {
+      launch: async () => ({ browserHandle: "fake:completed-target" }),
+      cancel: async () => undefined,
+    };
+    await launchPreparedBrowserWorker(ctx.stateDir, driver, worker.workerId);
+    await completeWorker(ctx.stateDir, worker.workerId, { summary: "done" });
+    await new BrowserWorkerController(ctx.stateDir, driver).cancel(worker.workerId);
+
+    const server = new McpServer({ name: "web-completed-test", version: "1" });
+    registerAgentTools(server, ctx);
+    registerWebAgentTools(server, ctx, {
+      browserDriver: driver,
+      browserProbe: { isAlive: async () => false },
+    });
+
+    const status = await handler(server, "agent_status")({ workerId: worker.workerId });
+    expect(status.isError).not.toBe(true);
+    expect(status.structuredContent).toMatchObject({
+      workerId: worker.workerId,
+      status: "completed",
+      browser: {
+        status: "stopped",
+        attempt: 1,
+        recoverable: false,
+        completionFallback: false,
+      },
+    });
   });
 });
