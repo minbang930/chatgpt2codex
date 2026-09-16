@@ -5,7 +5,7 @@ import {
   markBrowserWorkerFailed,
   type BrowserWorkerSession,
 } from "./browser-controller.js";
-import { getWorker } from "./store.js";
+import { getWorker, type WorkerStatus } from "./store.js";
 
 const FALLBACK_COMPLETION_PREFIX = "ChatGPT worker response ended without worker_finish.";
 const MAX_FALLBACK_ASSISTANT_TEXT = 2_800;
@@ -46,14 +46,15 @@ function isFallbackCompletion(session: BrowserWorkerSession): boolean {
   return session.lastError?.startsWith(FALLBACK_COMPLETION_PREFIX) === true;
 }
 
-function browserView(session: BrowserWorkerSession): Record<string, unknown> {
+function browserView(session: BrowserWorkerSession, durableStatus: WorkerStatus | undefined): Record<string, unknown> {
   return {
     status: session.status,
     attempt: session.attempt,
     route: session.route.mode,
     browserHandle: session.browserHandle,
     lastError: session.lastError,
-    recoverable: session.status === "failed" || session.status === "stopped",
+    recoverable:
+      durableStatus === "running" && (session.status === "failed" || session.status === "stopped"),
     completionFallback: isFallbackCompletion(session),
   };
 }
@@ -148,12 +149,13 @@ export function installAgentStatusBrowserReconciliation(
 
     const result = await original(...args);
     if (!browser) return result;
+    const durableWorker = workerId ? await getWorker(stateDir, workerId).catch(() => null) : null;
     const fallback = isFallbackCompletion(browser);
     return {
       ...result,
       structuredContent: {
         ...(result.structuredContent ?? {}),
-        browser: browserView(browser),
+        browser: browserView(browser, durableWorker?.status),
       },
       content: fallback
         ? [
