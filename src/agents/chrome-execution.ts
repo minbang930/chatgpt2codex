@@ -213,10 +213,9 @@ function executionSurfaceExpression(targetModel?: string): string {
   })()`;
 }
 
-function executionSliderPointExpression(targetValue: number): string {
+function executionSliderFocusExpression(): string {
   return `(() => {
-    /* C2C_EXECUTION_SLIDER_POINT */
-    const target = ${targetValue};
+    /* C2C_EXECUTION_SLIDER_FOCUS */
     const visible = (element) => {
       if (!(element instanceof HTMLElement)) return false;
       const rect = element.getBoundingClientRect();
@@ -224,17 +223,11 @@ function executionSliderPointExpression(targetValue: number): string {
       return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
     };
     const containers = Array.from(document.querySelectorAll('[data-model-reasoning-effort-slider]')).filter(visible);
-    if (containers.length !== 1) return null;
-    const container = containers[0];
-    const slider = container.querySelector('[role="slider"]');
-    if (!(slider instanceof HTMLElement)) return null;
-    const min = Number(slider.getAttribute('aria-valuemin'));
-    const max = Number(slider.getAttribute('aria-valuemax'));
-    if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max) || max < min || target < min || target > max) return null;
-    const rect = container.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return null;
-    const ratio = max === min ? 0.5 : (target - min) / (max - min);
-    return { x: rect.left + Math.max(0, Math.min(1, ratio)) * rect.width, y: rect.top + rect.height / 2 };
+    if (containers.length !== 1) return false;
+    const slider = containers[0].querySelector('[role="slider"]');
+    if (!(slider instanceof HTMLElement) || !visible(slider)) return false;
+    slider.focus({ preventScroll: true });
+    return document.activeElement === slider;
   })()`;
 }
 
@@ -255,6 +248,20 @@ async function clickPoint(connection: CdpConnection, point: Point): Promise<void
       button: "left",
       buttons: type === "mousePressed" ? 1 : 0,
       clickCount: 1,
+    });
+  }
+}
+
+async function dispatchKey(connection: CdpConnection, key: "ArrowLeft" | "ArrowRight"): Promise<void> {
+  const code = key;
+  const keyCode = key === "ArrowLeft" ? 37 : 39;
+  for (const type of ["keyDown", "keyUp"] as const) {
+    await connection.send("Input.dispatchKeyEvent", {
+      type,
+      key,
+      code,
+      windowsVirtualKeyCode: keyCode,
+      nativeVirtualKeyCode: keyCode,
     });
   }
 }
@@ -369,19 +376,26 @@ async function ensureReasoning(
   }
   if (slider.value === targetValue) return effort;
 
-  const point = await evaluateValue<Point | null>(connection, executionSliderPointExpression(targetValue));
-  if (!point) {
+  const focused = await evaluateValue<boolean>(connection, executionSliderFocusExpression());
+  if (!focused) {
     throw new DomainError(
       ErrorCode.WORKSPACE_NOT_READY,
-      `ChatGPT reasoning effort "${effort}" could not be targeted in the current execution slider`,
+      `ChatGPT reasoning effort "${effort}" could not focus the current execution slider`,
     );
   }
-  await clickPoint(connection, point);
-  for (let attempt = 0; attempt < EXECUTION_VERIFY_ATTEMPTS; attempt += 1) {
+
+  const delta = targetValue - slider.value;
+  const key = delta > 0 ? "ArrowRight" : "ArrowLeft";
+  for (let step = 0; step < Math.abs(delta); step += 1) {
+    await dispatchKey(connection, key);
     await sleepMs(EXECUTION_VERIFY_POLL_MS);
+  }
+
+  for (let attempt = 0; attempt < EXECUTION_VERIFY_ATTEMPTS; attempt += 1) {
     const observed = await evaluateValue<ExecutionSurface>(connection, executionSurfaceExpression());
     surface = observed?.menuOpen ? observed : await openExecutionMenu(connection, sleepMs);
     if (surface.slider?.value === targetValue) return effort;
+    await sleepMs(EXECUTION_VERIFY_POLL_MS);
   }
   throw new DomainError(
     ErrorCode.WORKSPACE_NOT_READY,
@@ -411,8 +425,10 @@ function executionDiagnostic(
  * Apply a durable worker execution intent to the current ChatGPT composer before
  * the Worker app is selected or any bootstrap text is inserted. The adapter
  * relies on current structural UI signals (unified intelligence picker + ARIA
- * effort slider) and verifies post-interaction state instead of treating clicks
- * as success. `allow-current` is the only policy that may continue unverified.
+ * effort slider) and verifies post-interaction state instead of treating UI
+ * interaction as success. Reasoning changes are driven through the focused
+ * slider's keyboard semantics rather than guessed track geometry. `allow-current`
+ * is the only policy that may continue unverified.
  */
 export async function applyWorkerExecutionIntent(
   connection: CdpConnection,
