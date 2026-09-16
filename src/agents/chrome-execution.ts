@@ -100,8 +100,13 @@ function executionControlExpression(): string {
     const testId = uniqueVisible('button[data-testid="model-switcher-dropdown-button"][aria-haspopup="menu"]');
     if (testId.length === 1) return point(testId[0]);
 
-    // Current ChatGPT unified intelligence picker exposes a neutral composer pill.
-    // Prefer this structural signal because recent UI revisions removed the model-switcher test id.
+    // Current ChatGPT A/B surfaces may expose the execution picker as a
+    // role-less composer pill with only the neutral class modifier. Prefer
+    // that structural marker before relying on labels, which may be absent.
+    const classNeutral = uniqueVisible('button.__composer-pill.__composer-pill--neutral[aria-haspopup="menu"]');
+    if (classNeutral.length === 1) return point(classNeutral[0]);
+
+    // Other current variants expose the same neutral state as a data attribute.
     const neutral = uniqueVisible('button[aria-haspopup="menu"][data-tone="neutral"]');
     if (neutral.length === 1) return point(neutral[0]);
 
