@@ -6,7 +6,7 @@ import type { WorkerExecutionIntent } from "./execution-settings.js";
 interface FakeOptions {
   modelAvailable?: boolean;
   modelClickMaterializes?: boolean;
-  sliderClickMaterializes?: boolean;
+  sliderKeyboardMaterializes?: boolean;
   sliderMax?: number;
   selectedModel?: string;
   sliderValue?: number;
@@ -20,10 +20,10 @@ class FakeExecutionConnection implements CdpConnection {
   menuOpen = false;
   selectedModel: string;
   sliderValue: number;
-  private pendingPoint: "control" | "model" | "slider" | undefined;
-  private pendingSliderTarget: number | undefined;
+  private pendingPoint: "control" | "model" | undefined;
   private controlEvaluations = 0;
   private sliderEvaluations = 0;
+  private sliderFocused = false;
 
   constructor(private readonly options: FakeOptions = {}) {
     this.selectedModel = options.selectedModel ?? "GPT-5.6 Luna";
@@ -48,11 +48,9 @@ class FakeExecutionConnection implements CdpConnection {
         this.pendingPoint = "control";
         return { result: { value: { x: 10, y: 10 } } };
       }
-      if (expression.includes("C2C_EXECUTION_SLIDER_POINT")) {
-        this.pendingPoint = "slider";
-        const match = expression.match(/const target = (\d+);/u);
-        this.pendingSliderTarget = match ? Number(match[1]) : undefined;
-        return { result: { value: { x: 30, y: 30 } } };
+      if (expression.includes("C2C_EXECUTION_SLIDER_FOCUS")) {
+        this.sliderFocused = this.menuOpen;
+        return { result: { value: this.sliderFocused } };
       }
       if (expression.includes("C2C_EXECUTION_SURFACE")) {
         if (!this.menuOpen) {
@@ -96,17 +94,29 @@ class FakeExecutionConnection implements CdpConnection {
       } else if (x === 20) {
         if (this.options.modelClickMaterializes ?? true) this.selectedModel = "GPT-5.6 Sol";
         this.menuOpen = false;
-      } else if (x === 30) {
-        if ((this.options.sliderClickMaterializes ?? true) && this.pendingSliderTarget !== undefined) {
-          this.sliderValue = this.pendingSliderTarget;
-        }
+        this.sliderFocused = false;
       }
       this.pendingPoint = undefined;
       return {};
     }
 
-    if (method === "Input.dispatchKeyEvent" && params?.key === "Escape" && params?.type === "keyUp") {
-      this.menuOpen = false;
+    if (method === "Input.dispatchKeyEvent" && params?.type === "keyUp") {
+      const key = String(params.key ?? "");
+      if (key === "Escape") {
+        this.menuOpen = false;
+        this.sliderFocused = false;
+        return {};
+      }
+      if (
+        this.sliderFocused
+        && (this.options.sliderKeyboardMaterializes ?? true)
+        && (key === "ArrowRight" || key === "ArrowLeft")
+      ) {
+        const max = this.options.sliderMax ?? 3;
+        this.sliderValue = key === "ArrowRight"
+          ? Math.min(max, this.sliderValue + 1)
+          : Math.max(0, this.sliderValue - 1);
+      }
       return {};
     }
     return {};
@@ -143,7 +153,37 @@ describe("agents/chrome-execution", () => {
     });
     expect(connection.selectedModel).toBe("GPT-5.6 Sol");
     expect(connection.sliderValue).toBe(2);
-    expect(connection.calls.filter((call) => call.method === "Input.dispatchMouseEvent").length).toBeGreaterThanOrEqual(6);
+    expect(connection.calls.some(
+      (call) => call.method === "Runtime.evaluate"
+        && String(call.params?.expression ?? "").includes("C2C_EXECUTION_SLIDER_FOCUS"),
+    )).toBe(true);
+    expect(connection.calls.filter(
+      (call) => call.method === "Input.dispatchKeyEvent"
+        && call.params?.type === "keyUp"
+        && call.params?.key === "ArrowRight",
+    )).toHaveLength(2);
+  });
+
+  it("moves from medium to high with one structural slider key step", async () => {
+    const connection = new FakeExecutionConnection({
+      selectedModel: "GPT-5.6 Sol",
+      sliderValue: 1,
+    });
+
+    await expect(applyWorkerExecutionIntent(
+      connection,
+      intent({ reasoningEffort: "high", fallbackPolicy: "fail-closed" }),
+      noSleep,
+    )).resolves.toEqual({
+      verified: true,
+      observedReasoningEffort: "high",
+    });
+    expect(connection.sliderValue).toBe(2);
+    expect(connection.calls.filter(
+      (call) => call.method === "Input.dispatchKeyEvent"
+        && call.params?.type === "keyUp"
+        && call.params?.key === "ArrowRight",
+    )).toHaveLength(1);
   });
 
   it("recognizes the current role-less neutral composer pill without relying on a label", async () => {
@@ -226,10 +266,10 @@ describe("agents/chrome-execution", () => {
     )).rejects.toThrow(/did not verify/i);
   });
 
-  it("fails closed when an effort click does not change the structural slider state", async () => {
+  it("fails closed when effort keyboard interaction does not change the structural slider state", async () => {
     const connection = new FakeExecutionConnection({
       selectedModel: "GPT-5.6 Sol",
-      sliderClickMaterializes: false,
+      sliderKeyboardMaterializes: false,
     });
 
     await expect(applyWorkerExecutionIntent(
