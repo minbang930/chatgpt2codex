@@ -12,6 +12,7 @@ import { createChromeBrowserTargetProbe } from "../agents/chrome-liveness.js";
 import { registerWebAgentLaunchTool } from "./web-agent-launch-tool.js";
 import { registerWebAgentProjectTools } from "./web-agent-project-tools.js";
 import { registerWebAgentStopTool } from "./web-agent-stop-tool.js";
+import { registerWorkerExecutionSettingsTools } from "./worker-execution-settings-tools.js";
 
 export interface WebAgentToolDeps {
   browserDriver?: BrowserWorkerDriver;
@@ -31,4 +32,5 @@ export function registerWebAgentTools(
   registerWebAgentLaunchTool(server, ctx, driver);
   registerWebAgentStopTool(server, ctx, driver);
   registerWebAgentProjectTools(server, ctx);
+  registerWorkerExecutionSettingsTools(server, ctx);
 }
