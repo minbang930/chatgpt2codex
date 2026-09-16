@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **M6 - Worker Execution Configuration**
 
-Active unit: **M6.3 - ChatGPT Web model/reasoning set-and-verify adapter**
+Active unit: **M6.4 - Status and diagnostics**
 
 Primary operational handoff: `docs/SESSION-HANDOFF.md`.
 
@@ -195,19 +195,37 @@ Full CI `35129481274` on code HEAD `ecb1f0764f6fd4080012e202304ea09c4d2a2a7a`: *
 
 M6.2 exit criterion is satisfied: every explicitly configured new worker has stable durable execution intent before browser launch, and recovery cannot silently re-resolve changed defaults.
 
-### M6.3 - ChatGPT Web model/reasoning set-and-verify adapter — active
+### M6.3 - ChatGPT Web model/reasoning set-and-verify adapter — code/CI complete
 
-- [ ] Inspect the current live ChatGPT model/reasoning UI in the dedicated worker profile before finalizing selector/label mapping.
-- [ ] Add a narrow browser execution-settings adapter for bounded observation and application.
-- [ ] Consume `WorkerRecord.executionIntent` on both initial launch and recovery.
-- [ ] Verify observed state after any UI interaction; a click alone is not success.
-- [ ] Default explicit requests to fail closed when unsupported or unverifiable.
-- [ ] Ensure no worker bootstrap can be submitted while explicit execution intent remains unverified.
-- [ ] Add fake-CDP regressions for unsupported values, false-positive clicks, stale/ambiguous UI state, and verification failure.
+- [x] Added a narrow `chrome-execution.ts` adapter instead of mixing model/reasoning selectors into durable worker or Agent Manager state.
+- [x] The adapter uses bounded structural discovery for the current unified intelligence picker/composer pill and the structural `[data-model-reasoning-effort-slider] [role="slider"]` ARIA state.
+- [x] Model/reasoning interactions use native CDP pointer events and are followed by fresh observation; a click alone is never accepted as success.
+- [x] `instant | medium | high | extra-high` map to the first four structural effort positions exposed by the current slider; unavailable positions fail closed.
+- [x] Explicit model targets require one unambiguous normalized picker match and post-selection verification.
+- [x] `fail-closed` blocks Worker-app selection/bootstrap when requested execution cannot be verified; only an explicitly persisted `allow-current` may continue unverified.
+- [x] Workers with no explicit model/reasoning preference keep the legacy unmanaged/current-ChatGPT path without touching execution controls.
+- [x] Initial browser launch and same-worker recovery receive the exact durable `WorkerRecord.executionIntent`; mutable defaults are not re-read.
+- [x] Execution verification runs before `@ChatGPT To Codex Worker` selection and before any bootstrap text is inserted.
+- [x] Added regressions for unavailable/ambiguous model targets, false-positive model clicks, reasoning clicks that do not change ARIA state, unsupported effort levels, explicit `allow-current`, unmanaged workers, launch ordering, and pre-bootstrap fail-closed behavior.
+- [x] Public/current ChatGPT implementations were inspected for the current unified picker/composer-pill and ARIA-slider structure before freezing the bounded adapter. Exact labels/account availability still require dedicated-profile live validation in M6.5.
+
+Implementation/test sequence: `d5741d07`, `2d15d532`, `7e0cedfd`, `c562e130`, `8960867e`, `43c6afae`, `dd423f59`, type-narrowing fix `dcc73aba`.
+
+Full CI `35131605738` on code HEAD `dcc73abac90cc925137df42a7a03139bcd85ec80`: **green on macOS, Ubuntu, and Windows**, including typecheck, new execution adapter/integration/recovery tests, existing agent tests, Windows native input/UIA/activity-indicator/hostname/startup-context tests, build, and Windows launcher build.
+
+M6.3 code exit criterion is satisfied: an explicit execution intent cannot reach Worker-app selection/bootstrap unless the browser adapter verified the requested state or the durable policy explicitly allows current state. This is not yet a claim that every model label is live-compatible with the user's dedicated Worker profile; that belongs to M6.5.
+
+### M6.4 - Status and diagnostics — active
+
+- [ ] Surface durable requested/resolved/source execution intent through existing worker status diagnostics without exposing browser-private identifiers.
+- [ ] Record browser-attempt observed/verified execution state separately from durable intent.
+- [ ] Surface verification failures concisely while preserving existing normal output for unmanaged workers.
+- [ ] Add success/failure/recovery/terminal-state regressions.
 
 ## Current queue
 
-- [ ] Implement M6.3 only, taking the actual current dedicated-worker ChatGPT UI as evidence before freezing selectors/labels.
+- [ ] Implement M6.4 status/diagnostics only; do not begin M6.5 live validation until the status contract is stable.
+- [ ] In M6.5, live-smoke the dedicated worker profile and record the exact model/reasoning labels/availability actually observed there; extend only the browser adapter if the live UI differs.
 - [ ] Naturally cross the original 30-minute local-control TTL during normal use and confirm no `LEASE_REQUIRED` regression; this remains non-blocking.
 - [ ] Keep Worker MCP/app/control isolation green while M6 evolves.
 
