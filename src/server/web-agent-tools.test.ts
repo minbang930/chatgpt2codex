@@ -25,7 +25,7 @@ async function git(cwd: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-async function makeCtx(): Promise<ToolContext> {
+async function makeCtx(preset: Lease["preset"] = "full-write"): Promise<ToolContext> {
   const stateDir = await temp("chatgpt2codex-web-agent-state-");
   const root = await temp("chatgpt2codex-web-agent-project-");
   await git(root, ["init"]);
@@ -40,7 +40,7 @@ async function makeCtx(): Promise<ToolContext> {
   const lease: Lease = {
     projectId,
     projectRoot: root,
-    preset: "full-write",
+    preset,
     leaseId: "lease_web_agent_test",
     issuedAt: now,
     expiresAt: now + 60_000,
@@ -133,6 +133,35 @@ describe("Web agent MCP tools", () => {
     expect(launchInput?.task).toContain("Implement the migration");
     expect(launchInput?.workerToken).toMatch(/^wcap\.wrk_/);
     expect((await getAgentStatus(ctx.stateDir, worker.workerId)).status).toBe("running");
+  });
+
+  it("launches and configures worker routing while a control lease remains active", async () => {
+    const ctx = await makeCtx("control");
+    const active = ctx.registry[0]!;
+    const worker = await spawnAgent(ctx.stateDir, {
+      project: { projectId: active.projectId, root: active.root },
+      task: "Edit only the isolated worktree",
+    });
+    const driver: BrowserWorkerDriver = {
+      launch: async () => ({ browserHandle: "fake:control-worker-tab" }),
+      cancel: async () => undefined,
+    };
+    const tool = handlers(serverWith(ctx, driver));
+
+    const routed = await tool.agent_project_route_set?.({
+      url: "https://chatgpt.com/g/g-p-control/project",
+      label: "Control Lease Project",
+    });
+    expect(routed?.isError).not.toBe(true);
+
+    const launched = await tool.agent_launch?.({ workerId: worker.workerId });
+    expect(launched?.isError).not.toBe(true);
+    expect(launched?.structuredContent).toMatchObject({
+      workerId: worker.workerId,
+      status: "running",
+      browserStatus: "running",
+      browserRoute: "project",
+    });
   });
 
   it("keeps a failed browser launch pending and allows a fresh retry", async () => {
