@@ -22,11 +22,13 @@ class FakeConnection implements CdpConnection {
   readonly calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
   closed = false;
   private appSelected = false;
+  private pageReadyEvaluations = 0;
 
   constructor(
     private readonly composerReady: boolean,
     private readonly appAvailable = true,
     private readonly selectionMaterializes = true,
+    private readonly defaultContextFailures = 0,
   ) {}
 
   async send(method: string, params?: Record<string, unknown>): Promise<unknown> {
@@ -44,6 +46,10 @@ class FakeConnection implements CdpConnection {
       return { result: { value: this.appSelected } };
     }
     if (expression.includes("rect.width > 0")) {
+      this.pageReadyEvaluations += 1;
+      if (this.pageReadyEvaluations <= this.defaultContextFailures) {
+        throw new Error("Cannot find default execution context");
+      }
       return { result: { value: this.composerReady } };
     }
     if (expression.includes("composer.focus();")) {
@@ -115,6 +121,29 @@ describe("agents/chrome-cdp", () => {
     );
     expect(selectedChecks.length).toBeGreaterThanOrEqual(2);
     expect(connection.calls.filter((call) => call.method === "Input.dispatchKeyEvent")).toHaveLength(2);
+  });
+
+  it("retries composer readiness when a fresh target temporarily lacks its default execution context", async () => {
+    const connection = new FakeConnection(true, true, true, 1);
+    const driver = new ChromeCdpBrowserWorkerDriver({
+      ensureEndpoint: async () => ({ port: 9222 }),
+      openTarget: async (_endpoint, url) => ({ id: "target-recovery-race", url, webSocketDebuggerUrl: "ws://recovery-race" }),
+      closeTarget: async () => undefined,
+      connect: async () => connection,
+      sleepMs: async () => undefined,
+      composerAttempts: 2,
+      composerPollMs: 0,
+      appMentionAttempts: 1,
+      appMentionPollMs: 0,
+    });
+
+    await expect(driver.launch(launchInput())).resolves.toMatchObject({
+      browserHandle: "cdp:target-recovery-race",
+    });
+    const readinessChecks = connection.calls.filter(
+      (call) => call.method === "Runtime.evaluate" && String(call.params?.expression ?? "").includes("rect.width > 0"),
+    );
+    expect(readinessChecks).toHaveLength(2);
   });
 
   it("supports an explicitly configured worker app name", async () => {
