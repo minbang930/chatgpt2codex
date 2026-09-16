@@ -11,6 +11,7 @@ interface FakeOptions {
   selectedModel?: string;
   sliderValue?: number;
   requireRolelessNeutralControl?: boolean;
+  controlUnavailableEvaluations?: number;
 }
 
 class FakeExecutionConnection implements CdpConnection {
@@ -20,6 +21,7 @@ class FakeExecutionConnection implements CdpConnection {
   sliderValue: number;
   private pendingPoint: "control" | "model" | "slider" | undefined;
   private pendingSliderTarget: number | undefined;
+  private controlEvaluations = 0;
 
   constructor(private readonly options: FakeOptions = {}) {
     this.selectedModel = options.selectedModel ?? "GPT-5.6 Luna";
@@ -31,6 +33,10 @@ class FakeExecutionConnection implements CdpConnection {
     if (method === "Runtime.evaluate") {
       const expression = String(params?.expression ?? "");
       if (expression.includes("C2C_EXECUTION_CONTROL")) {
+        this.controlEvaluations += 1;
+        if (this.controlEvaluations <= (this.options.controlUnavailableEvaluations ?? 0)) {
+          return { result: { value: null } };
+        }
         if (
           this.options.requireRolelessNeutralControl
           && !expression.includes('button.__composer-pill.__composer-pill--neutral[aria-haspopup="menu"]')
@@ -145,6 +151,27 @@ describe("agents/chrome-execution", () => {
       verified: true,
       observedReasoningEffort: "high",
     });
+  });
+
+  it("waits for the execution control to hydrate before failing closed", async () => {
+    const connection = new FakeExecutionConnection({
+      selectedModel: "GPT-5.6 Sol",
+      sliderValue: 2,
+      controlUnavailableEvaluations: 3,
+    });
+
+    await expect(applyWorkerExecutionIntent(
+      connection,
+      intent({ reasoningEffort: "high", fallbackPolicy: "fail-closed" }),
+      noSleep,
+    )).resolves.toEqual({
+      verified: true,
+      observedReasoningEffort: "high",
+    });
+    expect(connection.calls.filter(
+      (call) => call.method === "Runtime.evaluate"
+        && String(call.params?.expression ?? "").includes("C2C_EXECUTION_CONTROL"),
+    )).toHaveLength(4);
   });
 
   it("fails closed when the requested model is unavailable", async () => {
