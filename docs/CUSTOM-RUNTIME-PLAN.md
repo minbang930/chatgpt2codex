@@ -423,6 +423,51 @@ No browser worker yet.
 - Optional plugin-provided skills through explicit configuration/manifest boundaries.
 - No automatic worker access to plugin tools.
 
+### M6 - Worker Execution Configuration
+
+M6 makes browser-worker model/reasoning selection explicit, durable, and verifiable. Detailed design: `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
+
+#### M6.1 - Execution settings foundation
+
+- Normalized worker execution preference/intent types.
+- Versioned global/project defaults.
+- Fixed main-agent get/set/clear configuration surface.
+- Deterministic precedence: per-worker > project > global > unmanaged/current ChatGPT state.
+- Focused validation/backward-compatibility tests.
+- No ChatGPT model/reasoning UI automation yet.
+
+#### M6.2 - Durable per-worker intent
+
+- Optional execution override on worker spawn.
+- Resolve and persist effective execution intent when the durable worker is created.
+- Existing worker records remain backward compatible.
+- Recovery reuses stored intent instead of re-reading mutable defaults.
+
+#### M6.3 - ChatGPT Web model/reasoning set-and-verify
+
+- Observe current model/reasoning state through a narrow CDP/browser adapter.
+- Apply requested settings before Worker-app/bootstrap submission.
+- Re-observe and verify selected state after every relevant UI interaction.
+- Explicit requests fail closed by default when unsupported or unverifiable.
+- Initial launch and browser recovery share the same path.
+
+#### M6.4 - Status and diagnostics
+
+- Surface requested/resolved/observed/verified execution state through existing worker/browser diagnostics.
+- Keep durable intent separate from ephemeral browser-attempt observation.
+- Preserve concise output when no explicit settings are configured.
+
+#### M6.5 - Live validation
+
+- Default/no-explicit-setting compatibility.
+- Explicit model/reasoning selection and verification.
+- Multiple reasoning levels.
+- Parallel workers with distinct durable execution intents.
+- Same-worker browser recovery preserves execution intent.
+- Invalid/unavailable explicit preference fails before task submission.
+- Mapped ChatGPT Project routing and worker capability/catalog isolation remain intact.
+- Ubuntu/macOS/Windows CI remains green.
+
 ## Explicit non-goals for early milestones
 
 - Reimplementing Codex itself.
@@ -436,6 +481,7 @@ No browser worker yet.
 - Building a skill/plugin marketplace before local install/activation behavior is stable.
 - Automatically executing third-party skill scripts or package-manager install instructions during discovery.
 - Expanding M3 to macOS/Linux parity when Windows is the only required Computer Use target.
+- Automatically assigning model/reasoning effort from task content before explicit M6 execution control is stable.
 
 ## Development rule
 
