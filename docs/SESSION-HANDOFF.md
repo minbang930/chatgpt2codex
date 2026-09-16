@@ -11,7 +11,7 @@ Operational handoff for continuing `chatgpt2codex` across ChatGPT sessions. Veri
 
 ## Current phase
 
-The original M0-M5 roadmap and the blocking post-M5 stabilization work are complete enough to begin the next milestone.
+The original M0-M5 roadmap and blocking post-M5 stabilization work are complete. M6 is active.
 
 The only previous stabilization item left open is a **non-blocking natural-use observation**: eventually cross the original 30-minute local-control TTL during ordinary use and confirm there is no `LEASE_REQUIRED` regression. Renewal is already covered by code/CI, so do not delay M6 or force a 30-minute wait just to close this observation.
 
@@ -25,13 +25,13 @@ Purpose: let the runtime explicitly control and verify the ChatGPT Web model and
 
 M6 implementation order:
 
-1. **M6.1 - Execution settings foundation**
-2. **M6.2 - Durable per-worker execution intent**
+1. **M6.1 - Execution settings foundation — complete**
+2. **M6.2 - Durable per-worker execution intent — active**
 3. **M6.3 - ChatGPT Web model/reasoning set-and-verify adapter**
 4. **M6.4 - Status/diagnostics**
 5. **M6.5 - Live validation**
 
-Do one unit at a time. Do not jump directly to UI automation before M6.1/M6.2 establish configuration and durable-state contracts.
+Do one unit at a time. Do not jump to UI automation before M6.2 establishes the durable per-worker contract.
 
 ## How to work with the user
 
@@ -58,7 +58,7 @@ These are already-proven contracts. Do not weaken or redesign them merely to sim
 - Main and worker MCP sessions/tokens cannot be replayed across routes.
 - Windows Computer Use reuses the existing control/policy/audit plane.
 - Remote `/mcp` must never be able to mint or arm `preset=control`.
-- The desktop-control kill switch is independent from lease renewal. Renewal must never clear a kill; a fresh local control grant is still required after a kill.
+- The desktop-control kill switch is independent from lease renewal. Renewal must never clear a kill; a fresh local control grant is still required to resume after a kill.
 - Hooks are best-effort observational extensions, not authorization.
 - Agent Skills use bounded discovery/install/activation/security paths; skill scripts never execute automatically.
 - External MCP plugins remain main-agent extensions; browser workers do not inherit plugin access.
@@ -137,7 +137,7 @@ Direct `start-chatgpt.ps1` launch can reuse the native launcher's saved public h
 
 ## M6 invariant summary
 
-The runtime currently does **not** own model/reasoning selection. M6 fixes that without changing worker authorization.
+M6 controls model/reasoning execution state without changing worker authorization.
 
 Required precedence:
 
@@ -148,13 +148,15 @@ per-worker override
     > no explicit preference / current ChatGPT state
 ```
 
+Resolution is per field. A worker-level model can therefore coexist with a project reasoning default and global fallback policy.
+
 Required durable behavior:
 
 - resolve explicit execution intent when the worker is created;
 - persist that resolved intent with the durable worker;
 - recovery reuses the same persisted intent even if global/project defaults later change.
 
-Required browser behavior:
+Required browser behavior, beginning only in M6.3:
 
 ```text
 observe current model/reasoning
@@ -164,29 +166,98 @@ observe current model/reasoning
  -> only then select Worker app and submit bootstrap
 ```
 
-A model/reasoning picker click is not proof of success. Explicit settings should fail closed by default if they cannot be verified. Details and implementation units are in `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
+A model/reasoning picker click is not proof of success. Explicit settings should fail closed by default if they cannot be verified.
+
+## M6.1 completed contract
+
+M6.1 is implemented and full cross-platform CI is green.
+
+### Normalized types
+
+`src/agents/execution-settings.ts` defines:
+
+```text
+reasoningEffort = instant | medium | high | extra-high
+fallbackPolicy  = fail-closed | allow-current
+```
+
+`model` remains a trimmed string target for the future browser adapter. Model choices such as a Pro-style model are represented as `model`, not as `reasoningEffort`.
+
+The reasoning enum represents stable runtime adapter keys, not a guarantee that every target profile exposes all values. M6.3 must inspect/verify actual live availability.
+
+### Persistence
+
+Global/project defaults are stored atomically in:
+
+```text
+<stateDir>/agents/worker-execution-settings.json
+```
+
+Current file version is `1`. Missing settings state means unmanaged/current ChatGPT behavior and preserves compatibility. Invalid persisted state is rejected rather than silently accepted.
+
+### Resolution
+
+`resolveWorkerExecutionIntent()` resolves each field independently:
+
+```text
+worker > project > global
+```
+
+If model or reasoning resolves but no fallback policy exists, it adds `fail-closed` from source `default`.
+
+M6.1 does **not** persist this intent on worker records yet; that is the active M6.2 unit.
+
+### Main-agent configuration tools
+
+Main `/mcp` now exposes:
+
+```text
+worker_execution_settings_get
+worker_execution_settings_set
+worker_execution_settings_clear
+```
+
+Scopes are `global` and active `project`. `set` replaces a scope; `clear` removes it. Project reads show inherited global and effective merged settings.
+
+All setting mutations, including global ones, require the selected active project's existing `worker` lease capability. This deliberately reuses the established worker-orchestration authorization lane instead of adding global mutable authority. Read-only cannot mutate settings.
+
+These tools are registered through the main Web-agent surface only. `/mcp/worker` does not gain them or any additional authority.
+
+### M6.1 implementation/CI evidence
+
+Implementation sequence:
+
+- `f3a763f0` — normalized types, versioned storage, normalization/resolution helpers;
+- `418495d1` — persistence/resolution/compatibility tests;
+- `19a4ff65` — fixed get/set/clear tools;
+- `451dab05` — main-only registration;
+- `ff568723` — tool authorization/effective-resolution tests;
+- `fdc9c6af` — CI explicitly runs the new server tool tests on Ubuntu/Windows.
+
+Full CI `35125045144` on code HEAD `fdc9c6af07821870dfd2ca02b83563ea696be590` passed on macOS, Ubuntu, and Windows, including typecheck, settings/agent tests, Windows native input/UIA/activity indicator/hostname/startup-context tests, build, and Windows launcher build.
+
+Existing browser launch behavior is intentionally unchanged by M6.1.
 
 ## Active unit
 
-**M6.1 - Execution settings foundation.**
+**M6.2 - Durable per-worker intent.**
 
-Before writing code, inspect the current worker record schema, Agent Manager spawn path, browser session schema, MCP registration/lease patterns, and `src/agents/chrome-cdp.ts`.
+Implement only this unit next:
 
-M6.1 should add only:
+- extend `agent_spawn` with an optional `execution` override using the normalized M6.1 contract;
+- load global/project defaults and resolve the effective intent during worker creation;
+- persist the resolved intent in the durable worker record before browser launch;
+- keep legacy worker JSON without execution metadata readable;
+- make initial browser launch and recovery read the same stored durable intent rather than re-resolving defaults;
+- add lifecycle/recovery regressions proving defaults changed after spawn cannot alter an existing worker's intent.
 
-- normalized worker execution preference/intent types;
-- versioned global/project settings persistence;
-- fixed main-agent get/set/clear settings tools;
-- deterministic precedence/resolution helpers;
-- focused compatibility/validation tests.
+Do **not** implement ChatGPT model/reasoning DOM selection yet. That starts in M6.3.
 
-M6.1 must **not** automate the ChatGPT model/reasoning UI yet.
-
-Exit criterion: worker execution settings can be configured and resolved deterministically without changing existing browser launch behavior.
+Exit criterion: every explicitly configured new worker has a stable durable execution intent before browser launch, and recovery cannot silently change it by re-reading mutable defaults.
 
 ## Runtime/update note
 
-`start-chatgpt.ps1` builds only when `dist/cli.js` is missing, not whenever `src` is newer. After pulling source changes that touch TypeScript runtime code on the VM, run `npm run build` before restarting. PowerShell-only launcher changes do not require a TypeScript rebuild.
+`start-chatgpt.ps1` builds only when `dist/cli.js` is missing, not whenever `src` is newer. After pulling M6 TypeScript changes on the VM, run `npm run build` before restarting. M6.1 does not require a live VMware smoke because it intentionally does not change browser launch behavior; live model/reasoning UI work belongs to M6.3/M6.5.
 
 ## Source-of-truth documents
 
@@ -210,8 +281,8 @@ Update this file whenever an M6 unit completes, the active unit changes, an exec
 2. Read `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
 3. Check actual `dev/custom-runtime` HEAD.
 4. Check latest CI for that HEAD.
-5. Read the current-status/current-queue portion of `docs/CUSTOM-RUNTIME-PROGRESS.md`.
+5. Read the current M6/current-queue portion of `docs/CUSTOM-RUNTIME-PROGRESS.md`.
 6. If docs and repo disagree, trust repo and correct the docs.
-7. If they match, implement **M6.1 only** and take it through focused tests + full CI before moving to M6.2.
+7. If they match, implement **M6.2 only** and take it through focused tests + full CI before moving to M6.3.
 
 A future user message consisting only of **`SESSION-HANDOFF.md 읽고 M6 이어서 진행해`** should be enough to resume.
