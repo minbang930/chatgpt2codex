@@ -141,7 +141,8 @@ describe("agents/chrome-cdp", () => {
       browserHandle: "cdp:target-recovery-race",
     });
     const readinessChecks = connection.calls.filter(
-      (call) => call.method === "Runtime.evaluate" && String(call.params?.expression ?? "").includes("rect.width > 0"),
+      (call) => call.method === "Runtime.evaluate"
+        && String(call.params?.expression ?? "").includes("if (!composer) return false;"),
     );
     expect(readinessChecks).toHaveLength(2);
   });
