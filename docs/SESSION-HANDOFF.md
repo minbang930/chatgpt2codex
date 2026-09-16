@@ -163,19 +163,36 @@ Implementation: `7c3bf2c4`. Regression coverage: `ae3b5b8b`, `9d036fcf`, `02ab05
 
 This preserves the existing selected-chip/inline-anchor, role-less picker, subtitle row, and stale-draft paths while closing the false-positive click path.
 
+### Direct Windows launcher / named-tunnel reuse — live proven
+
+Direct `start-chatgpt.ps1` launch now reuses the native launcher's saved hostname instead of requiring the user to manually supply `PUBLIC_HOSTNAME` each time. It also handles the startup project/workspace relationship and surfaces early server-start failures directly.
+
+Behavior:
+
+- explicit `-PublicHostname` / persistent environment values still take precedence;
+- when web/named-tunnel use is already requested, the script can read the current launcher's Base64 `PublicHostname` from `%LOCALAPPDATA%\ChatGPT To Codex\settings.ini`, with the legacy roaming JSON as fallback;
+- saved hostname alone does not silently enable web exposure;
+- when `-Workspace` is omitted but `-ActiveProjectRoot` is provided, the active project itself becomes the workspace, so startup selection can actually find it;
+- if the local server exits before `/healthz` becomes ready, the launcher reports the process exit and stderr tail rather than only a generic health timeout.
+
+Implementation sequence for hostname reuse: `04b18cde`, `9d141c4f`, `8679301f`, `0aa70eab`, `946dcc8f`. Startup-context/diagnostic follow-up: `1a661d77`, `4ff97762`, `f52cad27`, cleanup `c4672019`.
+
+CI `35111157222` on `c4672019d2ddb482924b341de1969f6613aeb922` is green on macOS, Ubuntu, and Windows, including the Windows hostname resolver and startup-context tests plus Agent/native input/UIA/activity indicator/build/launcher jobs.
+
+Live VMware validation is complete. The user ran the previously failing command with only `-ActiveProjectRoot "C:\Dev\c2c-smoke" -ActiveProjectPreset control`, observed saved-hostname reuse, then after the startup-context fix reran it and reached `ChatGPT To Codex is ready` without manually supplying `-PublicHostname`.
+
 ## Active unit
 
-**Post-live-smoke stabilization cleanup.** The primary Worker-app path, control-preserving worker orchestration, true browser-target recovery, rolling local control authorization, terminal recovery-status semantics, and post-picker selected-entity verification are implemented and code/CI validated. Browser recovery and control/full-write coexistence are also proven in the live VMware environment.
+**Post-live-smoke stabilization cleanup.** The primary Worker-app path, control-preserving worker orchestration, true browser-target recovery, rolling local control authorization, terminal recovery-status semantics, post-picker selected-entity verification, and direct Windows launcher/named-tunnel reuse are implemented and code/CI validated. Browser recovery, control/full-write coexistence, and direct launcher reuse are also proven in the live VMware environment.
 
 Remaining integration cleanup, in practical priority order:
 
-1. Improve direct `start-chatgpt.ps1` named-tunnel/public-hostname reuse UX; do not guess the user's existing hostname configuration.
-2. Let ordinary live use naturally cross the original 30-minute control TTL and confirm no `LEASE_REQUIRED` regression; code/CI already covers renewal, so no forced wait is required.
-3. Keep CI green and fix integration defects before defining any new milestone.
+1. Let ordinary live use naturally cross the original 30-minute control TTL and confirm no `LEASE_REQUIRED` regression; code/CI already covers renewal, so no forced wait is required.
+2. Keep CI green and fix integration defects before defining any new milestone.
 
 ## Runtime/update note
 
-`start-chatgpt.ps1` builds only when `dist/cli.js` is missing, not whenever `src` is newer. After pulling source changes on the VM, run `npm run build` before restarting the existing runtime. Use the user's existing working runtime/tray launch path rather than inventing a new `PUBLIC_HOSTNAME` command.
+`start-chatgpt.ps1` builds only when `dist/cli.js` is missing, not whenever `src` is newer. After pulling source changes that touch TypeScript runtime code on the VM, run `npm run build` before restarting. PowerShell-only launcher changes do not require a TypeScript rebuild. A direct project-specific local arm can now use `start-chatgpt.ps1 -ActiveProjectRoot <project> -ActiveProjectPreset control` without separately supplying the already-saved public hostname.
 
 ## Source-of-truth documents
 
