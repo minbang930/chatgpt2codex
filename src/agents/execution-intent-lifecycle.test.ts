@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { markBrowserWorkerFailed, type BrowserWorkerDriver } from "./browser-controller.js";
+import {
+  markBrowserWorkerFailed,
+  type BrowserWorkerDriver,
+  type BrowserWorkerLaunchInput,
+} from "./browser-controller.js";
 import { launchPreparedBrowserWorker, recoverRunningBrowserWorker } from "./browser-launch.js";
 import { setWorkerExecutionPreference } from "./execution-settings.js";
 import { getAgentStatus, spawnAgent } from "./manager.js";
@@ -40,7 +44,7 @@ afterEach(async () => {
 });
 
 describe("durable worker execution intent", () => {
-  it("resolves intent at spawn and keeps it stable across mutable default changes and recovery", async () => {
+  it("resolves intent at spawn and keeps the same durable intent in initial launch and recovery", async () => {
     const stateDir = await temp("chatgpt2codex-execution-intent-state-");
     const root = await makeGitProject();
     const projectId = "project-execution-intent";
@@ -91,16 +95,24 @@ describe("durable worker execution intent", () => {
 
     expect((await getAgentStatus(stateDir, worker.workerId)).executionIntent).toEqual(expectedIntent);
 
+    const launchInputs: BrowserWorkerLaunchInput[] = [];
     const driver: BrowserWorkerDriver = {
-      launch: async () => ({ browserHandle: "fake:execution-intent" }),
+      launch: async (input) => {
+        launchInputs.push(input);
+        return { browserHandle: `fake:execution-intent:${launchInputs.length}` };
+      },
       cancel: async () => undefined,
     };
     const launched = await launchPreparedBrowserWorker(stateDir, driver, worker.workerId);
     expect(launched.worker.executionIntent).toEqual(expectedIntent);
+    expect(launchInputs).toHaveLength(1);
+    expect(launchInputs[0]?.executionIntent).toEqual(expectedIntent);
 
     await markBrowserWorkerFailed(stateDir, worker.workerId, "target lost");
     const recovered = await recoverRunningBrowserWorker(stateDir, driver, worker.workerId);
     expect(recovered.worker.executionIntent).toEqual(expectedIntent);
+    expect(launchInputs).toHaveLength(2);
+    expect(launchInputs[1]?.executionIntent).toEqual(expectedIntent);
     expect((await getAgentStatus(stateDir, worker.workerId)).executionIntent).toEqual(expectedIntent);
   });
 
