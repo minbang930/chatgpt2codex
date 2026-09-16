@@ -67,6 +67,11 @@ function resultValue(value: unknown): unknown {
   return (value as CdpEvaluateResult | undefined)?.result?.value;
 }
 
+function isTransientDefaultExecutionContextError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /Cannot find default execution context/i.test(message);
+}
+
 function pageReadyExpression(): string {
   return `(() => {
     const composer = document.querySelector('#prompt-textarea');
@@ -295,11 +300,19 @@ async function waitForComposer(
   sleepMs: (ms: number) => Promise<void>,
 ): Promise<boolean> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const evaluated = await connection.send("Runtime.evaluate", {
-      expression: pageReadyExpression(),
-      returnByValue: true,
-    });
-    if (resultValue(evaluated) === true) return true;
+    try {
+      const evaluated = await connection.send("Runtime.evaluate", {
+        expression: pageReadyExpression(),
+        returnByValue: true,
+      });
+      if (resultValue(evaluated) === true) return true;
+    } catch (error) {
+      // A freshly created recovery target can expose its DevTools websocket
+      // before Chrome has installed the page's default execution context.
+      // Treat only that exact CDP startup race as a normal composer poll; all
+      // other CDP failures still fail closed immediately.
+      if (!isTransientDefaultExecutionContextError(error)) throw error;
+    }
     await sleepMs(pollMs);
   }
   return false;
