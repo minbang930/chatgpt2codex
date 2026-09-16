@@ -10,19 +10,39 @@ import {
 /** Default lease TTL when no config is threaded in (PRD §7 Project Lease). */
 const DEFAULT_LEASE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
+function leaseWindow(): { leaseId: string; issuedAt: number; expiresAt: number } {
+  const issuedAt = Date.now();
+  return {
+    leaseId: `lease_${randomUUID()}`,
+    issuedAt,
+    expiresAt: issuedAt + DEFAULT_LEASE_TTL_MS,
+  };
+}
+
 /**
  * Issue a new active project Lease (PRD §7 Project Lease / §8.2
  * project_select) for the given registry entry and preset.
  */
 export function makeLease(entry: ProjectRegistryEntry, preset: LeasePreset): Lease {
-  const issuedAt = Date.now();
   return {
     projectId: entry.projectId,
-    leaseId: `lease_${randomUUID()}`,
     projectRoot: entry.root,
     preset,
-    issuedAt,
-    expiresAt: issuedAt + DEFAULT_LEASE_TTL_MS,
+    ...leaseWindow(),
+  };
+}
+
+/**
+ * Roll an already-authorized lease forward without changing its project or
+ * preset. This helper does not decide whether renewal is allowed; callers must
+ * enforce that policy before invoking it. In particular, the shared lease
+ * guard only auto-renews an expired `control` lease, because `control` can be
+ * armed only from the local owner-controlled surface.
+ */
+export function renewLease(lease: Lease): Lease {
+  return {
+    ...lease,
+    ...leaseWindow(),
   };
 }
 
