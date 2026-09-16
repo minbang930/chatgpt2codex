@@ -179,6 +179,8 @@ That coupling is now removed without creating an all-powerful preset:
 Implementation commits: `9fd2a6b`, `6d7ce6f`, `6fe7f5c`, `f32ad00`, `de6926d`; regression coverage: `b303e47`, `2f9ad59`, `2537462`.
 CI `35053101356`: Ubuntu/macOS/Windows all green, including Windows agent/native-input/UIA/activity-indicator/build/launcher coverage.
 
+Live VMware validation after updating/rebuilding/restarting the runtime also passed with the parent remaining on `control` for the entire flow: `agent_spawn -> agent_launch -> agent_wait(timeoutMs=60000) -> agent_result` completed successfully, the worker reported README heading `# c2c-smoke`, and no files were modified. No `full-write` reselection was needed.
+
 Setup/runbooks:
 
 - `docs/CHATGPT-WORKER-APP-SETUP.md`
@@ -188,11 +190,11 @@ Setup/runbooks:
 
 **Post-live-smoke stabilization cleanup.**
 
-The primary browser-worker custom-app path, including clean initial app selection and parent-side durable completion/result retrieval, is proven in the real user environment. The control/full-write lease-switching UX defect has also been fixed in code/CI by splitting worker orchestration from generic write authority.
+The primary browser-worker custom-app path, including clean initial app selection and parent-side durable completion/result retrieval, is proven in the real user environment. The control/full-write lease-switching UX defect is also now fixed and live-validated: a locally armed `control` lease can retain Computer Use while preparing and launching isolated workers through the dedicated `worker` capability.
 
 Known follow-up observations:
 
-1. The live VM must still `git pull`, `npm run build`, and restart the runtime before it uses both the automatic stale-draft recovery and the new control-preserving worker orchestration capability.
+1. The live VM has been updated/rebuilt/restarted and successfully exercised both the automatic stale-draft recovery code path and control-preserving worker orchestration path.
 2. A separate live running-worker recovery smoke (`running` worker with lost/stopped browser target -> recovery) has not yet been exercised end-to-end, although initial launch/retry and recovery use the same driver path in code.
 3. Keep CI green and fix only integration defects before considering broader scope.
 
@@ -207,7 +209,7 @@ In order unless a real defect changes priority:
 5. **Completed:** browser driver selects the dedicated worker app per task message (`236994e7` onward).
 6. **Completed live:** clean initial Worker-app selection and durable completion/result propagation with `wrk_777c1c14-8f66-462a-a95c-774db8f05c6b`; role-less picker support `95375f7`, stale-draft recovery `5b16988d`, regression `62844fa6`, CI `35051793885`.
 7. **Completed code/CI:** control-preserving worker orchestration via dedicated `worker` lease capability; CI `35053101356`.
-8. **Immediate operational step:** update/rebuild/restart the live VM so it runs the stale-draft and worker-lease fixes.
+8. **Completed live:** updated/rebuilt/restarted VM and verified `control`-preserving `agent_spawn -> agent_launch -> agent_wait -> agent_result` end-to-end without switching to `full-write`; README `# c2c-smoke`, no file changes.
 9. **Optional live follow-up:** running-worker recovery smoke through the same worker app.
 10. Keep CI green and fix integration defects before defining any new milestone.
 
