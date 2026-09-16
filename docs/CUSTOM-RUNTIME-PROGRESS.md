@@ -96,8 +96,12 @@ Key commits: `e4ee5b39`, `2448e60c`, `33ea1bff`, `15fa47aa`.
 - [x] `pending -> running` only after successful bootstrap submission.
 - [x] Failed launch revokes capability and remains retryable.
 - [x] Explicit `agent_launch` and persistent project-route tools.
+- [x] Dedicated Worker custom-app selection supports current role-less ChatGPT app-picker rows and verifies the selected inline app entity.
+- [x] Exact stale plain-text worker-app drafts are cleared before a new picker mention is inserted; arbitrary drafts remain untouched.
 
-Representative commits: `6f0a4221`, `892cf5d5`, `bfba691b`, `9766a1ce`, `820a4091`.
+Representative commits: `6f0a4221`, `892cf5d5`, `bfba691b`, `9766a1ce`, `820a4091`, `95375f7`, `5b16988d`, `62844fa6`.
+
+Latest stale-draft regression CI: `35051793885` (Ubuntu/macOS/Windows passed).
 
 #### M2.4 - Completion/recovery
 
@@ -107,6 +111,7 @@ Representative commits: `6f0a4221`, `892cf5d5`, `bfba691b`, `9766a1ce`, `820a409
 - [x] `agent_launch` can recover the same durable running worker in a fresh browser attempt.
 - [x] DOM completion is fallback-only diagnostic/recovery context; it never fabricates completed results.
 - [x] Parallel-worker lifecycle/recovery coverage passes cross-platform.
+- [x] Live parent-side completion retrieval verified through `agent_wait` followed by `agent_result` after a real Worker-app run.
 
 Representative commits: `32e74b45`, `5feeb9ce`, `a73fa36d`, `bed891fb`, `056be27c`, `a2c2495d`, `08c206fb`.
 
@@ -331,15 +336,19 @@ Post-roadmap work should therefore be stabilization and real integration validat
   - If the worker app cannot be found, launch fails closed before task submission; it never silently falls back to the main `/mcp` app.
   - Initial launch and recovery share the same `BrowserWorkerDriver`, so both use the same worker-app routing rule.
   - Initial implementation/test commits `236994e7`, `8b0b8b07`, `1a50605f`; CI `35022343381` passed on Ubuntu, macOS, and Windows.
-  - Live UI stabilization added subtitle-aware row matching (`415b8e3`, `5c886bb`), selected-state recovery (`8ccb755`, `1022fc1`, `c956c3d`), and actual inline-app DOM detection (`6179841e`, `f081c065`).
+  - Live UI stabilization added subtitle-aware row matching (`415b8e3`, `5c886bb`), selected-state recovery (`8ccb755`, `1022fc1`, `c956c3d`), actual inline-app DOM detection (`6179841e`, `f081c065`), role-less picker support (`95375f7`, `2f00ae9`, `878aa3d`), and exact stale-draft recovery (`5b16988d`, `62844fa6`).
+  - Stale-draft regression CI `35051793885` passed on Ubuntu, macOS, and Windows.
   - Setup/live-smoke procedure is documented in `docs/CHATGPT-WORKER-APP-SETUP.md`.
-- [x] Live-validate the real connected ChatGPT worker custom app in the user's dedicated worker Chrome profile.
-  - `ChatGPT To Codex Worker` was connected to the same public origin at `/mcp/worker` and completed OAuth.
+- [x] Live-validate the real connected ChatGPT worker custom app in the user's dedicated worker Chrome profile, including a clean initial picker and durable result propagation.
+  - `ChatGPT To Codex Worker` is connected to the same public origin at `/mcp/worker` and completed OAuth.
   - Manual inspection in the dedicated worker profile confirmed the worker-only tool catalog and app visibility in the `@` picker.
-  - Real DOM diagnostics (`904ab967`) showed ChatGPT renders the selected app as an inline `<a>` inside `#prompt-textarea`; the driver was corrected in `6179841e` and covered by `f081c065`.
-  - CI `35045017337` passed on Ubuntu, macOS, and Windows after the final live-DOM fix.
-  - The same pending durable worker `wrk_3fb5f6f7-43a7-47e5-9da1-5db1a90b086b` was repeatedly retried rather than replaced. Its final live run automatically selected the worker app, read `README.md`, reported the first heading `# c2c-smoke`, made no file changes, and completed through `worker_finish`.
-  - This proves the primary connected worker-app path end-to-end. It does not separately prove a live `running` worker recovery after a lost/stopped browser target; that remains an optional follow-up although code/CI use the same routing driver for recovery.
+  - Earlier validation with pending worker `wrk_3fb5f6f7-43a7-47e5-9da1-5db1a90b086b` proved a reused/preselected-state path through `worker_finish`, but was not treated as sufficient evidence for a clean initial picker.
+  - Fresh worker `wrk_777c1c14-8f66-462a-a95c-774db8f05c6b` exposed current role-less picker markup and a stale plain-text mention draft. Diagnostics and regressions were added without weakening fail-closed routing.
+  - After the stale diagnostic draft was manually cleared, the same pending worker was reused: `agent_launch` selected the Worker app from a clean standalone composer and transitioned it to `running`; no replacement worker was created.
+  - That worker read `README.md`, confirmed the first heading `# c2c-smoke`, made no file changes/staging/commit/push, and completed through `worker_finish`.
+  - Parent-side `agent_wait(timeoutMs=60000)` received the completion event, then `agent_result` returned the durable final result. This validates launch -> running -> worker_finish -> completion event -> durable result retrieval end-to-end.
+  - The primary connected worker-app path is therefore proven from clean initial selection through parent-side completion retrieval.
+- [ ] Update/rebuild/restart the live VM so the running runtime includes the automatic stale-draft recovery fix (`5b16988d`, `62844fa6`) rather than depending on manual draft cleanup.
 - [ ] Optionally live-smoke a true running-worker browser recovery (`running` -> lost/stopped target -> recover same worker) through the dedicated worker app.
 - [ ] Review the lease-restoration UX exposed during manual worker tests: remote MCP can raise to the permitted write lease for the task but cannot re-grant local-authority-only `control`; preserve the security boundary while reducing operational friction if possible.
 - [ ] Keep CI green and fix integration defects discovered by stabilization before defining any new milestone.
