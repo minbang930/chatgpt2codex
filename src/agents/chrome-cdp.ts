@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { DomainError, ErrorCode } from "../types.js";
+import { applyWorkerExecutionIntent } from "./chrome-execution.js";
 import type {
   BrowserWorkerDriver,
   BrowserWorkerLaunchInput,
@@ -465,6 +466,10 @@ export class ChromeCdpBrowserWorkerDriver implements BrowserWorkerDriver {
           "ChatGPT worker browser is open but no composer is available. Sign in to ChatGPT in the dedicated worker Chrome profile, then retry.",
         );
       }
+
+      // Durable execution intent is applied and post-verified before the Worker
+      // app is selected or any bootstrap text is inserted into the composer.
+      await applyWorkerExecutionIntent(connection, input.executionIntent, this.sleepMs);
 
       await submitWorkerPrompt(
         connection,
