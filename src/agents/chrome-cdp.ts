@@ -217,7 +217,12 @@ function clearTypedAppQueryExpression(appName: string): string {
     } else {
       composer.textContent = '';
     }
-    composer.dispatchEvent(new Event('input', { bubbles: true }));
+    composer.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      inputType: 'deleteContentBackward',
+      data: null,
+    }));
+    composer.focus();
     return true;
   })()`;
 }
@@ -286,11 +291,12 @@ async function workerAppIsSelected(connection: CdpConnection, appName: string): 
   return resultValue(evaluated) === true;
 }
 
-async function clearTypedAppQuery(connection: CdpConnection, appName: string): Promise<void> {
-  await connection.send("Runtime.evaluate", {
+async function clearTypedAppQuery(connection: CdpConnection, appName: string): Promise<boolean> {
+  const evaluated = await connection.send("Runtime.evaluate", {
     expression: clearTypedAppQueryExpression(appName),
     returnByValue: true,
   }).catch(() => undefined);
+  return resultValue(evaluated) === true;
 }
 
 async function selectWorkerApp(
@@ -312,6 +318,11 @@ async function selectWorkerApp(
     await clearTypedAppQuery(connection, appName);
     return;
   }
+
+  // A failed/abandoned launch can leave the exact plain-text @ app query as a
+  // restored ChatGPT draft. Clear only that exact worker-app query before
+  // inserting a fresh one; never erase arbitrary user draft content.
+  await clearTypedAppQuery(connection, appName);
 
   await connection.send("Input.insertText", { text: `@${appName}` });
   for (let attempt = 0; attempt < attempts; attempt += 1) {
