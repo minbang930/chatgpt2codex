@@ -66,7 +66,7 @@ class ScreenshotShapedConnection implements CdpConnection {
     const expression = String(params?.expression ?? "");
     if (expression.includes("candidate.click();")) {
       const fakeDocument = {
-        querySelectorAll: () => [this.root],
+        querySelectorAll: (selector: string) => selector === ".popover .__menu-item" ? [] : [this.root],
       };
       const fakeWindow = {
         getComputedStyle: () => ({ visibility: "visible", display: "block" }),
