@@ -353,8 +353,8 @@ async function ensureReasoning(
   await clickPoint(connection, point);
   for (let attempt = 0; attempt < EXECUTION_VERIFY_ATTEMPTS; attempt += 1) {
     await sleepMs(EXECUTION_VERIFY_POLL_MS);
-    surface = await evaluateValue<ExecutionSurface>(connection, executionSurfaceExpression());
-    if (!surface?.menuOpen) surface = await openExecutionMenu(connection, sleepMs);
+    const observed = await evaluateValue<ExecutionSurface>(connection, executionSurfaceExpression());
+    surface = observed?.menuOpen ? observed : await openExecutionMenu(connection, sleepMs);
     if (surface.slider?.value === targetValue) return effort;
   }
   throw new DomainError(
