@@ -151,7 +151,7 @@ CI `35053101356` green across Ubuntu/macOS/Windows including Windows helper/buil
 
 This live smoke proves the actual `running -> target loss -> reconcile -> same-worker recovery -> completed` path rather than only the initial launch/retry path.
 
-### Rolling local control authorization — code/CI complete
+### Rolling local control authorization — code/CI and live coexistence complete
 
 Goal: the user should not need to notice or manually refresh the short control lease TTL during ordinary use after locally authorizing Computer Use once.
 
@@ -167,17 +167,29 @@ Goal: the user should not need to notice or manually refresh the short control l
 - [x] Remote `/mcp` still cannot mint `preset=control`; the existing remote guard remains intact.
 - [x] Renewal never clears the desktop-control kill switch; a fresh local grant is still required after a kill.
 - [x] Added tests for renewal, backward migration, preservation across preset changes, active `full-write` + durable `control` coexistence, and non-control expiry remaining `LEASE_REQUIRED`.
+- [x] Live VMware after pull/build/restart: selected `c2c-smoke` as `full-write`, then captured a Notepad screenshot using the existing local control grant without a new `project_select preset=control` call.
 
 Implementation/test sequence: `04b4809`, `7e2e5fc`, `34d6968`, `e927e2b`, `58bb0aa`, `fa31065`, `8222d74`, `0aa28b3`, final narrowing fix `8fab58a`.
 
 Code CI `35090954861` on `8fab58afd2828d11d8898697bc828dda4ed694da`: **green on macOS, Ubuntu, and Windows**, including Windows Agent tests, native input helper, UIA helper, activity indicator helper, build, and launcher build.
 
+The live coexistence smoke proves that normal preset changes do not revoke local control authorization. The exact 30-minute wall-clock expiry/renewal path remains code/CI-proven but has not been separately waited out and observed live; it can be verified naturally during ordinary use.
+
+### Terminal Worker recovery-status UX — complete
+
+- [x] `browser.recoverable` now requires durable worker status `running` in addition to browser state `failed` or `stopped`.
+- [x] Durable `completed`, `failed`, and `cancelled` workers therefore no longer advertise recovery merely because the browser session is terminal.
+- [x] Existing running-worker target-loss semantics remain unchanged (`running` + `failed/stopped` => recoverable).
+- [x] Added regression coverage for a durable completed worker with browser `stopped` returning `recoverable=false`.
+
+Implementation: `63e22692`; test: `3c745d3d`.
+CI `35093400146`: **green on macOS, Ubuntu, and Windows**.
+
 ## Current stabilization queue
 
-- [ ] Deploy/update/rebuild/restart the live VMware runtime with the rolling-control changes and perform a small live confirmation. `start-chatgpt.ps1` does not rebuild when `dist/cli.js` already exists, so run `npm run build` after pulling source before restart.
-- [ ] Improve terminal Worker browser-status UX so a completed durable worker does not misleadingly show `recoverable=true` only because browser state is `stopped`.
 - [ ] Harden post-picker Worker-app selection: after candidate click, explicitly verify the selected inline Worker-app entity before clearing the exact typed query and returning success.
 - [ ] Improve direct `start-chatgpt.ps1` named-tunnel/public-hostname reuse UX. Do not assume the user's hostname storage mechanism; inspect the live launch path first.
+- [ ] Naturally cross the original 30-minute local-control TTL during normal use and confirm no `LEASE_REQUIRED` regression. Code/CI already covers renewal; no forced wait is required.
 - [ ] Keep CI green and fix integration defects before defining any new milestone.
 
 ## Update policy
