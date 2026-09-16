@@ -1,14 +1,12 @@
 # Worker Execution Configuration Design (M6)
 
-This document defines the next roadmap milestone after the completed M0-M5 implementation and post-M5 stabilization work.
+This document defines the worker execution configuration milestone after M0-M5 and post-M5 stabilization.
 
 ## Context
 
-Browser workers currently open ChatGPT Web, select the dedicated `ChatGPT To Codex Worker` app, and submit the worker bootstrap. The runtime does **not** currently own or verify the ChatGPT model or reasoning-effort selection before submission.
+Browser workers open ChatGPT Web, select the dedicated `ChatGPT To Codex Worker` app, and submit the worker bootstrap. Before M6, the runtime did not own or verify the ChatGPT model or reasoning-effort selection, so a worker could silently inherit whatever state the dedicated worker Chrome profile happened to have.
 
-That means a worker can inherit whatever model/reasoning state the dedicated worker Chrome profile happens to have at launch time. For coding workers this is too implicit: the user may expect a specific model or reasoning level, and recovery should not silently resume the same durable worker under a different execution configuration.
-
-M6 adds explicit, durable, observable worker execution intent while preserving the existing worker capability/worktree/MCP boundaries.
+M6 adds explicit, durable, observable worker execution intent while preserving existing worker capability/worktree/MCP boundaries.
 
 ## Goals
 
@@ -18,13 +16,13 @@ M6 must support:
 - an optional per-project override;
 - an optional per-worker override at spawn time;
 - deterministic precedence: **per-worker > project > global > unmanaged/current ChatGPT state**;
-- durable resolution of the worker's requested execution intent at worker creation time;
+- durable resolution at worker creation time;
 - the same resolved intent on initial launch and browser recovery;
-- ChatGPT Web model/reasoning selection **before** worker task submission;
-- set-and-verify behavior: a UI interaction is not success until the selected state is observed and matches the requested state;
-- fail-closed behavior when an explicit requested setting cannot be verified, unless a deliberately configured fallback policy allows current state;
-- status/diagnostic visibility for requested, resolved, observed, and verified execution settings;
-- no widening of worker repository/tool capabilities.
+- ChatGPT Web model/reasoning selection before worker task submission;
+- set-and-verify behavior rather than trusting picker clicks;
+- fail-closed behavior for unverifiable explicit requests unless `allow-current` is deliberately configured;
+- requested/resolved/observed/verified diagnostics;
+- no widening of worker repository/tool authority.
 
 ## Non-goals
 
@@ -37,12 +35,12 @@ M6 does not:
 - depend on private ChatGPT request/conversation IDs;
 - give workers plugin, Computer Use, Skill, Agent Manager, or other main-agent capabilities;
 - add another authorization system;
-- automatically choose a "best" reasoning level based on task content in the first implementation;
-- hard-code model/reasoning DOM knowledge throughout the runtime. UI-specific logic belongs behind the browser adapter.
+- automatically choose a best reasoning level based on task content in the first implementation;
+- scatter model/reasoning DOM selectors throughout durable-state/Agent Manager code.
 
 ## Core invariants
 
-The following existing boundaries remain authoritative:
+Existing boundaries remain authoritative:
 
 ```text
 workerId
@@ -52,41 +50,35 @@ workerId
 + /mcp/worker worker-only catalog
 ```
 
-Execution settings control **which ChatGPT model/reasoning configuration runs the worker**. They do not grant filesystem, repository, plugin, Computer Use, or network authority.
+Execution settings control **which ChatGPT model/reasoning configuration runs the worker**. They do not grant filesystem, repository, plugin, Computer Use, Skill, or network authority.
 
-The durable worker record remains the source of truth for a running/recoverable worker. Once a worker is created, later edits to global/project defaults must not silently change that worker's execution intent during recovery.
+The durable worker record remains the source of truth for a running/recoverable worker. Once a worker is created, later global/project default edits must not change that worker's execution intent.
 
 ## Configuration model
 
-Use one normalized runtime structure rather than scattering raw UI strings through the codebase.
-
-Current M6.1 contract:
+Implemented normalized preference:
 
 ```ts
-type WorkerReasoningEffort = "instant" | "medium" | "high" | "extra-high";
-type WorkerExecutionFallbackPolicy = "fail-closed" | "allow-current";
-
 interface WorkerExecutionPreference {
   model?: string;
-  reasoningEffort?: WorkerReasoningEffort;
-  fallbackPolicy?: WorkerExecutionFallbackPolicy;
+  reasoningEffort?: "instant" | "medium" | "high" | "extra-high";
+  fallbackPolicy?: "fail-closed" | "allow-current";
 }
 ```
 
-`model` is a trimmed runtime/browser-adapter target string, not an authorization primitive. `Pro`-style model choices belong in `model`, not in `reasoningEffort`.
+The reasoning values are stable runtime adapter keys, not raw DOM labels and not a guarantee that every ChatGPT profile exposes every option. M6.3 must inspect the current live worker-profile UI and map only actually observable options to these stable keys. UI label changes should remain isolated to the browser adapter.
 
-The normalized reasoning keys track the current product-level reasoning labels. They are durable adapter keys, **not** a promise that every account/profile exposes every choice. M6.3 must inspect the actual dedicated worker profile, map these keys to live UI labels, and verify availability before submission. A future UI label change should remain localized to the browser adapter where possible.
+`model` is a normalized runtime/browser-adapter target string, not an authorization primitive.
 
 Default behavior:
 
-- if no level specifies a model/reasoning preference, preserve current behavior and do not force a UI change;
-- if a model or reasoning preference resolves explicitly and no fallback policy is configured, resolution injects `fallbackPolicy: "fail-closed"` with source `default`;
-- an explicit `allow-current` may be configured as a policy default even when model/reasoning are currently unspecified;
-- do not silently downgrade an explicit reasoning request.
+- no model/reasoning preference anywhere -> preserve existing unmanaged/current ChatGPT behavior;
+- any explicit model/reasoning preference without a fallback -> `fail-closed`;
+- never silently downgrade an explicit reasoning request under `fail-closed`.
 
 ## Precedence and resolution
 
-Resolve configuration at worker creation time:
+Resolution is per field:
 
 ```text
 per-worker spawn override
@@ -98,11 +90,7 @@ global worker-execution default
 no explicit preference / current ChatGPT state
 ```
 
-Resolution is **per field** rather than whole-object replacement. For example, a worker model override can coexist with a project reasoning default and a global fallback policy.
-
-Persist the resolved execution intent with the durable worker record. Recovery reuses that persisted intent instead of re-reading mutable global/project defaults. Durable persistence begins in M6.2; M6.1 only defines and tests the deterministic resolver.
-
-Current normalized intent metadata:
+Implemented intent shape:
 
 ```ts
 interface WorkerExecutionIntent {
@@ -116,19 +104,19 @@ interface WorkerExecutionIntent {
 }
 ```
 
-Do not persist ephemeral DOM identifiers.
+No ephemeral DOM identifiers are persisted.
 
 ## Configuration storage and tools
 
-M6.1 uses a runtime-owned state file:
+M6.1 implemented versioned atomic storage at:
 
 ```text
 <stateDir>/agents/worker-execution-settings.json
 ```
 
-The file is versioned as `version: 1`, stores one optional global preference plus sorted project entries, and uses the existing temp-file + rename atomic-write pattern with private file/directory permissions where supported. Missing state is treated as an empty/unmanaged configuration for backward compatibility; malformed persisted state fails validation instead of being silently accepted.
+The file contains one global preference and optional project preferences. Missing state preserves legacy behavior; invalid persisted state is rejected.
 
-The main-agent configuration surface is fixed:
+Main-agent tools are fixed:
 
 ```text
 worker_execution_settings_get
@@ -136,22 +124,17 @@ worker_execution_settings_set
 worker_execution_settings_clear
 ```
 
-Current semantics:
+Requirements/implemented behavior:
 
 - scopes are `global` and active `project`;
-- `set` replaces the selected scope's normalized preference rather than patch-merging it;
-- `clear` removes that scope's preference;
-- `get(scope=project)` reports the project preference, inherited global preference, effective per-field resolution, and source metadata;
-- reads expose normalized runtime settings only, never browser DOM details;
-- all mutations reuse the existing active project's `worker` lease capability, including global mutations, so M6 introduces no new authorization path;
-- project reads require an active project but not mutation authority; global reads do not require mutation authority;
-- these tools are registered only in the main Web-agent tool surface and are absent from `/mcp/worker`.
+- mutations reuse the existing active project's `worker` capability;
+- `/mcp/worker` does not expose these configuration tools;
+- reads expose normalized settings/effective resolution, not browser DOM details;
+- changing defaults never mutates existing durable workers.
 
-The existing `control` and `full-write` presets already intentionally include `worker`, so either can manage these settings without acquiring direct authority outside its existing boundary. Read-only leases cannot mutate them.
+## Per-worker override and durable creation
 
-## Per-worker override
-
-M6.2 extends the normal worker spawn path with an optional execution override, conceptually:
+M6.2 extends normal spawn with optional:
 
 ```text
 agent_spawn(
@@ -164,15 +147,28 @@ agent_spawn(
 )
 ```
 
-Do not make these fields required. Existing callers with no execution settings must continue to work unchanged.
+Existing callers remain valid without `execution`.
 
-The override must be resolved and persisted before the worker is launched.
+`spawnAgent()` now performs this order:
+
+```text
+load global/project defaults
+ -> merge optional per-worker override
+ -> resolve WorkerExecutionIntent
+ -> create durable WorkerRecord with optional executionIntent
+ -> provision worktree
+ -> later browser launch
+```
+
+`WorkerRecord.executionIntent` is optional. No-settings/legacy workers omit it, preserving backward compatibility.
+
+Once written, this durable intent is not recomputed for that worker. Initial launch and recovery load the same WorkerRecord. Later changes to global/project defaults therefore affect future workers only.
 
 ## Browser set-and-verify flow
 
-The existing Worker-app routing already follows an important rule: a picker click is not authoritative until the selected Worker-app entity is observed. M6 must apply the same principle to model/reasoning selection.
+M6.3 must apply the same principle already used for Worker-app selection: a UI click is not authoritative until the expected state is observed afterward.
 
-Preferred launch order:
+Target launch order:
 
 ```text
 open mapped ChatGPT Project or standalone ChatGPT
@@ -180,25 +176,23 @@ open mapped ChatGPT Project or standalone ChatGPT
  -> read durable worker execution intent
  -> inspect current model/reasoning UI state
  -> apply requested model selection if needed
- -> verify observed model state
+ -> observe and verify model
  -> apply requested reasoning selection if needed
- -> verify observed reasoning state
- -> fail closed if explicit intent cannot be verified
+ -> observe and verify reasoning
+ -> enforce fallback policy
  -> select and verify ChatGPT To Codex Worker app
  -> append bootstrap + scoped capability
  -> submit task
  -> mark browser/worker running
 ```
 
-If actual ChatGPT UI behavior requires reasoning selection before model selection, or reopening one picker changes the other, keep that sequencing inside the browser execution-settings adapter and cover it with tests. The invariant is verification before bootstrap submission.
-
-No worker bootstrap/task text should be submitted while an explicit execution preference is in an unverified state.
+If the actual current UI requires another sequencing order, keep that sequencing inside the browser execution adapter. The invariant is that no explicit `fail-closed` intent reaches Worker-app/bootstrap submission without verified matching state.
 
 ## Browser adapter boundary
 
 Do not mix model/reasoning DOM selectors into worker durable-state or Agent Manager code.
 
-Prefer a narrow adapter in or near the existing Chrome/CDP worker layer, conceptually:
+Preferred boundary:
 
 ```ts
 interface WorkerExecutionUiAdapter {
@@ -207,162 +201,151 @@ interface WorkerExecutionUiAdapter {
 }
 ```
 
-Keep selector/label matching and ChatGPT UI quirks in this layer. Fake-CDP tests should cover selection success, stale/ambiguous state, false-positive clicks, unsupported values, and verification failure.
+Selector/label matching and ChatGPT UI quirks belong in or near the Chrome/CDP layer. Fake-CDP tests must cover successful selection, unsupported values, stale/ambiguous state, false-positive clicks, and verification failure.
+
+Before implementing selector/label mapping, inspect the **current live ChatGPT Web model/reasoning controls in the dedicated worker Chrome profile**. Do not freeze selectors from memory or an older UI.
 
 ## Durable recovery semantics
 
-Recovery must use the same persisted execution intent as initial launch:
+Implemented durable foundation from M6.2:
 
 ```text
-worker created with model/reasoning intent
- -> initial browser attempt
+worker created with persisted executionIntent
+ -> initial browser attempt reads durable worker
  -> target lost while durable worker remains running
  -> old capability revoked
- -> fresh browser attempt
- -> same persisted execution intent reapplied and verified
- -> fresh worker capability issued
+ -> fresh browser attempt reads same durable worker
+ -> same executionIntent remains available unchanged
+```
+
+M6.3 adds reapplication and verification on both attempts:
+
+```text
+fresh browser attempt
+ -> apply/verify same persisted intent
+ -> fresh worker capability
  -> same durable worker continues
 ```
 
-Do not re-resolve from new global/project defaults during recovery.
-
-If the requested model/reasoning is no longer available when recovering, follow the worker's persisted fallback policy. Default explicit-policy behavior should fail closed and surface a recoverable browser-launch error rather than silently changing execution quality.
+Recovery must never re-resolve from new global/project defaults. If a previously requested setting is no longer available, the persisted fallback policy governs behavior; default explicit behavior is fail closed.
 
 ## Status and diagnostics
 
-Extend worker/browser status output enough to answer:
+M6.4 will surface enough information to answer:
 
 ```text
-requested: what did the caller/defaults ask for?
-resolved:  what durable intent was stored for this worker?
-observed:  what did the ChatGPT UI report on the current browser attempt?
-verified:  did observed state satisfy resolved intent before submission?
-error:     why could selection/verification not complete?
+requested: caller/default intent
+resolved:  durable intent stored with worker
+observed:  UI state for current browser attempt
+verified:  whether observed state satisfied durable intent
+error:     why selection/verification failed
 ```
 
-Do not expose private ChatGPT request IDs or brittle raw DOM state.
-
-Suggested browser-attempt diagnostics may include:
-
-```ts
-execution: {
-  resolvedModel?: string;
-  resolvedReasoningEffort?: string;
-  observedModel?: string;
-  observedReasoningEffort?: string;
-  verified?: boolean;
-  verificationError?: string;
-}
-```
-
-Persist only what is useful for recovery/status semantics; avoid turning browser UI telemetry into a new source of truth.
+Do not expose private ChatGPT request IDs or brittle raw DOM state. Browser-attempt diagnostics may include normalized resolved/observed model/reasoning, `verified`, and a bounded verification error. Durable intent remains the recovery source of truth; browser telemetry does not replace it.
 
 ## M6 implementation units
 
 ### M6.1 - Execution settings foundation — complete
 
-- [x] Inspected current worker record schema, Agent Manager spawn path, MCP registration, project-state patterns, browser session schema, lease boundary, and Chrome/CDP boundary before changing contracts.
-- [x] Added normalized worker execution preference/intent types.
-- [x] Added versioned global/project settings persistence with atomic writes.
-- [x] Added fixed main-agent `get`/`set`/`clear` configuration tools.
-- [x] Defined deterministic per-field precedence and source metadata.
-- [x] Added focused tests for defaults, global/project storage, per-worker precedence helper behavior, clearing, invalid state/values, authorization, and backward compatibility.
-- [x] Kept ChatGPT model/reasoning UI automation untouched.
+Implemented:
 
-Implementation sequence:
+- normalized preference/intent types;
+- versioned global/project persistence;
+- fixed main-agent get/set/clear tools;
+- per-field precedence/resolution helpers;
+- compatibility/validation/authorization tests;
+- no ChatGPT UI automation.
 
-- `f3a763f0` — execution settings types, versioned persistence, normalization/resolution helpers;
-- `418495d1` — settings persistence/resolution tests;
-- `19a4ff65` — main-agent settings tools;
-- `451dab05` — main-only tool registration;
-- `ff568723` — settings-tool authorization/effective-resolution tests;
-- `fdc9c6af` — explicit cross-platform CI coverage for the new server tool tests.
+Implementation sequence: `f3a763f0`, `418495d1`, `19a4ff65`, `451dab05`, `ff568723`, `fdc9c6af`.
+CI `35125045144` on `fdc9c6af07821870dfd2ca02b83563ea696be590`: green on macOS/Ubuntu/Windows.
 
-Full CI `35125045144` on `fdc9c6af07821870dfd2ca02b83563ea696be590`: **green on macOS, Ubuntu, and Windows**, including typecheck, settings/agent tests, Windows native input/UIA/activity indicator/hostname/startup-context tests, build, and Windows launcher build.
+Exit criterion satisfied.
 
-M6.1 exit criterion is satisfied: settings can be configured and resolved deterministically while existing browser launch behavior remains unchanged.
+### M6.2 - Durable per-worker intent — complete
 
-### M6.2 - Durable per-worker intent — active
+Implemented:
 
-- Extend `agent_spawn` with optional execution override.
-- Resolve and persist the effective execution intent when the durable worker is created.
-- Keep older durable worker records readable through schema migration/defaulting.
-- Ensure recovery uses stored intent and does not re-resolve mutable defaults.
-- Add lifecycle/recovery tests proving a global/project change after spawn does not alter an existing worker.
+- optional `agent_spawn.execution` override;
+- global/project/worker resolution before durable worker creation;
+- optional validated `WorkerRecord.executionIntent` persistence;
+- backward-compatible older/no-settings worker records;
+- immutable intent across later default changes;
+- initial launch/recovery both reuse the same stored worker record rather than re-resolving settings;
+- lifecycle/recovery and MCP regressions.
 
-Exit criterion: every explicitly configured new worker has a stable durable execution intent before browser launch.
+Implementation/test sequence: `b234c58f`, `ff13722c`, `9e5de414`, `da5a10ca`, `c3017969`, `ecb1f076`.
+CI `35129481274` on `ecb1f0764f6fd4080012e202304ea09c4d2a2a7a`: green on macOS/Ubuntu/Windows.
 
-### M6.3 - ChatGPT Web model/reasoning adapter
+The lifecycle regression explicitly changes global/project defaults after spawn, launches the worker, marks the browser target failed, recovers the same durable worker, and verifies the original stored intent never changes.
+
+Exit criterion satisfied.
+
+### M6.3 - ChatGPT Web model/reasoning adapter — active
 
 - Inspect the current live ChatGPT model/reasoning UI in the dedicated worker profile before finalizing selectors/labels.
-- Add bounded CDP observation for current model/reasoning state.
+- Add bounded CDP observation for current normalized model/reasoning state.
 - Add model/reasoning selection through a narrow browser adapter.
 - Require post-interaction verification before success.
-- Integrate it before Worker-app selection/bootstrap submission.
-- Initial launch and recovery must share the same path.
+- Consume persisted `WorkerRecord.executionIntent` before Worker-app selection/bootstrap submission.
+- Initial launch and recovery must share the same execution adapter path.
 - Explicit requested settings default to fail closed on unsupported/unverifiable state.
-- Add fake-CDP regressions for false-positive clicks and UI state that never materializes, mirroring the Worker-app selected-entity protections.
+- Implement deliberate `allow-current` behavior without misreporting verification.
+- Add fake-CDP regressions for false-positive clicks and UI state that never materializes.
 
-Exit criterion: no explicit execution intent can reach bootstrap submission without verified matching UI state.
+Exit criterion: no explicit execution intent can reach bootstrap submission without satisfying its configured verification/fallback policy.
 
 ### M6.4 - Status and diagnostics
 
-- Surface resolved/observed/verified execution information through existing status/result diagnostics where appropriate.
-- Distinguish durable intent from current browser-attempt observation.
-- Preserve concise normal output when no explicit settings are configured.
-- Add tests for successful verification, unsupported selection, recovery failure, and terminal worker status.
+- Surface durable resolved intent and current-attempt observed/verified execution information through existing status/result diagnostics where appropriate.
+- Distinguish durable intent from browser-attempt observation.
+- Preserve concise output when no explicit settings are configured.
+- Add success/failure/recovery/terminal-state tests.
 
-Exit criterion: the parent can tell exactly what execution configuration a worker requested and whether the browser verified it.
+Exit criterion: the parent can tell what execution configuration a worker requested and whether the browser verified it.
 
 ### M6.5 - Live validation
 
-Use the real dedicated worker Chrome profile and existing worker custom app.
+Use the real dedicated worker Chrome profile and existing Worker custom app. Validate at least:
 
-Validate at least:
+1. default/no-explicit-setting compatibility;
+2. one explicit model + reasoning combination selected/verified before bootstrap;
+3. another reasoning level on a separate worker;
+4. two parallel workers carrying different durable intents;
+5. target-loss recovery with the same persisted intent;
+6. deliberately unavailable/invalid explicit preference fails before task submission;
+7. mapped ChatGPT Project routing still works;
+8. worker capability/catalog isolation unchanged;
+9. main `/mcp` behavior unchanged;
+10. Ubuntu/macOS/Windows CI green.
 
-1. default/no-explicit-setting worker preserves compatibility;
-2. one explicit model + reasoning combination is selected and verified before bootstrap;
-3. another reasoning level can be selected on a separate worker;
-4. two parallel workers may carry different persisted execution intents without sharing state;
-5. a running worker browser target can be closed and recovered with the **same** persisted model/reasoning intent;
-6. a deliberately unavailable/invalid explicit preference fails before task submission;
-7. mapped ChatGPT Project worker routing still works;
-8. worker capability/catalog isolation remains unchanged;
-9. main `/mcp` app behavior remains unchanged;
-10. Ubuntu/macOS/Windows CI remains green.
-
-Record actual live-observed model/reasoning labels and any UI-specific limitations in this document or `docs/CUSTOM-RUNTIME-PROGRESS.md` after validation.
+Record actual live-observed UI labels and limitations after validation.
 
 ## Parallel-worker implications
 
-M6 is intentionally compatible with future parallel task coordination. Different workers should be able to carry different durable execution intents, for example a deeper reasoning setting for architecture work and a lighter setting for mechanical tests/docs.
-
-M6 itself does not add automatic task classification or coordinator scheduling. Those can be considered later only after explicit per-worker execution control is stable.
+Different workers may carry different durable execution intents. M6 does not add automatic task classification or coordinator scheduling; those should only be considered after explicit per-worker execution control is stable.
 
 ## Security and reliability checklist
 
-- [x] M6.1 adds no new worker repository authority.
-- [x] M6.1 adds no plugin/Skill/Computer Use inheritance into `/mcp/worker`.
-- [ ] Global/project setting changes do not mutate running workers. M6.2 will make this durable contract explicit.
-- [ ] Explicit settings are verified before bootstrap submission.
-- [ ] False-positive UI clicks do not count as success.
-- [ ] Recovery reuses persisted intent.
-- [ ] Unsupported explicit settings fail closed by default at the browser boundary.
+- [x] No new worker repository authority.
+- [x] No plugin/Skill/Computer Use inheritance into `/mcp/worker`.
+- [x] Global/project setting changes do not mutate existing/running workers' durable intent.
+- [ ] Explicit settings are verified before bootstrap submission. (M6.3)
+- [ ] False-positive model/reasoning UI clicks do not count as success. (M6.3)
+- [x] Recovery reuses persisted intent instead of re-resolving defaults.
+- [ ] Unsupported explicit settings fail closed by default in the live browser adapter. (M6.3)
 - [x] No private ChatGPT request identity dependency.
-- [x] Existing workers/callers without settings remain backward compatible through missing-state/unmanaged behavior.
-- [x] M6.1 cross-platform CI is green.
+- [x] Existing workers/callers without settings remain backward compatible.
+- [x] M6.2 cross-platform CI remains green.
 
 ## First action in a new session
 
-M6.1 is complete. The next implementation unit is **M6.2 - Durable per-worker intent**.
+Before implementing M6.3:
 
-Before changing browser automation:
+1. read `docs/SESSION-HANDOFF.md` and this file;
+2. verify `dev/custom-runtime` HEAD and current CI;
+3. inspect current `WorkerRecord.executionIntent`, browser launch/recovery path, and `src/agents/chrome-cdp.ts`;
+4. inspect the **real current dedicated-worker ChatGPT model/reasoning UI** before choosing selectors or display-label mappings;
+5. implement **M6.3 only**;
+6. run focused fake-CDP regressions and full cross-platform CI, fix failures, then update progress/handoff/design docs before M6.4.
 
-1. read `docs/SESSION-HANDOFF.md`;
-2. read this file;
-3. verify current `dev/custom-runtime` HEAD and CI;
-4. extend the durable worker record/spawn contract for M6.2 only;
-5. prove defaults changing after spawn cannot alter an existing worker's stored intent;
-6. run focused tests and full CI, then update the three M6 source/handoff documents.
-
-Do not start CDP model-picker automation until M6.2 is complete.
+Do not infer current model/reasoning UI structure from old screenshots, product memory, or prompt text.
