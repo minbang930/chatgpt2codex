@@ -65,10 +65,12 @@ Current `src/agents/chrome-cdp.ts` behavior:
 2. wait for composer;
 3. preserve a genuine selected Worker-app inline entity, otherwise clear only an exact stale plain-text `@ChatGPT To Codex Worker` draft;
 4. type/select `@ChatGPT To Codex Worker` from the current role-less app picker;
-5. verify the selected inline app entity;
-6. append worker bootstrap + scoped capability and submit.
+5. after a picker click, explicitly verify the selected inline app entity before clearing the exact query or treating selection as successful;
+6. append worker bootstrap + scoped capability and submit only after selected-entity verification.
 
-Important stabilization commits include initial routing `236994e7`, subtitle-aware matching `415b8e3`/`5c886bb`, selected-state fixes `8ccb755`/`1022fc1`/`c956c3d`, actual inline selected-app detection `6179841e` + `f081c065`, role-less picker support `95375f7` + `2f00ae9` + `878aa3d`, and exact stale-draft handling `5b16988d` + `62844fa6`. Stale-draft regression CI `35051793885` is green.
+Important stabilization commits include initial routing `236994e7`, subtitle-aware matching `415b8e3`/`5c886bb`, selected-state fixes `8ccb755`/`1022fc1`/`c956c3d`, actual inline selected-app detection `6179841e` + `f081c065`, role-less picker support `95375f7` + `2f00ae9` + `878aa3d`, exact stale-draft handling `5b16988d` + `62844fa6`, and post-picker selected-entity verification `7c3bf2c4` with regressions `ae3b5b8b`/`9d036fcf`/`02ab05c3`. CI `35095515554` is green on macOS, Ubuntu, and Windows.
+
+A picker-row click is not authoritative by itself: a false-positive click that does not materialize the Worker-app selected entity now keeps polling and then fails closed without submitting the worker bootstrap. The exact typed Worker-app query is only cleared after verified selection.
 
 Do not overstate the live stale-draft evidence: the runtime has been updated with the automatic stale-draft fix and code/CI coverage is green, while the earlier stale condition in the live profile was manually cleared before the clean initial-selection smoke.
 
@@ -153,16 +155,23 @@ A durable `completed`, `failed`, or `cancelled` worker therefore reports `recove
 
 Implementation: `63e22692` (`fix: report browser recovery only for running workers`); regression coverage: `3c745d3d` (`test: hide recovery after durable completion`). CI `35093400146` passed on macOS, Ubuntu, and Windows.
 
+### Post-picker Worker-app verification
+
+`selectWorkerApp()` now requires observable selected-app state after a picker click before it can clear the typed query or return success. A click result of `{ ok: true }` is only an interaction signal, not proof of selected identity.
+
+Implementation: `7c3bf2c4`. Regression coverage: `ae3b5b8b`, `9d036fcf`, `02ab05c3`. CI `35095515554` passed on macOS, Ubuntu, and Windows, including Windows Agent/native input/UIA/activity indicator/build/launcher jobs.
+
+This preserves the existing selected-chip/inline-anchor, role-less picker, subtitle row, and stale-draft paths while closing the false-positive click path.
+
 ## Active unit
 
-**Post-live-smoke stabilization cleanup.** The primary Worker-app path, control-preserving worker orchestration, true browser-target recovery, rolling local control authorization, and terminal recovery-status semantics are now implemented and code/CI validated. Browser recovery and control/full-write coexistence are also proven in the live VMware environment.
+**Post-live-smoke stabilization cleanup.** The primary Worker-app path, control-preserving worker orchestration, true browser-target recovery, rolling local control authorization, terminal recovery-status semantics, and post-picker selected-entity verification are implemented and code/CI validated. Browser recovery and control/full-write coexistence are also proven in the live VMware environment.
 
 Remaining integration cleanup, in practical priority order:
 
-1. Harden `selectWorkerApp` so a picker click is followed by an explicit selected-entity verification before clearing the typed app query/returning success.
-2. Improve direct `start-chatgpt.ps1` named-tunnel/public-hostname reuse UX; do not guess the user's existing hostname configuration.
-3. Let ordinary live use naturally cross the original 30-minute control TTL and confirm no `LEASE_REQUIRED` regression; code/CI already covers renewal, so no forced wait is required.
-4. Keep CI green and fix integration defects before defining any new milestone.
+1. Improve direct `start-chatgpt.ps1` named-tunnel/public-hostname reuse UX; do not guess the user's existing hostname configuration.
+2. Let ordinary live use naturally cross the original 30-minute control TTL and confirm no `LEASE_REQUIRED` regression; code/CI already covers renewal, so no forced wait is required.
+3. Keep CI green and fix integration defects before defining any new milestone.
 
 ## Runtime/update note
 
