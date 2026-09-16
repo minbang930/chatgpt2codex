@@ -31,6 +31,8 @@ The user prefers implementation-first progress.
 - Full-write workers use isolated Git branches/worktrees and scoped worker capabilities.
 - Browser-worker repository authority is derived only from `WORKER_CORE_TOOL_NAMES` plus `worker_finish`.
 - Windows Computer Use reuses the existing control lease/policy/audit plane.
+- `control` remains locally armable only and still does **not** grant direct project `write`, `verify`, `image`, or `remote`; it now also grants the bounded `worker` orchestration capability so ChatGPT can prepare/launch isolated workers without replacing the control lease.
+- The `worker` lease capability authorizes only runtime-managed worker lifecycle/routing operations. Actual code edits remain behind the worker's opaque capability and isolated worktree.
 - Hooks are best-effort observational extensions, not authorization.
 - Agent Skills use bounded discovery/install/activation/security paths; **skill scripts never automatically execute**.
 - External MCP plugins remain main-agent extensions behind fixed Core proxies; browser workers do not inherit plugin access.
@@ -161,6 +163,22 @@ This now proves the primary connected worker-app path end-to-end from a clean in
 
 Do **not** claim that a separate live `running -> lost target -> recoverRunningBrowserWorker` recovery scenario has been tested; only initial launch/retry and completion propagation have been exercised live. Recovery still shares the same driver in code/CI.
 
+### Control-preserving worker orchestration
+
+The manual smoke exposed a lease UX defect: `agent_spawn`/`agent_launch` required the parent's generic `write` capability, forcing a locally armed `control` lease to be replaced with `full-write`, after which remote ChatGPT could not re-arm `control` by design.
+
+That coupling is now removed without creating an all-powerful preset:
+
+- new lease capability: `worker`;
+- `control` grants `read + control + worker`, but still denies direct `write`, `verify`, `image`, and `remote`;
+- `full-write` grants its previous capabilities plus `worker`, but still does not grant desktop `control`;
+- `read-only`, `tests-only`, and `image-only` do not grant `worker`;
+- `agent_spawn`, `agent_launch`, and worker Project route set/clear require `worker` rather than generic `write`;
+- worker edits remain authorized only by the scoped `workerToken` inside the runtime-managed isolated worktree.
+
+Implementation commits: `9fd2a6b`, `6d7ce6f`, `6fe7f5c`, `f32ad00`, `de6926d`; regression coverage: `b303e47`, `2f9ad59`, `2537462`.
+CI `35053101356`: Ubuntu/macOS/Windows all green, including Windows agent/native-input/UIA/activity-indicator/build/launcher coverage.
+
 Setup/runbooks:
 
 - `docs/CHATGPT-WORKER-APP-SETUP.md`
@@ -170,14 +188,13 @@ Setup/runbooks:
 
 **Post-live-smoke stabilization cleanup.**
 
-The primary browser-worker custom-app path, including clean initial app selection and parent-side durable completion/result retrieval, is now proven in the real user environment. Before defining any new milestone, handle only concrete stabilization follow-ups discovered by live use.
+The primary browser-worker custom-app path, including clean initial app selection and parent-side durable completion/result retrieval, is proven in the real user environment. The control/full-write lease-switching UX defect has also been fixed in code/CI by splitting worker orchestration from generic write authority.
 
 Known follow-up observations:
 
-1. The stale worker-app draft fix (`5b16988d`, regression `62844fa6`) is merged and CI-green; the live VM must still `git pull`, `npm run build`, and restart the runtime before relying on automatic stale-draft recovery instead of manual cleanup.
+1. The live VM must still `git pull`, `npm run build`, and restart the runtime before it uses both the automatic stale-draft recovery and the new control-preserving worker orchestration capability.
 2. A separate live running-worker recovery smoke (`running` worker with lost/stopped browser target -> recovery) has not yet been exercised end-to-end, although initial launch/retry and recovery use the same driver path in code.
-3. During manual tests, the parent MCP lease was temporarily raised to `full-write`; a remote session could not restore `control` because `control` re-grant is intentionally local-authority-only. Treat this as a UX/operational follow-up, not as permission to weaken the authorization boundary.
-4. Keep CI green and fix only integration defects before considering broader scope.
+3. Keep CI green and fix only integration defects before considering broader scope.
 
 ## Remaining stabilization work
 
@@ -189,9 +206,9 @@ In order unless a real defect changes priority:
 4. **Completed:** hard worker MCP server/catalog/OAuth boundary (`87f497f0`, CI `35017393064`).
 5. **Completed:** browser driver selects the dedicated worker app per task message (`236994e7` onward).
 6. **Completed live:** clean initial Worker-app selection and durable completion/result propagation with `wrk_777c1c14-8f66-462a-a95c-774db8f05c6b`; role-less picker support `95375f7`, stale-draft recovery `5b16988d`, regression `62844fa6`, CI `35051793885`.
-7. **Immediate operational step:** update/rebuild/restart the live VM so it runs the stale-draft recovery fix.
-8. **Optional live follow-up:** running-worker recovery smoke through the same worker app.
-9. Review the lease-restoration UX exposed during manual testing without weakening local-only `control` authority.
+7. **Completed code/CI:** control-preserving worker orchestration via dedicated `worker` lease capability; CI `35053101356`.
+8. **Immediate operational step:** update/rebuild/restart the live VM so it runs the stale-draft and worker-lease fixes.
+9. **Optional live follow-up:** running-worker recovery smoke through the same worker app.
 10. Keep CI green and fix integration defects before defining any new milestone.
 
 ## Source-of-truth documents
