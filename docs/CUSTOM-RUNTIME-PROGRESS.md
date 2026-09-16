@@ -358,8 +358,8 @@ Post-roadmap work should therefore be stabilization and real integration validat
   - Actual repository edits remain worker-scoped behind `workerToken` and the runtime-managed isolated worktree; no all-capabilities preset was introduced.
   - Implementation commits: `9fd2a6b`, `6d7ce6f`, `6fe7f5c`, `f32ad00`, `de6926d`; tests `b303e47`, `2f9ad59`, `2537462`.
   - CI `35053101356` passed on Ubuntu, macOS, and Windows, including Windows agent/native-input/UIA/activity-indicator/build/launcher coverage.
-- [ ] Update/rebuild/restart the live VM so the running runtime includes both the automatic stale-draft recovery and worker-orchestration lease split.
-- [ ] Live-smoke the new control-preserving path: with a locally armed `control` lease, prepare/launch a worker and confirm direct parent project write remains denied without switching to `full-write`.
+- [x] Update/rebuild/restart the live VM so the running runtime includes both the automatic stale-draft recovery and worker-orchestration lease split.
+- [x] Live-smoke the new control-preserving path: with the parent lease kept on `control`, `agent_spawn -> agent_launch -> agent_wait(timeoutMs=60000) -> agent_result` completed end-to-end without any `full-write` reselection; the worker confirmed README heading `# c2c-smoke` and made no file changes.
 - [ ] Optionally live-smoke a true running-worker browser recovery (`running` -> lost/stopped target -> recover same worker) through the dedicated worker app.
 - [ ] Keep CI green and fix integration defects discovered by stabilization before defining any new milestone.
 
