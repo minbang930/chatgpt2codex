@@ -25,6 +25,7 @@ interface SessionWithLease {
   activeProjectId?: string | null;
   lease?: Lease | null;
   activeLease?: Lease | null;
+  controlLease?: Lease | null;
   [key: string]: unknown;
 }
 
@@ -32,35 +33,67 @@ function sessionObject(session: unknown): SessionWithLease | undefined {
   return typeof session === "object" && session !== null ? (session as SessionWithLease) : undefined;
 }
 
-/**
- * A persisted control lease is itself proof that the owner armed control from
- * a local surface: remote /mcp project_select is forbidden from granting the
- * control preset. That lets the runtime hide the short lease TTL from normal
- * use by rolling an expired control lease forward on demand.
- *
- * This deliberately does not clear the desktop-control kill switch. After a
- * kill, a fresh local control grant is still required to resume input.
- */
-function expiredRenewableControlLease(session: unknown, projectId: string): Lease | undefined {
-  const state = sessionObject(session);
-  if (!state) return undefined;
-  if (state.activeProjectId !== undefined && state.activeProjectId !== null && state.activeProjectId !== projectId) {
-    return undefined;
-  }
-  const lease = state.lease ?? state.activeLease;
-  if (!lease) return undefined;
-  if (lease.projectId !== projectId || lease.preset !== "control") return undefined;
-  return Date.now() > lease.expiresAt ? lease : undefined;
+function capabilityAllowed(lease: Lease, capability: LeaseCapability): boolean {
+  return ALLOWED_CAPABILITIES[lease.preset].has(capability);
 }
 
 /**
- * Require a lease for `projectId` that permits `capability`.
+ * Return the durable local control authorization for the active project.
+ * Before `controlLease` existed, an active control lease itself was the only
+ * persisted proof of local arming, so keep that backward-compatible fallback.
+ */
+function controlLeaseForSession(session: unknown, projectId: string): Lease | undefined {
+  const state = sessionObject(session);
+  if (!state || state.activeProjectId !== projectId) return undefined;
+
+  const candidate = state.controlLease ?? (
+    state.lease?.preset === "control" ? state.lease : state.activeLease?.preset === "control" ? state.activeLease : undefined
+  );
+  if (!candidate || candidate.projectId !== projectId || candidate.preset !== "control") return undefined;
+  return candidate;
+}
+
+async function renewControlLease(
+  ctx: ToolContext,
+  session: unknown,
+  projectId: string,
+  controlLease: Lease,
+): Promise<Lease> {
+  if (Date.now() <= controlLease.expiresAt) return controlLease;
+
+  const renewed = renewLease(controlLease);
+  const state = sessionObject(session) ?? {};
+  const active = state.lease;
+  const activeIsSameControlLease =
+    active?.preset === "control" && active.projectId === projectId && active.leaseId === controlLease.leaseId;
+
+  await ctx.store.setSession({
+    ...state,
+    ...(activeIsSameControlLease ? { lease: renewed } : {}),
+    controlLease: renewed,
+  });
+  await ctx.ledger.append({
+    type: "control.lease.renewed",
+    projectId,
+    leaseId: renewed.leaseId,
+    issuedAt: renewed.issuedAt,
+    expiresAt: renewed.expiresAt,
+  });
+  return renewed;
+}
+
+/**
+ * Require authority for `projectId` that permits `capability`.
  *
- * Normal presets still expire normally. A locally armed `control` lease rolls
- * forward transparently after expiry so users do not have to re-arm it every
- * 30 minutes; remote callers still cannot mint control authority themselves.
- * Throws LEASE_REQUIRED (no/mismatched/non-renewable expired lease) or
- * PERMISSION_DENIED (lease exists but its preset lacks the capability).
+ * Normal project presets still expire normally. Locally armed desktop-control
+ * authorization is persisted separately by the state store and rolls forward
+ * transparently after expiry. This keeps Computer Use/worker orchestration
+ * available even if the main project lease later switches to full-write or
+ * another preset. Remote MCP callers still cannot mint control authority.
+ *
+ * The desktop-control kill switch is intentionally independent: renewing a
+ * control lease never clears a kill. A fresh local control grant is still
+ * required to resume after a kill.
  */
 export async function requireProjectLease(
   ctx: ToolContext,
@@ -68,38 +101,32 @@ export async function requireProjectLease(
   capability: LeaseCapability = "read",
 ): Promise<Lease> {
   const session = await ctx.store.getSession();
-  let lease: Lease;
+  let activeLease: Lease | undefined;
+  let activeError: unknown;
 
   try {
-    lease = requireLease(session, projectId);
+    activeLease = requireLease(session, projectId);
   } catch (error) {
-    const renewable = expiredRenewableControlLease(session, projectId);
-    if (!(error instanceof DomainError) || error.code !== ErrorCode.LEASE_REQUIRED || !renewable) {
-      throw error;
-    }
-
-    lease = renewLease(renewable);
-    const state = sessionObject(session);
-    await ctx.store.setSession({
-      ...(state ?? {}),
-      activeProjectId: projectId,
-      lease,
-    });
-    await ctx.ledger.append({
-      type: "control.lease.renewed",
-      projectId,
-      leaseId: lease.leaseId,
-      issuedAt: lease.issuedAt,
-      expiresAt: lease.expiresAt,
-    });
+    activeError = error;
   }
 
-  if (!ALLOWED_CAPABILITIES[lease.preset].has(capability)) {
-    throw new DomainError(ErrorCode.PERMISSION_DENIED, `Lease preset ${lease.preset} does not allow ${capability}`, {
+  if (activeLease && capabilityAllowed(activeLease, capability)) {
+    return activeLease;
+  }
+
+  const localControlLease = controlLeaseForSession(session, projectId);
+  if (localControlLease && capabilityAllowed(localControlLease, capability)) {
+    return renewControlLease(ctx, session, projectId, localControlLease);
+  }
+
+  if (activeLease) {
+    throw new DomainError(ErrorCode.PERMISSION_DENIED, `Lease preset ${activeLease.preset} does not allow ${capability}`, {
       projectId,
-      preset: lease.preset,
+      preset: activeLease.preset,
       capability,
     });
   }
-  return lease;
+
+  if (activeError) throw activeError;
+  throw new DomainError(ErrorCode.LEASE_REQUIRED, "No active lease for project", { projectId });
 }
