@@ -56,10 +56,10 @@ Key commits: `d680dca3`, `b904a145`.
 #### M1.4 - MCP agent tools
 
 - [x] `agent_spawn`, `agent_status`, `agent_result`, `agent_wait`, `agent_cancel`, `worker_finish`.
-- [x] Full-write lease required for preparation.
+- [x] Worker preparation requires the dedicated `worker` lease capability rather than generic project `write`; both `full-write` and locally armed `control` grant `worker`, while direct parent writes remain separately gated.
 - [x] `worker_finish` verifies managed worktree and optional commit SHA.
 
-Key commits: `88b981cb`, `99a61874`, `3052774e`, `0140853b`.
+Key commits: `88b981cb`, `99a61874`, `3052774e`, `0140853b`, `9fd2a6b`, `6fe7f5c`, `2f9ad59`.
 
 #### M1.5 - Completion notification piggyback
 
@@ -98,10 +98,11 @@ Key commits: `e4ee5b39`, `2448e60c`, `33ea1bff`, `15fa47aa`.
 - [x] Explicit `agent_launch` and persistent project-route tools.
 - [x] Dedicated Worker custom-app selection supports current role-less ChatGPT app-picker rows and verifies the selected inline app entity.
 - [x] Exact stale plain-text worker-app drafts are cleared before a new picker mention is inserted; arbitrary drafts remain untouched.
+- [x] `agent_launch` and worker Project route mutations require the dedicated `worker` orchestration capability, so a locally armed `control` lease can launch isolated workers without being replaced by `full-write`.
 
-Representative commits: `6f0a4221`, `892cf5d5`, `bfba691b`, `9766a1ce`, `820a4091`, `95375f7`, `5b16988d`, `62844fa6`.
+Representative commits: `6f0a4221`, `892cf5d5`, `bfba691b`, `9766a1ce`, `820a4091`, `95375f7`, `5b16988d`, `62844fa6`, `f32ad00`, `de6926d`, `2537462`.
 
-Latest stale-draft regression CI: `35051793885` (Ubuntu/macOS/Windows passed).
+Latest worker-orchestration CI: `35053101356` (Ubuntu/macOS/Windows passed, including Windows agent/native-input/UIA/activity-indicator/build/launcher jobs).
 
 #### M2.4 - Completion/recovery
 
@@ -348,9 +349,18 @@ Post-roadmap work should therefore be stabilization and real integration validat
   - That worker read `README.md`, confirmed the first heading `# c2c-smoke`, made no file changes/staging/commit/push, and completed through `worker_finish`.
   - Parent-side `agent_wait(timeoutMs=60000)` received the completion event, then `agent_result` returned the durable final result. This validates launch -> running -> worker_finish -> completion event -> durable result retrieval end-to-end.
   - The primary connected worker-app path is therefore proven from clean initial selection through parent-side completion retrieval.
-- [ ] Update/rebuild/restart the live VM so the running runtime includes the automatic stale-draft recovery fix (`5b16988d`, `62844fa6`) rather than depending on manual draft cleanup.
+- [x] Split worker orchestration from parent project-write authority so a locally armed `control` lease can keep Computer Use while still preparing/launching isolated workers.
+  - Added the `worker` lease capability in `src/workspace/lease-guard.ts`.
+  - `control` now grants `read + control + worker` but still denies direct `write`, `verify`, `image`, and `remote`.
+  - `full-write` retains `read + verify + write + image + remote` and additionally grants `worker`; it still does not grant desktop `control`.
+  - `read-only`, `tests-only`, and `image-only` do not grant `worker`.
+  - `agent_spawn`, `agent_launch`, and worker Project route set/clear now require `worker` instead of generic `write`.
+  - Actual repository edits remain worker-scoped behind `workerToken` and the runtime-managed isolated worktree; no all-capabilities preset was introduced.
+  - Implementation commits: `9fd2a6b`, `6d7ce6f`, `6fe7f5c`, `f32ad00`, `de6926d`; tests `b303e47`, `2f9ad59`, `2537462`.
+  - CI `35053101356` passed on Ubuntu, macOS, and Windows, including Windows agent/native-input/UIA/activity-indicator/build/launcher coverage.
+- [ ] Update/rebuild/restart the live VM so the running runtime includes both the automatic stale-draft recovery and worker-orchestration lease split.
+- [ ] Live-smoke the new control-preserving path: with a locally armed `control` lease, prepare/launch a worker and confirm direct parent project write remains denied without switching to `full-write`.
 - [ ] Optionally live-smoke a true running-worker browser recovery (`running` -> lost/stopped target -> recover same worker) through the dedicated worker app.
-- [ ] Review the lease-restoration UX exposed during manual worker tests: remote MCP can raise to the permitted write lease for the task but cannot re-grant local-authority-only `control`; preserve the security boundary while reducing operational friction if possible.
 - [ ] Keep CI green and fix integration defects discovered by stabilization before defining any new milestone.
 
 ## Update policy
