@@ -42,8 +42,38 @@ for (let n = 0; n < 60; n += 1) {
 }
 if (!ready) throw new Error("ChatGPT composer not available; confirm worker profile is signed in");
 
-const focus = await send("Runtime.evaluate", { expression: `(() => { const c=document.querySelector('#prompt-textarea'); if(!(c instanceof HTMLElement)) return false; if((c.textContent||'').trim()) return false; c.focus(); return true; })()`, returnByValue: true });
-if (focus?.result?.value !== true) throw new Error("Fresh composer was not empty/focusable");
+const focus = await send("Runtime.evaluate", {
+  expression: `(() => { const c=document.querySelector('#prompt-textarea'); if(!(c instanceof HTMLElement)) return false; c.focus(); return true; })()`,
+  returnByValue: true,
+});
+if (focus?.result?.value !== true) throw new Error("ChatGPT composer was not focusable");
+
+// Clear whatever ChatGPT left in the fresh composer. Do this through normal
+// keyboard editing first so ProseMirror updates its own state.
+await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 });
+await send("Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 });
+await send("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 });
+await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 });
+await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 });
+await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 });
+await new Promise((resolve) => setTimeout(resolve, 100));
+
+// If the editor still exposes residual text, clear it only for this disposable
+// diagnostic tab. No message is ever submitted by this script.
+await send("Runtime.evaluate", {
+  expression: `(() => {
+    const c=document.querySelector('#prompt-textarea');
+    if(!(c instanceof HTMLElement)) return false;
+    if((c.textContent||'').trim()) {
+      c.textContent='';
+      c.dispatchEvent(new InputEvent('input', { bubbles:true, inputType:'deleteContentBackward', data:null }));
+    }
+    c.focus();
+    return true;
+  })()`,
+  returnByValue: true,
+});
+
 await send("Input.insertText", { text: `@${appName}` });
 await new Promise((resolve) => setTimeout(resolve, 1200));
 
