@@ -7,6 +7,7 @@ import { DomainError, ErrorCode } from "../types.js";
 import { applyWorkerExecutionIntent } from "./chrome-execution.js";
 import type {
   BrowserWorkerDriver,
+  BrowserWorkerExecutionDiagnostic,
   BrowserWorkerLaunchInput,
   BrowserWorkerLaunchResult,
 } from "./browser-controller.js";
@@ -250,6 +251,26 @@ function normalizeWorkerAppName(value: string | undefined): string {
   return normalized;
 }
 
+function hasExplicitExecutionIntent(input: BrowserWorkerLaunchInput): boolean {
+  return Boolean(input.executionIntent?.resolved?.model || input.executionIntent?.resolved?.reasoningEffort);
+}
+
+function attachExecutionDiagnostic(error: unknown, execution: BrowserWorkerExecutionDiagnostic | undefined): unknown {
+  if (!execution) return error;
+  if (error instanceof DomainError) {
+    return new DomainError(error.code, error.message, {
+      ...(error.details ?? {}),
+      workerExecution: execution,
+    });
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return new DomainError(
+    ErrorCode.WORKSPACE_NOT_READY,
+    message,
+    { workerExecution: execution },
+  );
+}
+
 export function buildWorkerBootstrap(input: BrowserWorkerLaunchInput): string {
   return [
     "You are an isolated coding worker launched by chatgpt2codex.",
@@ -435,6 +456,7 @@ export class ChromeCdpBrowserWorkerDriver implements BrowserWorkerDriver {
     let target = await this.deps.openTarget(endpoint, preferredUrl);
     let connection = await this.deps.connect(target.webSocketDebuggerUrl);
     let fallbackUsed = false;
+    let execution: BrowserWorkerExecutionDiagnostic | undefined;
 
     try {
       await connection.send("Runtime.enable");
@@ -469,7 +491,8 @@ export class ChromeCdpBrowserWorkerDriver implements BrowserWorkerDriver {
 
       // Durable execution intent is applied and post-verified before the Worker
       // app is selected or any bootstrap text is inserted into the composer.
-      await applyWorkerExecutionIntent(connection, input.executionIntent, this.sleepMs);
+      const applied = await applyWorkerExecutionIntent(connection, input.executionIntent, this.sleepMs);
+      if (hasExplicitExecutionIntent(input)) execution = applied;
 
       await submitWorkerPrompt(
         connection,
@@ -486,11 +509,12 @@ export class ChromeCdpBrowserWorkerDriver implements BrowserWorkerDriver {
 
       return {
         browserHandle: `cdp:${target.id}`,
+        ...(execution ? { execution } : {}),
         ...(fallbackUsed ? { fallbackUsed: true } : {}),
       } as BrowserWorkerLaunchResult;
     } catch (error) {
       await this.deps.closeTarget(endpoint, target.id).catch(() => undefined);
-      throw error;
+      throw attachExecutionDiagnostic(error, execution);
     } finally {
       connection.close();
     }
