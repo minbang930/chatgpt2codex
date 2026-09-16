@@ -6,365 +6,180 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **Implementation roadmap complete through M5**
 
-Active unit: **Post-M5 stabilization / post-live-smoke cleanup**
+Active unit: **Post-M5 stabilization / integration cleanup**
+
+Primary operational handoff: `docs/SESSION-HANDOFF.md`.
 
 Detailed design documents:
 
-- `docs/SESSION-HANDOFF.md` - current operational context for continuing work across ChatGPT sessions.
 - `docs/WINDOWS-COMPUTER-USE-DESIGN.md`
 - `docs/HOOKS-DESIGN.md`
 - `docs/SKILLS-DESIGN.md`
 - `docs/PLUGINS-DESIGN.md`
-- `docs/CHATGPT-WORKER-APP-SETUP.md` - dedicated worker custom-app setup and live-smoke procedure.
+- `docs/CHATGPT-WORKER-APP-SETUP.md`
+- `docs/CHATGPT-PROJECT-WORKER-ROUTING.md`
 
-## Completed
+## Completed roadmap
 
 ### M0 - Baseline
 
 - [x] Fork and `dev/custom-runtime` branch created.
 - [x] Baseline preserved against upstream starting point.
-- [x] Cross-platform CI established for typecheck/tests/build; Windows launcher/native-helper regressions are covered separately.
+- [x] Cross-platform CI established for typecheck/tests/build, with Windows launcher/native-helper coverage.
 
-Key commits: `bac50959`, `53c2d1a4`.
+Representative commits: `bac50959`, `53c2d1a4`.
 
 ### M1 - Local multi-agent runtime
 
-#### M1.1 - Durable worker state and inbox
+- [x] Durable `pending/running/completed/failed/cancelled` worker records and durable completion inbox.
+- [x] One isolated managed Git branch/worktree per worker.
+- [x] Agent Manager spawn/status/result/cancel/workspace/wait/ack APIs.
+- [x] MCP tools: `agent_spawn`, `agent_status`, `agent_result`, `agent_wait`, `agent_cancel`, `worker_finish`.
+- [x] Completion notification piggyback without discarding durable results.
+- [x] Worker orchestration authority split from parent direct-write authority.
 
-- [x] Durable `pending/running/completed/failed/cancelled` worker records.
-- [x] Atomic persistence, final result/error, durable completion notifications.
-- [x] Illegal transitions and invalid IDs rejected.
-
-Key commits: `8de81ae3`, `072feace`.
-
-#### M1.2 - Worker Git isolation
-
-- [x] One branch and runtime-managed worktree per worker.
-- [x] Worktree assignment and base commit persisted/verified.
-- [x] Cleanup preserves dirty work.
-
-Key commits: `6795635d`, `84d34d46`.
-
-#### M1.3 - Agent Manager API
-
-- [x] Spawn/status/result/cancel/workspace/wait/ack orchestration.
-- [x] Spawn remains pending until browser acceptance.
-- [x] Short waits use the durable inbox without discarding full results.
-
-Key commits: `d680dca3`, `b904a145`.
-
-#### M1.4 - MCP agent tools
-
-- [x] `agent_spawn`, `agent_status`, `agent_result`, `agent_wait`, `agent_cancel`, `worker_finish`.
-- [x] Worker preparation requires the dedicated `worker` lease capability rather than generic project `write`; both `full-write` and locally armed `control` grant `worker`, while direct parent writes remain separately gated.
-- [x] `worker_finish` verifies managed worktree and optional commit SHA.
-
-Key commits: `88b981cb`, `99a61874`, `3052774e`, `0140853b`, `9fd2a6b`, `6fe7f5c`, `2f9ad59`.
-
-#### M1.5 - Completion notification piggyback
-
-- [x] Concise worker completion notices attach to later normal Core MCP results.
-- [x] Full results remain durable behind `agent_result`.
-- [x] Notification failure cannot break Core tool success.
-
-Key commits: `f3b9c80b`, `b0f92638`, `30cb2921`.
+Representative commits: `8de81ae3`, `6795635d`, `d680dca3`, `88b981cb`, `f3b9c80b`.
 
 ### M2 - ChatGPT Web workers
 
-#### M2.1 - Worker-scoped Core routing
-
-- [x] Opaque worker capabilities with hash-only persistence and revoke/expiry lifecycle.
-- [x] Worker-specific in-memory `ToolContext` rooted at the managed worktree.
-- [x] Explicit reused-Core tool allowlist.
-- [x] Worker calls never mutate the main `sessions.json` project/lease state.
-
-Key commits: `0a47070e`, `3d5886a8`, `66159afa`, `83166838`, `0140853b`.
-
-#### M2.2 - Browser worker controller foundation
-
-- [x] Durable browser-worker state separate from ChatGPT private conversation identity.
+- [x] Opaque worker capabilities with hash-only persistence, expiry, and revocation.
+- [x] Worker-specific Core context rooted at the managed worktree.
+- [x] Durable browser-worker state separate from ChatGPT conversation identity.
+- [x] Dedicated Chrome profile + local CDP worker launch/bootstrap.
 - [x] Optional local project -> ChatGPT Project routing.
-- [x] Launch/cancel driver boundary; browser failure isolated from durable worker/workspace state.
-
-Key commits: `e4ee5b39`, `2448e60c`, `33ea1bff`, `15fa47aa`.
-
-#### M2.3 - ChatGPT worker launch/bootstrap
-
-- [x] Dedicated Chrome profile + local CDP endpoint.
-- [x] Project-route preference with standalone fallback.
-- [x] Bootstrap carries task + scoped worker capability.
 - [x] `pending -> running` only after successful bootstrap submission.
-- [x] Failed launch revokes capability and remains retryable.
-- [x] Explicit `agent_launch` and persistent project-route tools.
-- [x] Dedicated Worker custom-app selection supports current role-less ChatGPT app-picker rows and verifies the selected inline app entity.
-- [x] Exact stale plain-text worker-app drafts are cleared before a new picker mention is inserted; arbitrary drafts remain untouched.
-- [x] `agent_launch` and worker Project route mutations require the dedicated `worker` orchestration capability, so a locally armed `control` lease can launch isolated workers without being replaced by `full-write`.
+- [x] Dedicated Worker custom app backed by `/mcp/worker`.
+- [x] Worker-only MCP catalog and exact OAuth resource/audience isolation from main `/mcp`.
+- [x] Current ChatGPT role-less app picker and inline selected-app entity support.
+- [x] Exact stale Worker-app draft cleanup without erasing arbitrary drafts.
+- [x] `worker_finish` remains the only durable completion source of truth.
+- [x] Lost browser targets revoke old worker capability without fabricating durable worker failure.
+- [x] Same durable running worker can be recovered in a fresh browser attempt.
+- [x] DOM completion remains fallback-only and never fabricates a completed durable result.
 
-Representative commits: `6f0a4221`, `892cf5d5`, `bfba691b`, `9766a1ce`, `820a4091`, `95375f7`, `5b16988d`, `62844fa6`, `f32ad00`, `de6926d`, `2537462`.
-
-Latest worker-orchestration CI: `35053101356` (Ubuntu/macOS/Windows passed, including Windows agent/native-input/UIA/activity-indicator/build/launcher jobs).
-
-#### M2.4 - Completion/recovery
-
-- [x] `worker_finish` remains the durable completion source of truth.
-- [x] `agent_stop` retires browser access while preserving branch/worktree/partial edits.
-- [x] Lost CDP targets revoke old capabilities without fabricating worker failure.
-- [x] `agent_launch` can recover the same durable running worker in a fresh browser attempt.
-- [x] DOM completion is fallback-only diagnostic/recovery context; it never fabricates completed results.
-- [x] Parallel-worker lifecycle/recovery coverage passes cross-platform.
-- [x] Live parent-side completion retrieval verified through `agent_wait` followed by `agent_result` after a real Worker-app run.
-
-Representative commits: `32e74b45`, `5feeb9ce`, `a73fa36d`, `bed891fb`, `056be27c`, `a2c2495d`, `08c206fb`.
+Representative commits: `0a47070e`, `e4ee5b39`, `6f0a4221`, `32e74b45`, `f2d03f0e`, `a9888c70`, `87f497f0`, `236994e7`, `6179841e`, `95375f7`, `5b16988d`.
 
 ### M3 - Windows Computer Use
 
-#### M3.1 - Native input backend
+- [x] Native `SendInput` helper and exact foreground-target verification.
+- [x] Coordinate click, Unicode typing, key translation.
+- [x] Window screenshot capture with DPI/scale metadata and privacy gates.
+- [x] Windows UIA semantic observation/action layer with coordinate fallback.
+- [x] Topmost click-through/no-activate activity indicator with screenshot exclusion.
+- [x] VMware live smoke across Notepad, Explorer, Chrome, minimized windows, and 125%/150% DPI.
+- [x] Pointer/halo/ripple experiments removed; subtle edge glow retained.
+- [x] Named Cloudflare tunnel environment-scope lookup and Windows native-input integration fixes validated.
 
-- [x] Existing lease/policy/approval/kill-switch/audit plane preserved.
-- [x] Persistent Windows helper with exact target activation and foreground verification.
-- [x] Coordinate click, Unicode typing, key translation via native `SendInput` path.
-- [x] Startup-ready handshake separates C# cold compile from per-request timeout.
-
-Representative commits: `32c857d4`, `eac761b0`, `73997d09`, `c34d207e`.
-
-#### M3.2 - Windows observation
-
-- [x] Visible top-level window enumeration with ephemeral IDs.
-- [x] App-window screenshot capture with `PrintWindow` + validated fallback.
-- [x] DPI/scale metadata and request-time target privacy gates.
-- [x] Before/after action evidence through the same capture adapter.
-
-Representative commits: `13c8cb31`, `54a4f7ba`, `ce78688e`, `c5cc4fd1`, `9785a1c9`.
-
-#### M3.3 - UIA semantic layer
-
-- [x] Bounded Windows ControlView observation in a separate persistent helper.
-- [x] Ephemeral observation/element IDs; no raw HWND/UIA runtime IDs exposed.
-- [x] Invoke/Selection/Focus/ValuePattern actions with re-resolution before actuation.
-- [x] UIA failure does not remove coordinate fallback.
-
-Representative commits: `b31ebc41`, `79e31c86`, `362804cf`, `5c2844a7`.
-
-#### M3.4 - Activity indicator
-
-- [x] Native topmost click-through/no-activate indicator helper.
-- [x] Screenshot exclusion/hide-restore fallback.
-- [x] Ref-counted activity scope and parent watchdog.
-- [x] Cosmetic indicator failure cannot block/authorize Computer Use.
-
-Representative commits: `22e0773f`, `14cdef8d`, `bdedb955`, `e68b7eaa`.
-
-#### M3.5 - VMware live smoke validation
-
-- [x] Notepad semantic/coordinate interaction.
-- [x] Explorer selection and Chrome address-bar/UIA interaction.
-- [x] 125% and 150% DPI validation.
-- [x] Minimized Notepad semantic observation.
-- [x] Screenshot exclusion, edge-glow UX, and physical Esc cancellation.
-- [x] Pointer/halo/ripple experiments removed from final indicator path.
-- [x] Repeated runtime/session restart behavior validated.
-- [x] Fixed Cloudflare Named Tunnel setting lookup across Process/User/Machine environment scopes.
-- [x] Fixed `GetCurrentThreadId` DLL import (`kernel32.dll`); final live `windowPoint` click succeeded.
-
-Final M3 tunnel/native-input CI: `34925521385`.
+Representative final M3 CI: `34925521385`.
 
 ### M4 - Hooks
 
-#### M4.1 - Hook engine foundation
-
 - [x] Runtime-owned versioned `hooks.json`.
-- [x] `SessionStart`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop` event vocabulary.
-- [x] Direct argv command driver with `shell:false`, restricted environment, JSON stdin envelope.
-- [x] Bounded cwd modes, timeouts, output capture, and deterministic sequential execution.
-- [x] Hook failures never break healthy Core operations.
-
-Final M4.1 CI: `34927688256`.
-
-#### M4.2 - SessionStart
-
-- [x] One `SessionStart` per created MCP server/session instance.
-- [x] Bounded transport/remote/project metadata only.
-- [x] State/config/hook failure remains best-effort.
-
-Representative commits: `fd75e655`, `3c5f68b7`, `4401806c`, `e5a735c5`.
-
-#### M4.3 - Tool lifecycle
-
-- [x] `PreToolUse` / `PostToolUse` wrap the shared MCP tool boundary.
-- [x] Raw arguments/results/secrets are not copied into lifecycle payloads.
-- [x] Hook failure cannot veto or alter tool results.
-
-Final M4.3 CI: `34977212167`.
-
-#### M4.4 - Subagent lifecycle
-
-- [x] `SubagentStart` emitted after durable `running` transition.
-- [x] `SubagentStop` emitted after durable terminal transition.
-- [x] Duplicate transitions do not duplicate hooks.
-- [x] Durable state remains authoritative when hooks fail.
-
-Final M4.4 CI: `34977859202`.
-
-#### M4.5 - Ponytail worker integration
-
-- [x] Ponytail remains an instruction-layer adapter, not a hook policy engine.
-- [x] Default `FULL`; task-local `lite/full/ultra/off` directives supported.
-- [x] Initial launch and recovery share the same adapter.
-- [x] Durable worker task remains the original unmodified task.
-- [x] Validation/security/error-handling/accessibility/user requirements cannot be simplified away.
+- [x] `SessionStart`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`.
+- [x] Direct argv hook execution with bounded cwd/time/output and restricted environment.
+- [x] Hook failures are best-effort and never become authorization.
+- [x] Ponytail worker integration remains an instruction adapter rather than an authorization layer.
 
 Final M4 CI: `34984722276`.
 
 ### M5 - Extensions
 
-#### M5.1 - Agent Skills foundation
+- [x] Agent Skills discovery with global/project roots and project precedence.
+- [x] Managed local/Git skill install/update/remove with provenance.
+- [x] Progressive skill activation with bounded catalog/body sizes.
+- [x] Bounded resource reads from references/templates/assets; scripts never auto-run.
+- [x] Static external-skill security scan and trust classification.
+- [x] External MCP plugin registry/client/lifecycle with HTTPS/loopback constraints.
+- [x] Plugin `skillSources` integrated through the normal Skill lifecycle.
+- [x] Plugins remain main-agent only and do not enlarge Worker capability/tool registration.
 
-- [x] Dependency-free `SKILL.md` metadata parser.
-- [x] Global `<stateDir>/skills/` and project `<project>/.agents/skills/` roots with project-over-global precedence.
-- [x] Bounded recursive discovery (depth 4, 256 directories per root) and deterministic collision diagnostics.
-- [x] Discovery stops below a valid skill root so support directories do not become accidental skills.
-- [x] Canonical root checks and symlink rejection for skill roots/directories/`SKILL.md`.
-- [x] `SKILL.md` capped at 256 KiB; common VCS/dependency/cache directories skipped.
-- [x] Registry stores metadata only; full skill content loads on demand.
-- [x] Discovery never executes skill scripts or package-manager instructions.
+Representative CI: `34993848469`, `34995875346`, `34998597354`, `35011189776`, `35013285118`, `35014499804`.
 
-Implementation commits: `3126c177`, `e9abe262`, `7a85f7f2`, `925804a9`, `1536944e`, `2cfe3377`, `1b0784dc`, `1465cca5`.
+## Post-M5 stabilization completed
 
-Final M5.1 CI: `34993848469`.
+### Hard Worker MCP identity/catalog boundary
 
-#### M5.2 - Skill management tools
+- [x] Main custom app remains on `/mcp`.
+- [x] Worker custom app uses `/mcp/worker`.
+- [x] Worker catalog is exactly `worker_finish` plus `worker_*` mirrors derived from `WORKER_CORE_TOOL_NAMES`.
+- [x] Worker endpoint excludes normal main/plugin/Skill/Agent Manager/Computer Use tools.
+- [x] OAuth audiences and MCP sessions are role-bound; cross-route replay is rejected.
 
-- [x] Added fixed MCP tools: `skill_list`, `skill_view`, `skill_install`, `skill_update`, `skill_remove`.
-- [x] `skill_list` exposes lightweight metadata only; `skill_view` loads one full `SKILL.md` on demand.
-- [x] Added managed local-directory installs restricted to canonical paths inside the configured workspace.
-- [x] Added HTTPS Git installs staged in a temporary clone with terminal prompts disabled and optional explicit ref checkout.
-- [x] Git installs record the resolved commit before exporting a snapshot into managed skill storage.
-- [x] Multi-skill repositories require an explicit `skillName`; direct single-skill roots are supported.
-- [x] Added project/global target scopes; project-scoped mutation reuses the existing active-project write lease.
-- [x] Managed provenance is stored under `<skill>/.chatgpt2codex/source.json` with source/ref/commit/install/update metadata.
-- [x] Updates/removals operate only on runtime-managed installs; manual/project-authored skills are never overwritten or deleted.
-- [x] Snapshot copying rejects symlinks/special entries, omits VCS metadata, and is bounded to 2048 files / 32 MiB.
-- [x] No install/list/view/update path executes skill scripts or package-manager instructions.
-- [x] Added local lifecycle, project-scope, multiple-skill, outside-workspace, credential-URL, unmanaged-skill, and MCP progressive-disclosure coverage.
-- [x] Agent Skills tests are included in the Ubuntu/Windows focused CI set; macOS continues to run the full suite.
+Implementation/test HEAD `87f497f0`; CI `35017393064` green.
 
-Representative implementation commits: `ab7183a0`, `ddf742ea`, `5df8f883`, `46bdfb71`, `f5d46268`, `167081ab`, `9fa2510d`, `5567e71b`, `bdcf1b00`.
+### Browser Worker app selection stabilization
 
-Final M5.2 code CI: `34995875346` (Ubuntu, macOS, Windows all passed).
+- [x] Subtitle-aware app-row matching.
+- [x] Real inline selected-app entity detection inside the composer.
+- [x] Current role-less `.popover .__menu-item` picker support.
+- [x] Narrow stale plain-text Worker-app mention cleanup.
+- [x] Fail-closed behavior when the dedicated Worker app is unavailable.
 
-#### M5.3 - Skill activation
+Relevant commits: `415b8e3`, `5c886bb`, `6179841e`, `f081c065`, `95375f7`, `2f00ae9`, `878aa3d`, `5b16988d`, `62844fa6`.
 
-- [x] Added persistent runtime-owned skill activation state with independent global and active-project selection layers.
-- [x] Added `skill_activate` and `skill_deactivate`; activation returns the selected bounded `SKILL.md` to the main ChatGPT agent immediately.
-- [x] `skill_list` now exposes a bounded catalog with active-state metadata instead of exposing every skill body.
-- [x] Catalog limits: 32 entries, approximately 6,000 metadata characters total, and 500 description characters per entry.
-- [x] Effective activation is deterministic and capped at 3 skill names, 8,000 characters per `SKILL.md`, and 24,000 activated instruction characters combined.
-- [x] Project-over-global package precedence is re-applied when activated instructions are loaded.
-- [x] Activated instructions are appended only at browser-worker launch/recovery time; the durable worker task is never rewritten.
-- [x] Initial launch and recovery use the same activation adapter and re-read current activation state.
-- [x] Missing/stale optional activation content is skipped rather than fabricating durable worker failure.
-- [x] Skill activation does not alter worker capability tokens, worker tool allowlists, Computer Use access, or external plugin access.
-- [x] Added activation-state, precedence, stale-entry, main-agent lifecycle, oversized-skill, initial-worker, and recovery-worker coverage.
+Stale-draft regression CI `35051793885` green. Live clean initial Worker-app selection was proven after manually clearing the earlier stale diagnostic draft; do not claim that the automatic stale-draft branch itself was separately live-smoked.
 
-Representative implementation commits: `5de3de2e`, `208e8bc5`, `aa435211`, `dfa469af`, `a0207c9b`, `59e37eb6`.
+### Connected Worker-app initial completion path
 
-Final M5.3 code CI: `34998597354` (Ubuntu, macOS, Windows all passed).
+- [x] Dedicated Worker app completed OAuth and exposes only the worker catalog.
+- [x] Fresh initial-selection worker `wrk_777c1c14-8f66-462a-a95c-774db8f05c6b` transitioned to `running` through the Worker app.
+- [x] Same worker confirmed README heading `# c2c-smoke`, made no file changes, called `worker_finish`, produced an `agent_wait` completion event, and returned the durable result through `agent_result`.
 
-#### M5.4 - Skill resources and security
+### Control-preserving Worker orchestration
 
-- [x] Added `skill_resource_read` for bounded non-executable reads from `references/`, `templates/`, and `assets/` only.
-- [x] Resource paths reject absolute/traversal paths and symlink escapes; text reads are bounded and binary resources are returned only as bounded base64.
-- [x] `scripts/` remains outside the resource-read allowlist and no skill script runner was introduced.
-- [x] Added `skill_security_status` with provenance, trust classification (`unmanaged`, `managed-local`, `external-git`), and static-scan metadata without returning the instruction body.
-- [x] External Git skill install/update staging is scanned before the prepared snapshot is placed into managed storage.
-- [x] External skill activation is blocked before activation state is persisted when the static scan reports blocking findings.
-- [x] Existing activated external skills are re-checked at browser-worker launch/recovery and skipped rather than injected when validation fails.
-- [x] `skill_list`, `skill_view`, and activation flows surface trust/provenance metadata; unsafe external `skill_view` content is not exposed for instruction use.
-- [x] Static checks cover obvious higher-priority instruction override, persistence/agent-config modification, broad destructive commands, destructive Git warnings, package-script execution instructions, and explicit data-exfiltration language.
-- [x] Added focused resource/security/MCP/external-activation regressions and included them in cross-platform CI.
+- [x] Added dedicated `worker` lease capability.
+- [x] `control = read + control + worker`.
+- [x] `full-write = read + verify + write + image + remote + worker`.
+- [x] `control` still denies parent direct write/verify/image/remote.
+- [x] `full-write` still denies desktop control.
+- [x] `agent_spawn`, `agent_launch`, and Worker Project route mutations require `worker` instead of generic `write`.
+- [x] Worker edits remain scoped to opaque `workerToken` + isolated worktree.
 
-Representative implementation commits: `88ac2517`, `e2fbed65`, `54cd0ac1`, `b01815ef`, `6b7801f7`, `79c17833`, `43953177`, `7587094e`, `1300813d`, `58595ae8`, `ef60f445`, `d640350a`, `61113ab6`.
+Implementation: `9fd2a6b`, `6d7ce6f`, `6fe7f5c`, `f32ad00`, `de6926d`; tests `b303e47`, `2f9ad59`, `2537462`.
+CI `35053101356` green across Ubuntu/macOS/Windows including Windows helper/build jobs.
 
-Final M5.4 code CI: `35002217812` (Ubuntu, macOS, Windows all passed, including Windows native/UIA/activity-indicator and launcher build coverage).
+- [x] Live VMware smoke kept the parent on `control` for `agent_spawn -> agent_launch -> agent_wait -> agent_result` without switching to `full-write`; README `# c2c-smoke`, no project changes.
 
-#### M5.5 - External MCP plugins
+### True running-worker browser recovery — live complete
 
-- [x] Added runtime-owned versioned `plugins.json` with a hard cap of 16 configured plugins.
-- [x] Added local-only `plugin_register`, `plugin_set_enabled`, and `plugin_remove`; remote ChatGPT sessions cannot add or arm new network endpoints.
-- [x] Added read-only `plugin_list`; registration is disabled by default and listing does not make network calls.
-- [x] Plugin authentication headers store environment-variable names only; credential values are resolved in memory and are never persisted in plugin configuration.
-- [x] Endpoint validation allows HTTPS and loopback HTTP only and rejects embedded URL credentials, query strings, and fragments.
-- [x] Added bounded on-demand `plugin_discover` using the MCP Streamable HTTP client with enabled-only connections, timeouts, schema/catalog limits, and per-plugin error isolation.
-- [x] Added fixed `plugin_call` proxy instead of dynamically registering external schemas into Core; calls require an explicit plugin id and exact remote tool name.
-- [x] Plugin call arguments/results are bounded and plugin failures remain local to the invocation.
-- [x] Worker-prefixed plugin inheritance remains disabled: worker mirrors still come only from `WORKER_CORE_TOOL_NAMES`, and no `worker_plugin_*` proxy is registered.
-- [x] Added optional explicit plugin `skillSources` declarations for HTTPS Git sources; declarations are inert and never install/activate automatically.
-- [x] Plugin-associated skills continue through the normal `skill_install` path and therefore reuse M5.1-M5.4 provenance, scanning, activation, resource, and script-disable boundaries.
-- [x] Added cross-platform plugin registry, discovery, invocation, failure-isolation, and skill-source regression coverage.
+- [x] Spawned/launched recovery worker `wrk_7270a415-1519-4f9e-905c-5d221c63266a` and left durable state `running`.
+- [x] Manually closed only its Worker browser tab.
+- [x] `agent_status` reconciled durable `running` + browser `failed`, `recoverable=true`, attempt `1`.
+- [x] Re-launched the same workerId; response reported `recovered=true`, browser attempt `2`.
+- [x] Worker reached durable `completed` without completion fallback; browser became `stopped`.
+- [x] Final `agent_result` confirmed README heading `# c2c-smoke`, marker cleanup, no commit/push, and no remaining issues.
 
-Representative implementation commits: `e3ca6afc`, `f578645d`, `62ee8fd9`, `7558bde5`, `a84fb368`, `fb8c3a28`, `cb524aff`, `36804fc6`, `6d45b0f4`, `41d0b826`, `318900e4`, `ada4f3fa`.
+This live smoke proves the actual `running -> target loss -> reconcile -> same-worker recovery -> completed` path rather than only the initial launch/retry path.
 
-Final M5.5 code CI: `35007895907` (Ubuntu, macOS, Windows all passed, including Windows native/UIA/activity-indicator and launcher build coverage).
+### Rolling local control authorization — code/CI complete
 
-## Planned next
+Goal: the user should not need to notice or manually refresh the short control lease TTL during ordinary use after locally authorizing Computer Use once.
 
-The milestone plan in `docs/CUSTOM-RUNTIME-PLAN.md` ends at M5. No new feature milestone has been added implicitly.
+- [x] Added reusable rolling lease-window helper in `src/workspace/project-select.ts` while leaving generic `requireLease()` expiry semantics intact.
+- [x] Added durable `controlLease` to `sessions.json` as a separate local-control authorization lane.
+- [x] A locally granted active control lease is promoted into the durable control lane automatically.
+- [x] Older sessions containing only an active control lease are migrated in memory so upgrades do not immediately require a new local arm.
+- [x] Normal project preset changes preserve the durable control authorization, including switching the active project lease to `full-write`.
+- [x] `requireProjectLease()` uses the normal active lease first, then falls back to durable local control only for `read`, `control`, and `worker`.
+- [x] Expired durable control authorization transparently renews and emits `control.lease.renewed`.
+- [x] The durable control lane never grants `write`, `verify`, `image`, or `remote`.
+- [x] Explicit empty-session reset clears the durable local grant.
+- [x] Remote `/mcp` still cannot mint `preset=control`; the existing remote guard remains intact.
+- [x] Renewal never clears the desktop-control kill switch; a fresh local grant is still required after a kill.
+- [x] Added tests for renewal, backward migration, preservation across preset changes, active `full-write` + durable `control` coexistence, and non-control expiry remaining `LEASE_REQUIRED`.
 
-Post-roadmap work should therefore be stabilization and real integration validation rather than widening scope automatically:
+Implementation/test sequence: `04b4809`, `7e2e5fc`, `34d6968`, `e927e2b`, `58bb0aa`, `fa31065`, `8222d74`, `0aa28b3`, final narrowing fix `8fab58a`.
 
-- [x] Run one live external MCP smoke test against a deliberately configured endpoint: local registration -> enable -> discovery -> explicit `plugin_call` -> disable/remove.
-  - Verified by loopback Streamable HTTP MCP integration through the actual Core plugin tool handlers in commit `5fbc010b`; CI `35011189776` passed on Ubuntu, macOS, and Windows.
-- [x] Run a declared plugin skill-source smoke test through the existing `skill_install` / `skill_activate` path.
-  - Verified in commit `c99bee63`; CI `35013285118` passed on Ubuntu, macOS, and Windows.
-  - The test registers an inert plugin `skillSources` declaration, confirms no install/activation occurs automatically, then explicitly routes the returned declaration through the normal `skill_install` path.
-  - A test-only Git URL rewrite maps the declared HTTPS source to a temporary local repository, so the production Git clone/install path, resolved-commit provenance, `external-git` trust classification, static security scan, and `skill_activate` are all exercised deterministically without depending on a public Git service.
-  - A marker script inside the fixture remains unexecuted across registration, install, security inspection, and activation.
-- [x] Validate plugin configuration against the browser-worker capability/tool-registration path.
-  - Verified in `f849dff0`; CI `35014499804` passed on Ubuntu, macOS, and Windows.
-  - Configuring/enabling a plugin does not add any `worker_plugin_*` tool. Worker mirrors remain exactly derived from `WORKER_CORE_TOOL_NAMES`.
-  - `dispatchWorkerCoreTool()` rejects `plugin_list`, `plugin_discover`, and `plugin_call` before worker capability use, so the worker capability itself cannot authorize plugin access.
-  - This validation exposed the original shared remote catalog gap and motivated the dedicated worker transport.
-- [x] Add a hard browser-worker MCP identity/catalog boundary while preserving main-agent plugin access.
-  - Implemented a worker-only MCP server factory and dedicated `/mcp/worker` resource while keeping the normal main catalog on `/mcp`.
-  - The worker catalog is exactly `worker_finish` plus `worker_*` mirrors derived from `WORKER_CORE_TOOL_NAMES`; unprefixed plugin/main tools are not registered on that transport.
-  - Main and worker OAuth resource audiences are exact-matched at the HTTP boundary, and tracked MCP sessions are role-bound so tokens/session IDs cannot be replayed across routes.
-  - The existing opaque worker capability remains the authority for each worker operation; the worker endpoint only narrows catalog exposure.
-  - Real OAuth authorization-code + PKCE and Streamable HTTP MCP clients verify main plugin availability, worker plugin denial, worker protected-resource metadata, and cross-audience rejection in `src/server/worker-mcp-isolation.test.ts`.
-  - Implementation/test HEAD `87f497f0`; CI `35017393064` passed on Ubuntu, macOS, and Windows.
-- [x] Route browser-worker task messages through a dedicated ChatGPT worker custom app backed by `/mcp/worker`.
-  - ChatGPT app selection is message-scoped, so the Chrome/CDP driver types `@ChatGPT To Codex Worker`, selects the exact app from ChatGPT's app picker, and then inserts/submits the task bootstrap.
-  - The worker app name defaults to `ChatGPT To Codex Worker` and can be overridden with `CHATGPT2CODEX_WORKER_APP_NAME` when the installed custom app uses another exact display name.
-  - If the worker app cannot be found, launch fails closed before task submission; it never silently falls back to the main `/mcp` app.
-  - Initial launch and recovery share the same `BrowserWorkerDriver`, so both use the same worker-app routing rule.
-  - Initial implementation/test commits `236994e7`, `8b0b8b07`, `1a50605f`; CI `35022343381` passed on Ubuntu, macOS, and Windows.
-  - Live UI stabilization added subtitle-aware row matching (`415b8e3`, `5c886bb`), selected-state recovery (`8ccb755`, `1022fc1`, `c956c3d`), actual inline-app DOM detection (`6179841e`, `f081c065`), role-less picker support (`95375f7`, `2f00ae9`, `878aa3d`), and exact stale-draft recovery (`5b16988d`, `62844fa6`).
-  - Stale-draft regression CI `35051793885` passed on Ubuntu, macOS, and Windows.
-  - Setup/live-smoke procedure is documented in `docs/CHATGPT-WORKER-APP-SETUP.md`.
-- [x] Live-validate the real connected ChatGPT worker custom app in the user's dedicated worker Chrome profile, including a clean initial picker and durable result propagation.
-  - `ChatGPT To Codex Worker` is connected to the same public origin at `/mcp/worker` and completed OAuth.
-  - Manual inspection in the dedicated worker profile confirmed the worker-only tool catalog and app visibility in the `@` picker.
-  - Earlier validation with pending worker `wrk_3fb5f6f7-43a7-47e5-9da1-5db1a90b086b` proved a reused/preselected-state path through `worker_finish`, but was not treated as sufficient evidence for a clean initial picker.
-  - Fresh worker `wrk_777c1c14-8f66-462a-a95c-774db8f05c6b` exposed current role-less picker markup and a stale plain-text mention draft. Diagnostics and regressions were added without weakening fail-closed routing.
-  - After the stale diagnostic draft was manually cleared, the same pending worker was reused: `agent_launch` selected the Worker app from a clean standalone composer and transitioned it to `running`; no replacement worker was created.
-  - That worker read `README.md`, confirmed the first heading `# c2c-smoke`, made no file changes/staging/commit/push, and completed through `worker_finish`.
-  - Parent-side `agent_wait(timeoutMs=60000)` received the completion event, then `agent_result` returned the durable final result. This validates launch -> running -> worker_finish -> completion event -> durable result retrieval end-to-end.
-  - The primary connected worker-app path is therefore proven from clean initial selection through parent-side completion retrieval.
-- [x] Split worker orchestration from parent project-write authority so a locally armed `control` lease can keep Computer Use while still preparing/launching isolated workers.
-  - Added the `worker` lease capability in `src/workspace/lease-guard.ts`.
-  - `control` now grants `read + control + worker` but still denies direct `write`, `verify`, `image`, and `remote`.
-  - `full-write` retains `read + verify + write + image + remote` and additionally grants `worker`; it still does not grant desktop `control`.
-  - `read-only`, `tests-only`, and `image-only` do not grant `worker`.
-  - `agent_spawn`, `agent_launch`, and worker Project route set/clear now require `worker` instead of generic `write`.
-  - Actual repository edits remain worker-scoped behind `workerToken` and the runtime-managed isolated worktree; no all-capabilities preset was introduced.
-  - Implementation commits: `9fd2a6b`, `6d7ce6f`, `6fe7f5c`, `f32ad00`, `de6926d`; tests `b303e47`, `2f9ad59`, `2537462`.
-  - CI `35053101356` passed on Ubuntu, macOS, and Windows, including Windows agent/native-input/UIA/activity-indicator/build/launcher coverage.
-- [x] Update/rebuild/restart the live VM so the running runtime includes both the automatic stale-draft recovery and worker-orchestration lease split.
-- [x] Live-smoke the new control-preserving path: with the parent lease kept on `control`, `agent_spawn -> agent_launch -> agent_wait(timeoutMs=60000) -> agent_result` completed end-to-end without any `full-write` reselection; the worker confirmed README heading `# c2c-smoke` and made no file changes.
-- [ ] Optionally live-smoke a true running-worker browser recovery (`running` -> lost/stopped target -> recover same worker) through the dedicated worker app.
-- [ ] Keep CI green and fix integration defects discovered by stabilization before defining any new milestone.
+Code CI `35090954861` on `8fab58afd2828d11d8898697bc828dda4ed694da`: **green on macOS, Ubuntu, and Windows**, including Windows Agent tests, native input helper, UIA helper, activity indicator helper, build, and launcher build.
+
+## Current stabilization queue
+
+- [ ] Deploy/update/rebuild/restart the live VMware runtime with the rolling-control changes and perform a small live confirmation. `start-chatgpt.ps1` does not rebuild when `dist/cli.js` already exists, so run `npm run build` after pulling source before restart.
+- [ ] Improve terminal Worker browser-status UX so a completed durable worker does not misleadingly show `recoverable=true` only because browser state is `stopped`.
+- [ ] Harden post-picker Worker-app selection: after candidate click, explicitly verify the selected inline Worker-app entity before clearing the exact typed query and returning success.
+- [ ] Improve direct `start-chatgpt.ps1` named-tunnel/public-hostname reuse UX. Do not assume the user's hostname storage mechanism; inspect the live launch path first.
+- [ ] Keep CI green and fix integration defects before defining any new milestone.
 
 ## Update policy
 
-Update this file whenever a unit is completed, blocked, materially redesigned, or moved in scope. Record verification and relevant commits before beginning the next unit.
-
-Keep `docs/SESSION-HANDOFF.md` synchronized whenever a milestone/stabilization unit completes, the active unit or architectural direction changes, or a major live validation changes the next session's operational context.
+Update this file whenever a unit is completed, blocked, materially redesigned, or moved in scope. Keep `docs/SESSION-HANDOFF.md` synchronized when a stabilization unit completes or major live validation changes the next session's context.
