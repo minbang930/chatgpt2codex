@@ -196,7 +196,7 @@ CI `35093400146`: **green on macOS, Ubuntu, and Windows**.
 Implementation: `7c3bf2c4`; tests: `ae3b5b8b`, `9d036fcf`, `02ab05c3`.
 CI `35095515554`: **green on macOS, Ubuntu, and Windows**, including Windows Agent/native input/UIA/activity indicator/build/launcher jobs.
 
-### Direct Windows named-tunnel hostname reuse — code/CI complete
+### Direct Windows named-tunnel hostname reuse — code/CI and live complete
 
 - [x] `start-chatgpt.ps1` now understands both persistent `PUBLIC_HOSTNAME` and `CHATGPT2CODEX_PUBLIC_HOSTNAME`, not only the inherited process environment.
 - [x] When web exposure/named-tunnel use is already requested and no explicit/environment hostname exists, the script reuses the hostname saved by the current native launcher in `%LOCALAPPDATA%\ChatGPT To Codex\settings.ini`.
@@ -204,16 +204,17 @@ CI `35095515554`: **green on macOS, Ubuntu, and Windows**, including Windows Age
 - [x] Saved UI settings do not enable public exposure by themselves; they are consulted only after `-ExposeWeb`, `CHATGPT2CODEX_EXPOSE_WEB=1`, or named-tunnel credentials/name already request a tunnel.
 - [x] Host values are normalized from full URLs to hostnames before tunnel/public-URL construction.
 - [x] The script never copies or persists Cloudflare tunnel tokens; existing token/name lookup and security boundaries remain unchanged.
-- [x] Added Windows CI coverage for explicit/env precedence, current launcher Base64 settings format, legacy fallback, direct-script wiring, and PowerShell parse validity.
+- [x] Direct launch with only `-ActiveProjectRoot` now uses that project as the workspace when `-Workspace` was not explicitly supplied, avoiding a startup registry mismatch.
+- [x] Local health waiting now detects early server exit and includes the server stderr tail instead of hiding the root cause behind a generic timeout.
+- [x] Added Windows CI coverage for hostname resolution, direct-script wiring, startup workspace resolution, early server-exit diagnostics, and PowerShell parse validity.
+- [x] Live VMware smoke passed with no manual `-PublicHostname`: saved hostname reuse was reported, the active project was adopted as workspace, and the script reached `ChatGPT To Codex is ready`.
 
-Implementation sequence: `04b18cde`, `9d141c4f`, `8679301f`, parser/test fixes `0aa70eab`, `946dcc8f`.
-CI `35102639492` on `946dcc8f5acd12fa813a8890ad06987774b64159`: **green on macOS, Ubuntu, and Windows**, including the new Windows public-hostname resolver test plus Windows Agent/native input/UIA/activity indicator/build/launcher jobs.
-
-Live direct-script validation on the user's VMware runtime is still pending. The intended smoke is the previously failing `start-chatgpt.ps1 -ActiveProjectRoot ... -ActiveProjectPreset control` path without manually supplying `-PublicHostname`.
+Hostname reuse implementation sequence: `04b18cde`, `9d141c4f`, `8679301f`, parser/test fixes `0aa70eab`, `946dcc8f`.
+Startup-context/diagnostic follow-up: `1a661d77`, `4ff97762`, `f52cad27`, cleanup `c4672019`.
+CI `35111157222` on `c4672019d2ddb482924b341de1969f6613aeb922`: **green on macOS, Ubuntu, and Windows**, including the Windows hostname resolver, startup-context test, Agent/native input/UIA/activity indicator/build/launcher jobs.
 
 ## Current stabilization queue
 
-- [ ] Live-smoke direct `start-chatgpt.ps1` named-tunnel hostname reuse on VMware without manually supplying `-PublicHostname`.
 - [ ] Naturally cross the original 30-minute local-control TTL during normal use and confirm no `LEASE_REQUIRED` regression. Code/CI already covers renewal; no forced wait is required.
 - [ ] Keep CI green and fix integration defects before defining any new milestone.
 
