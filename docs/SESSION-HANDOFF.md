@@ -19,8 +19,8 @@ The only prior stabilization item still open is a non-blocking natural-use obser
 
 1. **M6.1 - Execution settings foundation — complete**
 2. **M6.2 - Durable per-worker execution intent — complete**
-3. **M6.3 - ChatGPT Web model/reasoning set-and-verify adapter — active**
-4. **M6.4 - Status/diagnostics**
+3. **M6.3 - ChatGPT Web model/reasoning set-and-verify adapter — code/CI complete**
+4. **M6.4 - Status/diagnostics — active**
 5. **M6.5 - Live validation**
 
 Design/source of truth: `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
@@ -71,17 +71,9 @@ The opaque `workerToken` remains the authority for a specific worker/worktree. W
 
 ### Browser worker routing/recovery
 
-Current proven path:
+The established Worker-app routing remains fail closed: the dedicated app must materialize as the selected entity before bootstrap text is submitted. True target-loss recovery has also been live-proven: durable `running` worker remained authoritative, lost target reconciled to browser `failed`, same workerId relaunched in attempt 2, and normal `worker_finish` completion remained durable.
 
-1. open mapped ChatGPT Project or standalone ChatGPT;
-2. wait for composer;
-3. clear only the exact stale Worker-app draft case;
-4. type/select `@ChatGPT To Codex Worker`;
-5. verify the selected inline Worker-app entity;
-6. append bootstrap + scoped capability;
-7. submit only after verified Worker-app selection.
-
-True target-loss recovery has been live-proven: durable `running` worker remained authoritative, lost target reconciled to browser `failed`, same workerId relaunched in attempt 2, and normal `worker_finish` completion remained durable.
+M6.3 inserts execution verification before this existing Worker-app flow when a worker has explicit model/reasoning intent.
 
 ### Rolling local control authorization
 
@@ -108,7 +100,7 @@ reasoningEffort = instant | medium | high | extra-high
 fallbackPolicy  = fail-closed | allow-current
 ```
 
-`model` is a normalized string target; the browser adapter owns translation to the current ChatGPT UI.
+`model` remains a normalized string target. The browser adapter owns matching it to the current ChatGPT execution picker and must verify the resulting state before submission.
 
 ## M6.1 completed contract
 
@@ -118,94 +110,93 @@ fallbackPolicy  = fail-closed | allow-current
 <stateDir>/agents/worker-execution-settings.json
 ```
 
-Main `/mcp` exposes:
-
-```text
-worker_execution_settings_get
-worker_execution_settings_set
-worker_execution_settings_clear
-```
-
-Mutations reuse the existing `worker` capability. `/mcp/worker` does not expose these tools. Missing settings preserve legacy unmanaged/current-ChatGPT behavior.
+Main `/mcp` exposes `worker_execution_settings_get`, `worker_execution_settings_set`, and `worker_execution_settings_clear`. Mutations reuse the existing `worker` capability. `/mcp/worker` does not expose these tools. Missing settings preserve legacy unmanaged/current-ChatGPT behavior.
 
 Implementation sequence: `f3a763f0`, `418495d1`, `19a4ff65`, `451dab05`, `ff568723`, `fdc9c6af`.
 Full CI `35125045144` on `fdc9c6af07821870dfd2ca02b83563ea696be590` passed macOS/Ubuntu/Windows.
 
 ## M6.2 completed contract
 
-M6.2 resolves execution intent exactly once at worker creation and stores it with the durable worker.
-
-### Spawn surface
-
-`agent_spawn` now accepts optional:
-
-```ts
-execution?: {
-  model?: string;
-  reasoningEffort?: "instant" | "medium" | "high" | "extra-high";
-  fallbackPolicy?: "fail-closed" | "allow-current";
-}
-```
-
-Existing callers need not supply it.
-
-### Durable record
-
-`WorkerRecord` now has optional:
-
-```ts
-executionIntent?: WorkerExecutionIntent
-```
-
-The field is optional for backward compatibility. Workers created when no global/project/per-worker execution preference exists omit it entirely and continue legacy behavior.
-
-`spawnAgent()` loads the current global/project defaults, combines the optional worker override through `resolveWorkerExecutionIntent()`, and passes the resolved intent into `createWorker()` **before** browser launch/worktree execution begins.
-
-### Immutability/recovery semantics
-
-Once the worker is created, mutable defaults are no longer consulted for that worker. State transitions preserve `executionIntent` through record spreading. Initial browser launch and `recoverRunningBrowserWorker()` both load the same durable worker record, so a later global/project settings change cannot silently alter a running/recoverable worker's stored intent.
-
-M6.2 deliberately does not yet apply this intent to ChatGPT Web. The current browser driver still behaves exactly as before; M6.3 is responsible for consuming and verifying the durable intent before bootstrap submission.
-
-### M6.2 tests/CI
-
-Regression coverage proves:
-
-- worker/project/global per-field resolution is persisted before launch;
-- changing global/project defaults after spawn does not mutate the worker;
-- the same intent survives initial launch, target loss, and same-worker recovery;
-- legacy/no-settings workers remain readable without execution metadata;
-- MCP `agent_spawn.execution` wins over lower-precedence defaults.
+`agent_spawn` accepts optional execution overrides. `spawnAgent()` resolves worker/project/global settings exactly once and stores optional `WorkerRecord.executionIntent` before browser launch. Legacy/no-settings workers omit that field. Later changes to mutable defaults do not alter an existing worker, and both initial launch and same-worker recovery load the same durable intent.
 
 Implementation/test sequence: `b234c58f`, `ff13722c`, `9e5de414`, `da5a10ca`, `c3017969`, `ecb1f076`.
-Full CI `35129481274` on code HEAD `ecb1f0764f6fd4080012e202304ea09c4d2a2a7a`: **green on macOS, Ubuntu, and Windows**.
+Full CI `35129481274` on `ecb1f0764f6fd4080012e202304ea09c4d2a2a7a`: **green on macOS, Ubuntu, and Windows**.
+
+## M6.3 completed code contract
+
+M6.3 adds a narrow set-and-verify browser adapter at `src/agents/chrome-execution.ts` and wires the durable intent into both initial browser launch and recovery.
+
+### Launch ordering
+
+For workers with explicit model/reasoning intent, current launch order is:
+
+```text
+open ChatGPT / wait for composer
+ -> read durable executionIntent from BrowserWorkerLaunchInput
+ -> open bounded execution picker
+ -> apply model/reasoning interaction if needed
+ -> re-observe structural state and verify
+ -> only then select/verify ChatGPT To Codex Worker
+ -> insert bootstrap + worker capability
+ -> submit
+```
+
+No explicit execution intent means the adapter returns immediately without touching execution controls, preserving legacy behavior.
+
+### Current structural adapter
+
+The adapter is intentionally bounded near the CDP layer. Based on current public ChatGPT Web implementation evidence available during M6.3, it supports:
+
+- the existing model-switcher test-id when present;
+- the newer neutral composer-pill/unified intelligence-picker structure when that test-id is absent;
+- exact normalized model-row matching with unique-match requirements;
+- structural reasoning observation through `[data-model-reasoning-effort-slider] [role="slider"]` and its ARIA min/max/current value;
+- runtime effort mapping to the first four structural positions: `instant`, `medium`, `high`, `extra-high`;
+- native CDP pointer events followed by fresh observation rather than accepting a synthetic/picker click as success.
+
+This is **not yet a live VMware/profile compatibility claim** for every visible model label. The exact model names/account availability in the user's dedicated Worker Chrome profile still belong to M6.5 live validation. If the live UI differs, extend only the browser adapter without weakening fail-closed verification.
+
+### Fallback policy
+
+- `fail-closed`: unsupported, ambiguous, missing, or non-materializing requested execution state aborts before Worker-app selection/bootstrap.
+- `allow-current`: the adapter may continue unverified only because that permission was already persisted in the durable worker intent.
+
+### M6.3 tests/CI
+
+Regression coverage includes:
+
+- model + reasoning successful set-and-verify;
+- unavailable/ambiguous model targets;
+- false-positive model interaction that never materializes selected state;
+- reasoning pointer interaction that does not update structural ARIA state;
+- unsupported `extra-high` when the profile exposes too few slider positions;
+- deliberate `allow-current` behavior;
+- unmanaged/no-explicit-setting compatibility;
+- durable intent reaching both initial launch and recovery;
+- execution verification happening before the first Worker-app/bootstrap `Input.insertText`;
+- fail-closed execution failure producing no Worker-app mention, bootstrap insertion, or Enter submission.
+
+Implementation/test sequence: `d5741d07`, `2d15d532`, `7e0cedfd`, `c562e130`, `8960867e`, `43c6afae`, `dd423f59`, final type-narrowing fix `dcc73aba`.
+Full CI `35131605738` on code HEAD `dcc73abac90cc925137df42a7a03139bcd85ec80`: **green on macOS, Ubuntu, and Windows**, including Agent tests, Windows native input/UIA/activity-indicator/hostname/startup-context checks, build, and Windows launcher build.
 
 ## Active unit
 
-**M6.3 - ChatGPT Web model/reasoning set-and-verify adapter.**
+**M6.4 - Status and diagnostics.**
 
-Before finalizing selectors or label mapping, inspect the **current live ChatGPT model/reasoning UI in the dedicated worker Chrome profile**. Do not guess from old layouts or hard-code model strings based only on product knowledge.
+Implement only this unit next:
 
-M6.3 scope:
+- expose the durable requested/resolved/source execution intent through existing worker status diagnostics;
+- keep browser-attempt observed/verified state separate from durable intent;
+- record concise execution verification failure information on the browser attempt without turning browser telemetry into durable worker truth;
+- preserve concise output for workers with no explicit execution settings;
+- add success/failure/recovery/terminal-state regressions;
+- do not begin live model/reasoning compatibility claims until M6.5.
 
-- add a narrow browser execution-settings adapter near the CDP layer;
-- observe current model/reasoning state with bounded DOM queries;
-- map stable runtime keys to the live UI discovered during implementation;
-- consume the durable `WorkerRecord.executionIntent` on initial launch and recovery;
-- apply requested changes only when needed;
-- re-observe after interaction and verify requested == observed;
-- explicit `fail-closed` intent must prevent Worker-app selection/bootstrap if verification fails;
-- `allow-current` behavior must be deliberate and tested;
-- false-positive clicks, ambiguous/stale state, unsupported values, and verification failure need fake-CDP regressions;
-- initial launch and recovery must share the same adapter path.
-
-Do not expand worker authority or expose private ChatGPT request/conversation IDs. M6.4, not M6.3, owns the final parent-facing status/diagnostic presentation beyond what is necessary for adapter errors/tests.
-
-Exit criterion: no explicit execution intent can reach bootstrap submission without satisfying its configured verification/fallback policy.
+M6.4 should not widen worker authority, expose private ChatGPT request IDs, or redesign the execution-selection adapter.
 
 ## Runtime/update note
 
-`start-chatgpt.ps1` builds only when `dist/cli.js` is missing. After pulling M6 TypeScript changes on the VM, run `npm run build` before restarting. M6.2 itself does not require a separate live smoke because it does not alter browser UI behavior; M6.3 requires live UI inspection before selectors/labels are finalized.
+`start-chatgpt.ps1` builds only when `dist/cli.js` is missing. After pulling M6 TypeScript changes on the VM, run `npm run build` before restarting. A real dedicated-profile model/reasoning smoke is intentionally deferred to M6.5, after M6.4 gives us stable diagnostics to inspect.
 
 ## Source-of-truth documents
 
@@ -230,6 +221,6 @@ Update this file whenever an M6 unit completes, the active unit changes, an exec
 3. Check actual `dev/custom-runtime` HEAD and latest CI.
 4. Read the current M6/current-queue portion of `docs/CUSTOM-RUNTIME-PROGRESS.md`.
 5. If docs and repo disagree, trust repo and correct the docs.
-6. If they match, implement **M6.3 only**, beginning with live dedicated-worker UI inspection before selector/label implementation.
+6. If they match, implement **M6.4 only** and take it through tests/full CI before M6.5.
 
 A future message consisting only of **`SESSION-HANDOFF.md 읽고 M6 이어서 진행해`** should be enough to resume.
