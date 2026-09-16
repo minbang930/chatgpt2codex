@@ -25,10 +25,14 @@ try {
             -EnvironmentResolver $emptyEnvironment
     ) "explicit hostname normalization"
 
-    $modernValue = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("saved.example.com"))
-    Set-Content -LiteralPath (Join-Path $modernDir "settings.ini") -Encoding UTF8 -Value @(
-        "Port=" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("7979")),
-        "PublicHostname=$modernValue"
+    $modernLines = @(
+        "Port=" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("7979"))
+        "PublicHostname=" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("saved.example.com"))
+    )
+    [IO.File]::WriteAllLines(
+        (Join-Path $modernDir "settings.ini"),
+        $modernLines,
+        [Text.Encoding]::UTF8
     )
 
     Assert-Equal "saved.example.com" (
@@ -38,7 +42,11 @@ try {
             -EnvironmentResolver $emptyEnvironment
     ) "modern launcher settings"
 
-    Set-Content -LiteralPath (Join-Path $legacyDir "settings.json") -Encoding UTF8 -Value '{"PublicHostname":"legacy.example.com"}'
+    [IO.File]::WriteAllText(
+        (Join-Path $legacyDir "settings.json"),
+        '{"PublicHostname":"legacy.example.com"}',
+        [Text.Encoding]::UTF8
+    )
     Assert-Equal "saved.example.com" (
         Resolve-ChatGPT2CodexPublicHostname `
             -LocalAppData $localAppData `
