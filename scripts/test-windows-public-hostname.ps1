@@ -70,6 +70,25 @@ try {
             -EnvironmentResolver $environmentResolver
     ) "environment alias precedence"
 
+    $startScriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) "start-chatgpt.ps1"
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+        $startScriptPath,
+        [ref]$tokens,
+        [ref]$parseErrors
+    )
+    if ($parseErrors.Count -gt 0) {
+        throw "start-chatgpt.ps1 has PowerShell parse errors: $($parseErrors[0].Message)"
+    }
+    $startScriptText = $ast.Extent.Text
+    if ($startScriptText -notmatch 'Resolve-ChatGPT2CodexPublicHostname') {
+        throw "start-chatgpt.ps1 does not wire the saved public-hostname resolver."
+    }
+    if ($startScriptText -notmatch 'CHATGPT2CODEX_PUBLIC_HOSTNAME') {
+        throw "start-chatgpt.ps1 does not honor CHATGPT2CODEX_PUBLIC_HOSTNAME."
+    }
+
     Write-Host "Windows public hostname resolver tests passed."
 } finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
