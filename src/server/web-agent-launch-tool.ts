@@ -8,7 +8,12 @@ import { addToolCallProof } from "./tool-proof.js";
 import { resolveActiveProject } from "../workspace/active.js";
 import { requireProjectLease } from "../workspace/lease-guard.js";
 
-const annotations = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
+const annotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: true,
+} as const;
 
 export function registerWebAgentLaunchTool(
   server: McpServer,
@@ -20,7 +25,7 @@ export function registerWebAgentLaunchTool(
     {
       title: "Launch or recover ChatGPT worker",
       description:
-        "Start a pending worker prepared by agent_spawn, or recover a running worker whose previous browser target was lost/stopped. Returns after bootstrap submission; the worker continues asynchronously.",
+        "Launch an already-prepared pending worker, or recover an existing running worker whose browser target was lost/stopped. This opens a dedicated ChatGPT Web tab and submits the worker task/bootstrap to the connected ChatGPT To Codex Worker app. It does not create a new worker, delete data, or directly edit project files; the launched worker may later edit only its isolated worktree according to its assigned task. Returns after bootstrap submission while the worker continues asynchronously.",
       annotations,
       _meta: {
         securitySchemes: [{ type: "oauth2", scopes: ["chatgpt2codex"] }],
