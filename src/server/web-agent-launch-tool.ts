@@ -25,7 +25,7 @@ export function registerWebAgentLaunchTool(
     {
       title: "Launch or recover ChatGPT worker",
       description:
-        "Launch an already-prepared pending worker, or recover an existing running worker whose browser target was lost/stopped. This opens a dedicated ChatGPT Web tab and submits the worker task/bootstrap to the connected ChatGPT To Codex Worker app. It does not create a new worker, delete data, or directly edit project files; the launched worker may later edit only its isolated worktree according to its assigned task. Returns after bootstrap submission while the worker continues asynchronously.",
+        "Launch an already-prepared pending worker, or recover an existing running worker whose browser target was lost/stopped. Requires worker-orchestration authority, not parent project-write authority. This opens a dedicated ChatGPT Web tab and submits the worker task/bootstrap to the connected ChatGPT To Codex Worker app. It does not create a new worker, delete data, or directly edit project files; the launched worker may later edit only its isolated worktree according to its assigned task. Returns after bootstrap submission while the worker continues asynchronously.",
       annotations,
       _meta: {
         securitySchemes: [{ type: "oauth2", scopes: ["chatgpt2codex"] }],
@@ -42,7 +42,7 @@ export function registerWebAgentLaunchTool(
         if (!active) {
           throw new DomainError(ErrorCode.PROJECT_NOT_SELECTED, "No active project; call project_select first");
         }
-        await requireProjectLease(ctx, active.projectId, "write");
+        await requireProjectLease(ctx, active.projectId, "worker");
         const worker = await getAgentStatus(ctx.stateDir, input.workerId);
         if (worker.projectId !== active.projectId) {
           throw new DomainError(ErrorCode.PERMISSION_DENIED, `Worker ${worker.workerId} belongs to another project`);
