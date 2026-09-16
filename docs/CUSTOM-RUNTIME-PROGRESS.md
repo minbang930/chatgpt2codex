@@ -4,14 +4,15 @@ Implementation status for `dev/custom-runtime`.
 
 ## Current status
 
-Overall phase: **Implementation roadmap complete through M5**
+Overall phase: **M6 - Worker Execution Configuration**
 
-Active unit: **Post-M5 stabilization / integration cleanup**
+Active unit: **M6.2 - Durable per-worker intent**
 
 Primary operational handoff: `docs/SESSION-HANDOFF.md`.
 
 Detailed design documents:
 
+- `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`
 - `docs/WINDOWS-COMPUTER-USE-DESIGN.md`
 - `docs/HOOKS-DESIGN.md`
 - `docs/SKILLS-DESIGN.md`
@@ -213,11 +214,46 @@ Hostname reuse implementation sequence: `04b18cde`, `9d141c4f`, `8679301f`, pars
 Startup-context/diagnostic follow-up: `1a661d77`, `4ff97762`, `f52cad27`, cleanup `c4672019`.
 CI `35111157222` on `c4672019d2ddb482924b341de1969f6613aeb922`: **green on macOS, Ubuntu, and Windows**, including the Windows hostname resolver, startup-context test, Agent/native input/UIA/activity indicator/build/launcher jobs.
 
-## Current stabilization queue
+## M6 - Worker Execution Configuration
 
-- [ ] Naturally cross the original 30-minute local-control TTL during normal use and confirm no `LEASE_REQUIRED` regression. Code/CI already covers renewal; no forced wait is required.
-- [ ] Keep CI green and fix integration defects before defining any new milestone.
+Design/source of truth: `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
+
+### M6.1 - Execution settings foundation — complete
+
+- [x] Added normalized `WorkerExecutionPreference` / `WorkerExecutionIntent` contracts.
+- [x] Initial reasoning keys are `instant | medium | high | extra-high`; model remains a normalized string target owned by the future browser adapter.
+- [x] Added `fallbackPolicy = fail-closed | allow-current` with automatic `fail-closed` when model/reasoning resolves explicitly without a configured policy.
+- [x] Added deterministic per-field precedence `worker > project > global` with source metadata.
+- [x] Added versioned atomic persistence at `<stateDir>/agents/worker-execution-settings.json` for one global default and optional project overrides.
+- [x] Missing settings state preserves the legacy unmanaged/current-ChatGPT behavior.
+- [x] Added main-agent-only `worker_execution_settings_get`, `worker_execution_settings_set`, and `worker_execution_settings_clear`.
+- [x] Scope `set` is replacement semantics; `clear` removes the selected scope.
+- [x] Global/project mutations reuse the existing active project's `worker` capability; no new authorization primitive was added.
+- [x] The new settings tools are not registered on `/mcp/worker`.
+- [x] Existing browser launch/bootstrap code is unchanged in M6.1.
+- [x] Added storage/resolution, invalid-state/value, clearing, authorization, and tool-contract regressions.
+
+Implementation sequence: `f3a763f0`, `418495d1`, `19a4ff65`, `451dab05`, `ff568723`, `fdc9c6af`.
+
+Full CI `35125045144` on code HEAD `fdc9c6af07821870dfd2ca02b83563ea696be590`: **green on macOS, Ubuntu, and Windows**, including typecheck, settings/agent tests, Windows native input/UIA/activity indicator/hostname/startup-context tests, build, and launcher build.
+
+M6.1 exit criterion is satisfied. No ChatGPT model/reasoning picker automation was added.
+
+### M6.2 - Durable per-worker intent — active
+
+- [ ] Extend `agent_spawn` with an optional execution override.
+- [ ] Resolve global/project/per-worker settings at worker creation time.
+- [ ] Persist the resolved execution intent in the durable worker record before browser launch.
+- [ ] Keep older worker records readable.
+- [ ] Prove later global/project setting changes do not change an existing worker's stored intent.
+- [ ] Ensure recovery reads stored intent rather than mutable defaults.
+
+## Current queue
+
+- [ ] Implement M6.2 only, then focused tests + full cross-platform CI + doc/handoff update before M6.3.
+- [ ] Naturally cross the original 30-minute local-control TTL during normal use and confirm no `LEASE_REQUIRED` regression. Code/CI already covers renewal; this remains non-blocking.
+- [ ] Keep existing Worker MCP/app/control isolation green while M6 evolves.
 
 ## Update policy
 
-Update this file whenever a unit is completed, blocked, materially redesigned, or moved in scope. Keep `docs/SESSION-HANDOFF.md` synchronized when a stabilization unit completes or major live validation changes the next session's context.
+Update this file whenever an M6 unit is completed, blocked, materially redesigned, or moved in scope. Keep `docs/SESSION-HANDOFF.md` and `docs/WORKER-EXECUTION-CONFIG-DESIGN.md` synchronized with the active M6 unit.
