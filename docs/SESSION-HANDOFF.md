@@ -133,19 +133,36 @@ Implementation sequence: `04b4809`, `7e2e5fc`, `34d6968`, `e927e2b`, `58bb0aa`, 
 
 CI `35090954861` for code HEAD `8fab58afd2828d11d8898697bc828dda4ed694da` passed on macOS, Ubuntu, and Windows, including Windows agent, native input, UIA, activity indicator, build, and launcher jobs.
 
+Live VMware coexistence smoke after pull/build/restart also passed: the user selected `c2c-smoke` as `full-write`, then captured a Notepad screenshot using the previously granted local control authorization without calling `project_select preset=control` again. This proves the local control lane survives an ordinary active-preset change. The exact 30-minute wall-clock expiry/renewal path is covered in code/CI but has not yet been separately waited out and observed live.
+
 Security meaning: users no longer need to care about the short lease expiry during ordinary use, but ChatGPT still cannot self-elevate into control. Local arming remains the root authorization event, and the kill switch remains authoritative.
+
+### Terminal Worker browser recovery status UX
+
+`agent_status` no longer reports a terminal durable worker as recoverable merely because its browser session is `stopped` or `failed`.
+
+`browser.recoverable` is now true only when both conditions hold:
+
+```text
+durable worker status = running
+AND
+browser status = failed | stopped
+```
+
+A durable `completed`, `failed`, or `cancelled` worker therefore reports `recoverable=false`. The actual running-worker recovery behavior remains unchanged.
+
+Implementation: `63e22692` (`fix: report browser recovery only for running workers`); regression coverage: `3c745d3d` (`test: hide recovery after durable completion`). CI `35093400146` passed on macOS, Ubuntu, and Windows.
 
 ## Active unit
 
-**Post-live-smoke stabilization cleanup.** The primary Worker-app path, control-preserving worker orchestration, true browser-target recovery, and rolling local control authorization are now implemented and validated in code/CI; the browser recovery path is also proven in the live VMware environment.
+**Post-live-smoke stabilization cleanup.** The primary Worker-app path, control-preserving worker orchestration, true browser-target recovery, rolling local control authorization, and terminal recovery-status semantics are now implemented and code/CI validated. Browser recovery and control/full-write coexistence are also proven in the live VMware environment.
 
 Remaining integration cleanup, in practical priority order:
 
-1. Deploy/rebuild/restart the live VM with rolling control authorization and perform a small live confirmation that normal use no longer fails merely because the original control lease TTL elapsed.
-2. Clarify Worker browser status UX so a terminal durable worker does not misleadingly surface `recoverable=true` merely because its browser status is `stopped`.
-3. Harden `selectWorkerApp` so a picker click is followed by an explicit selected-entity verification before clearing the typed app query/returning success.
-4. Improve direct `start-chatgpt.ps1` named-tunnel/public-hostname reuse UX; do not guess the user's existing hostname configuration.
-5. Keep CI green and fix integration defects before defining any new milestone.
+1. Harden `selectWorkerApp` so a picker click is followed by an explicit selected-entity verification before clearing the typed app query/returning success.
+2. Improve direct `start-chatgpt.ps1` named-tunnel/public-hostname reuse UX; do not guess the user's existing hostname configuration.
+3. Let ordinary live use naturally cross the original 30-minute control TTL and confirm no `LEASE_REQUIRED` regression; code/CI already covers renewal, so no forced wait is required.
+4. Keep CI green and fix integration defects before defining any new milestone.
 
 ## Runtime/update note
 
