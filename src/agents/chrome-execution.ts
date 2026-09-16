@@ -367,6 +367,20 @@ function explicitExecutionRequested(intent: WorkerExecutionIntent | undefined): 
   return Boolean(intent?.resolved?.model || intent?.resolved?.reasoningEffort);
 }
 
+function executionDiagnostic(
+  surface: ExecutionSurface | undefined,
+  message: string,
+): WorkerExecutionApplyResult {
+  return {
+    verified: false,
+    ...(surface?.selectedModel ? { observedModel: surface.selectedModel } : {}),
+    ...(effortForSliderValue(surface?.slider)
+      ? { observedReasoningEffort: effortForSliderValue(surface?.slider) }
+      : {}),
+    error: message,
+  };
+}
+
 /**
  * Apply a durable worker execution intent to the current ChatGPT composer before
  * the Worker app is selected or any bootstrap text is inserted. The adapter
@@ -396,21 +410,26 @@ export async function applyWorkerExecutionIntent(
       ...(observedReasoningEffort ? { observedReasoningEffort } : {}),
     };
   } catch (error) {
-    await closeExecutionMenu(connection).catch(() => undefined);
+    const surface = await evaluateValue<ExecutionSurface>(
+      connection,
+      executionSurfaceExpression(),
+    ).catch(() => undefined);
     const message = error instanceof Error ? error.message : String(error);
+    const diagnostic = executionDiagnostic(surface, message);
+    await closeExecutionMenu(connection).catch(() => undefined);
     if (resolved?.fallbackPolicy === "allow-current") {
-      const surface = await evaluateValue<ExecutionSurface>(connection, executionSurfaceExpression()).catch(() => undefined);
-      return {
-        verified: false,
-        ...(surface?.selectedModel ? { observedModel: surface.selectedModel } : {}),
-        ...(effortForSliderValue(surface?.slider) ? { observedReasoningEffort: effortForSliderValue(surface?.slider) } : {}),
-        error: message,
-      };
+      return diagnostic;
     }
-    if (error instanceof DomainError) throw error;
+    if (error instanceof DomainError) {
+      throw new DomainError(error.code, error.message, {
+        ...(error.details ?? {}),
+        workerExecution: diagnostic,
+      });
+    }
     throw new DomainError(
       ErrorCode.WORKSPACE_NOT_READY,
       `ChatGPT execution settings could not be verified: ${message}`,
+      { workerExecution: diagnostic },
     );
   }
 }
