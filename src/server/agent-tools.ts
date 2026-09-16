@@ -163,7 +163,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
     {
       title: "Prepare isolated coding worker",
       description:
-        "Create a durable worker plus its isolated Git branch/worktree for the active full-write project. Browser worker launch is a later step, so do not claim the task is running until the worker becomes running.",
+        "Create a durable worker plus its isolated managed Git branch/worktree when the active lease permits worker orchestration. This does not grant the parent direct project-write authority. Browser worker launch is a later step, so do not claim the task is running until the worker becomes running.",
       annotations: LOCAL_STATE_ANNOTATIONS,
       _meta: chatGptMeta("Preparing isolated worker...", "Isolated worker prepared"),
       inputSchema: {
@@ -177,7 +177,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
         if (!active) {
           throw new DomainError(ErrorCode.PROJECT_NOT_SELECTED, "No active project; call project_select first");
         }
-        await requireProjectLease(ctx, active.projectId, "write");
+        await requireProjectLease(ctx, active.projectId, "worker");
         const worker = await spawnAgent(ctx.stateDir, {
           project: { projectId: active.projectId, root: active.root },
           task: input.task,
