@@ -16,6 +16,12 @@ if (-not (Test-Path -LiteralPath $publicHostnameHelper)) {
 }
 . $publicHostnameHelper
 
+$startupContextHelper = Join-Path $Root "scripts\windows-startup-context.ps1"
+if (-not (Test-Path -LiteralPath $startupContextHelper)) {
+    throw "Missing Windows startup-context helper: $startupContextHelper"
+}
+. $startupContextHelper
+
 $machinePath = [System.Environment]::GetEnvironmentVariable("PATH", "Machine")
 $userPath = [System.Environment]::GetEnvironmentVariable("PATH", "User")
 $nodePath = Join-Path $env:ProgramFiles "nodejs"
@@ -35,8 +41,16 @@ function Get-EffectiveEnvironmentValue([string]$Name) {
     return $null
 }
 
-if (-not $Workspace) {
-    $Workspace = Join-Path $HOME "workspace"
+$workspaceWasImplicit = [string]::IsNullOrWhiteSpace($Workspace)
+if ($workspaceWasImplicit -and -not [string]::IsNullOrWhiteSpace($ActiveProjectRoot)) {
+    $resolvedActiveProjectRoot = [System.IO.Path]::GetFullPath($ActiveProjectRoot)
+    if (-not (Test-Path -LiteralPath $resolvedActiveProjectRoot -PathType Container)) {
+        throw "Active project root does not exist: $resolvedActiveProjectRoot"
+    }
+}
+$Workspace = Resolve-ChatGPT2CodexWorkspace -Workspace $Workspace -ActiveProjectRoot $ActiveProjectRoot -HomePath $HOME
+if ($workspaceWasImplicit -and -not [string]::IsNullOrWhiteSpace($ActiveProjectRoot)) {
+    Write-Host "[chatgpt2codex] using active project as workspace: $Workspace"
 }
 New-Item -ItemType Directory -Force -Path $Workspace | Out-Null
 $Workspace = [System.IO.Path]::GetFullPath($Workspace)
@@ -133,7 +147,24 @@ function Test-PortBusy([int]$PortToCheck) {
     }
 }
 
-function Wait-HttpOk([string]$Url, [int]$Tries, [string]$Label) {
+function Get-LogTailText([string]$Path, [int]$Lines = 30) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return $null }
+    try {
+        $text = (Get-Content -LiteralPath $Path -Tail $Lines -ErrorAction Stop) -join "`n"
+        if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+        return $text.Trim()
+    } catch {
+        return $null
+    }
+}
+
+function Wait-HttpOk(
+    [string]$Url,
+    [int]$Tries,
+    [string]$Label,
+    [System.Diagnostics.Process]$Process = $null,
+    [string]$ErrorLog = $null
+) {
     for ($i = 0; $i -lt $Tries; $i++) {
         try {
             $response = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 -Uri $Url
@@ -142,9 +173,27 @@ function Wait-HttpOk([string]$Url, [int]$Tries, [string]$Label) {
             }
         } catch {
         }
+
+        if ($Process) {
+            try {
+                if ($Process.HasExited) {
+                    try { $Process.WaitForExit() } catch {}
+                    $details = Get-LogTailText $ErrorLog
+                    $message = "$Label exited before becoming ready (exit code $($Process.ExitCode)): $Url"
+                    if ($details) { $message += "`n$details" }
+                    throw $message
+                }
+            } catch {
+                if ($_.Exception.Message -like "$Label exited before becoming ready*") { throw }
+            }
+        }
         Start-Sleep -Seconds 1
     }
-    throw "$Label did not become ready: $Url"
+
+    $details = Get-LogTailText $ErrorLog
+    $message = "$Label did not become ready: $Url"
+    if ($details) { $message += "`n$details" }
+    throw $message
 }
 
 function Resolve-HostWithCloudflareDoh([string]$HostName) {
@@ -387,7 +436,7 @@ try {
         $serverArgs += @("--active-project-root", $ActiveProjectRoot, "--active-project-preset", $ActiveProjectPreset)
     }
     $srvProc = Start-LoggedProcess "node" $serverArgs $srvOut $srvErr
-    Wait-HttpOk "http://127.0.0.1:$Port/healthz" 20 "local server"
+    Wait-HttpOk "http://127.0.0.1:$Port/healthz" 20 "local server" $srvProc $srvErr
 
     Write-Host ""
     Write-Host "[chatgpt2codex] connector URL ready:"
