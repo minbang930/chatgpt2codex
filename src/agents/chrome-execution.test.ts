@@ -12,6 +12,7 @@ interface FakeOptions {
   sliderValue?: number;
   requireRolelessNeutralControl?: boolean;
   controlUnavailableEvaluations?: number;
+  sliderUnavailableEvaluations?: number;
 }
 
 class FakeExecutionConnection implements CdpConnection {
@@ -22,6 +23,7 @@ class FakeExecutionConnection implements CdpConnection {
   private pendingPoint: "control" | "model" | "slider" | undefined;
   private pendingSliderTarget: number | undefined;
   private controlEvaluations = 0;
+  private sliderEvaluations = 0;
 
   constructor(private readonly options: FakeOptions = {}) {
     this.selectedModel = options.selectedModel ?? "GPT-5.6 Luna";
@@ -58,6 +60,10 @@ class FakeExecutionConnection implements CdpConnection {
         }
         const targetRequested = expression.includes('const target = "GPT-5.6 Sol"');
         const modelAvailable = this.options.modelAvailable ?? true;
+        const reasoningObservation = expression.includes('const target = "";');
+        if (reasoningObservation) this.sliderEvaluations += 1;
+        const sliderAvailable = !reasoningObservation
+          || this.sliderEvaluations > (this.options.sliderUnavailableEvaluations ?? 0);
         this.pendingPoint = targetRequested && modelAvailable ? "model" : undefined;
         return {
           result: {
@@ -67,11 +73,15 @@ class FakeExecutionConnection implements CdpConnection {
               modelSelected: targetRequested && this.selectedModel === "GPT-5.6 Sol",
               modelOptionCount: targetRequested && modelAvailable ? 1 : 0,
               modelOptionPoint: targetRequested && modelAvailable ? { x: 20, y: 20 } : undefined,
-              slider: {
-                min: 0,
-                max: this.options.sliderMax ?? 3,
-                value: this.sliderValue,
-              },
+              ...(sliderAvailable
+                ? {
+                    slider: {
+                      min: 0,
+                      max: this.options.sliderMax ?? 3,
+                      value: this.sliderValue,
+                    },
+                  }
+                : {}),
             },
           },
         };
@@ -172,6 +182,28 @@ describe("agents/chrome-execution", () => {
       (call) => call.method === "Runtime.evaluate"
         && String(call.params?.expression ?? "").includes("C2C_EXECUTION_CONTROL"),
     )).toHaveLength(4);
+  });
+
+  it("waits for the structural reasoning slider to hydrate after the picker opens", async () => {
+    const connection = new FakeExecutionConnection({
+      selectedModel: "GPT-5.6 Sol",
+      sliderValue: 2,
+      sliderUnavailableEvaluations: 3,
+    });
+
+    await expect(applyWorkerExecutionIntent(
+      connection,
+      intent({ reasoningEffort: "high", fallbackPolicy: "fail-closed" }),
+      noSleep,
+    )).resolves.toEqual({
+      verified: true,
+      observedReasoningEffort: "high",
+    });
+    expect(connection.calls.filter(
+      (call) => call.method === "Runtime.evaluate"
+        && String(call.params?.expression ?? "").includes("C2C_EXECUTION_SURFACE")
+        && String(call.params?.expression ?? "").includes('const target = "";'),
+    ).length).toBeGreaterThanOrEqual(4);
   });
 
   it("fails closed when the requested model is unavailable", async () => {
