@@ -21,10 +21,12 @@ function launchInput(route: BrowserWorkerLaunchInput["route"] = { mode: "standal
 class FakeConnection implements CdpConnection {
   readonly calls: Array<{ method: string; params?: Record<string, unknown> }> = [];
   closed = false;
+  private appSelected = false;
 
   constructor(
     private readonly composerReady: boolean,
     private readonly appAvailable = true,
+    private readonly selectionMaterializes = true,
   ) {}
 
   async send(method: string, params?: Record<string, unknown>): Promise<unknown> {
@@ -35,7 +37,11 @@ class FakeConnection implements CdpConnection {
 
     const expression = String(params?.expression ?? "");
     if (expression.includes("candidate.click();")) {
+      if (this.appAvailable && this.selectionMaterializes) this.appSelected = true;
       return { result: { value: { ok: this.appAvailable, text: this.appAvailable ? "ChatGPT To Codex Worker" : undefined } } };
+    }
+    if (expression.includes("inlineSelectedApp")) {
+      return { result: { value: this.appSelected } };
     }
     if (expression.includes("rect.width > 0")) {
       return { result: { value: this.composerReady } };
@@ -104,6 +110,10 @@ describe("agents/chrome-cdp", () => {
       (call) => call.method === "Runtime.evaluate" && String(call.params?.expression ?? "").includes("candidate.click();"),
     );
     expect(String(appSelection?.params?.expression)).toContain("ChatGPT To Codex Worker");
+    const selectedChecks = connection.calls.filter(
+      (call) => call.method === "Runtime.evaluate" && String(call.params?.expression ?? "").includes("inlineSelectedApp"),
+    );
+    expect(selectedChecks.length).toBeGreaterThanOrEqual(2);
     expect(connection.calls.filter((call) => call.method === "Input.dispatchKeyEvent")).toHaveLength(2);
   });
 
@@ -151,6 +161,33 @@ describe("agents/chrome-cdp", () => {
     await expect(driver.launch(launchInput())).rejects.toThrow(/custom app.*\/mcp\/worker/i);
     expect(closedTargets).toEqual(["target-no-app"]);
     expect(connection.calls.filter((call) => call.method === "Input.dispatchKeyEvent")).toHaveLength(0);
+    expect(connection.closed).toBe(true);
+  });
+
+  it("fails closed when a picker click does not materialize the selected worker app entity", async () => {
+    const connection = new FakeConnection(true, true, false);
+    const closedTargets: string[] = [];
+    const driver = new ChromeCdpBrowserWorkerDriver({
+      ensureEndpoint: async () => ({ port: 9222 }),
+      openTarget: async (_endpoint, url) => ({ id: "target-click-no-selection", url, webSocketDebuggerUrl: "ws://click-no-selection" }),
+      closeTarget: async (_endpoint, targetId) => {
+        closedTargets.push(targetId);
+      },
+      connect: async () => connection,
+      sleepMs: async () => undefined,
+      composerAttempts: 1,
+      composerPollMs: 0,
+      appMentionAttempts: 1,
+      appMentionPollMs: 0,
+    });
+
+    await expect(driver.launch(launchInput())).rejects.toThrow(/custom app.*\/mcp\/worker/i);
+    expect(closedTargets).toEqual(["target-click-no-selection"]);
+    expect(connection.calls.filter((call) => call.method === "Input.dispatchKeyEvent")).toHaveLength(0);
+    const exactQueryClears = connection.calls.filter(
+      (call) => call.method === "Runtime.evaluate" && String(call.params?.expression ?? "").includes("current.trim() !== expected"),
+    );
+    expect(exactQueryClears).toHaveLength(1);
     expect(connection.closed).toBe(true);
   });
 
