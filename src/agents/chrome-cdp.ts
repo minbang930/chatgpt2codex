@@ -338,8 +338,10 @@ async function selectWorkerApp(
     const selectedValue = resultValue(selected) as { ok?: boolean } | undefined;
     if (selectedValue?.ok === true) {
       await sleepMs(50);
-      await clearTypedAppQuery(connection, appName);
-      return;
+      if (await workerAppIsSelected(connection, appName)) {
+        await clearTypedAppQuery(connection, appName);
+        return;
+      }
     }
 
     await sleepMs(pollMs);
