@@ -11,7 +11,7 @@ class ExecutionAwareConnection implements CdpConnection {
   menuOpen = false;
   sliderValue = 0;
   appSelected = false;
-  private sliderTarget: number | undefined;
+  private sliderFocused = false;
 
   constructor(private readonly sliderMax = 3) {}
 
@@ -22,12 +22,21 @@ class ExecutionAwareConnection implements CdpConnection {
     if (method === "Input.dispatchMouseEvent" && params?.type === "mouseReleased") {
       const x = Number(params.x);
       if (x === 10) this.menuOpen = true;
-      if (x === 30 && this.sliderTarget !== undefined) this.sliderValue = this.sliderTarget;
       return {};
     }
 
     if (method === "Input.dispatchKeyEvent") {
-      if (params?.key === "Escape" && params?.type === "keyUp") this.menuOpen = false;
+      const key = String(params?.key ?? "");
+      if (key === "Escape" && params?.type === "keyUp") {
+        this.menuOpen = false;
+        this.sliderFocused = false;
+        return {};
+      }
+      if (params?.type === "keyUp" && this.sliderFocused && (key === "ArrowRight" || key === "ArrowLeft")) {
+        this.sliderValue = key === "ArrowRight"
+          ? Math.min(this.sliderMax, this.sliderValue + 1)
+          : Math.max(0, this.sliderValue - 1);
+      }
       return {};
     }
     if (method === "Input.insertText") return {};
@@ -37,10 +46,9 @@ class ExecutionAwareConnection implements CdpConnection {
     if (expression.includes("C2C_EXECUTION_CONTROL")) {
       return { result: { value: { x: 10, y: 10 } } };
     }
-    if (expression.includes("C2C_EXECUTION_SLIDER_POINT")) {
-      const match = expression.match(/const target = (\d+);/u);
-      this.sliderTarget = match ? Number(match[1]) : undefined;
-      return { result: { value: { x: 30, y: 30 } } };
+    if (expression.includes("C2C_EXECUTION_SLIDER_FOCUS")) {
+      this.sliderFocused = this.menuOpen;
+      return { result: { value: this.sliderFocused } };
     }
     if (expression.includes("C2C_EXECUTION_SURFACE")) {
       return {
@@ -132,6 +140,11 @@ describe("Chrome worker execution integration", () => {
     expect(executionIndex).toBeGreaterThanOrEqual(0);
     expect(firstInsertIndex).toBeGreaterThan(executionIndex);
     expect(connection.calls[firstInsertIndex]?.params?.text).toBe("@ChatGPT To Codex Worker");
+    expect(connection.calls.filter(
+      (call) => call.method === "Input.dispatchKeyEvent"
+        && call.params?.type === "keyUp"
+        && call.params?.key === "ArrowRight",
+    )).toHaveLength(2);
     expect(connection.calls.filter((call) => call.method === "Input.dispatchKeyEvent" && call.params?.key === "Enter")).toHaveLength(2);
   });
 
