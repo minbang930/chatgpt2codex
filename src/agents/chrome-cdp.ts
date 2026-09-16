@@ -157,6 +157,18 @@ function selectedWorkerAppExpression(appName: string): string {
       const style = window.getComputedStyle(element);
       return element.getClientRects().length > 0 && style.visibility !== 'hidden' && style.display !== 'none';
     };
+
+    // ChatGPT currently materializes a selected @ app as an inline anchor
+    // inside the ProseMirror composer. Plain typed mention text is not an
+    // anchor, so this distinguishes a real app selection from an unselected
+    // "@ChatGPT To Codex Worker" query.
+    const inlineSelectedApp = Array.from(composer.querySelectorAll('a')).some((element) =>
+      visible(element) && normalize(element.textContent) === expectedText
+    );
+    if (inlineSelectedApp) return true;
+
+    // Keep the outside-composer fallback for older/alternate ChatGPT layouts
+    // where the selected app may render as a sibling chip or toolbar control.
     const suggestionRootSelector = '[role="listbox"], [role="menu"], [role="dialog"], [data-radix-popper-content-wrapper], [data-floating-ui-portal]';
     let scope = composer.closest('form');
     if (!(scope instanceof HTMLElement)) {
