@@ -10,6 +10,7 @@ interface FakeOptions {
   sliderMax?: number;
   selectedModel?: string;
   sliderValue?: number;
+  requireRolelessNeutralControl?: boolean;
 }
 
 class FakeExecutionConnection implements CdpConnection {
@@ -30,6 +31,12 @@ class FakeExecutionConnection implements CdpConnection {
     if (method === "Runtime.evaluate") {
       const expression = String(params?.expression ?? "");
       if (expression.includes("C2C_EXECUTION_CONTROL")) {
+        if (
+          this.options.requireRolelessNeutralControl
+          && !expression.includes('button.__composer-pill.__composer-pill--neutral[aria-haspopup="menu"]')
+        ) {
+          return { result: { value: null } };
+        }
         this.pendingPoint = "control";
         return { result: { value: { x: 10, y: 10 } } };
       }
@@ -121,6 +128,23 @@ describe("agents/chrome-execution", () => {
     expect(connection.selectedModel).toBe("GPT-5.6 Sol");
     expect(connection.sliderValue).toBe(2);
     expect(connection.calls.filter((call) => call.method === "Input.dispatchMouseEvent").length).toBeGreaterThanOrEqual(6);
+  });
+
+  it("recognizes the current role-less neutral composer pill without relying on a label", async () => {
+    const connection = new FakeExecutionConnection({
+      selectedModel: "GPT-5.6 Sol",
+      sliderValue: 2,
+      requireRolelessNeutralControl: true,
+    });
+
+    await expect(applyWorkerExecutionIntent(
+      connection,
+      intent({ reasoningEffort: "high", fallbackPolicy: "fail-closed" }),
+      noSleep,
+    )).resolves.toEqual({
+      verified: true,
+      observedReasoningEffort: "high",
+    });
   });
 
   it("fails closed when the requested model is unavailable", async () => {
