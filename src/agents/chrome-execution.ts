@@ -8,6 +8,7 @@ import type { CdpConnection } from "./chrome-cdp.js";
 const EXECUTION_CONTROL_ATTEMPTS = 30;
 const EXECUTION_MENU_ATTEMPTS = 20;
 const EXECUTION_MENU_POLL_MS = 100;
+const EXECUTION_SLIDER_ATTEMPTS = 30;
 const EXECUTION_VERIFY_ATTEMPTS = 12;
 const EXECUTION_VERIFY_POLL_MS = 100;
 
@@ -303,6 +304,20 @@ async function openExecutionMenu(
   );
 }
 
+async function waitForReasoningSlider(
+  connection: CdpConnection,
+  sleepMs: (ms: number) => Promise<void>,
+): Promise<ExecutionSurface> {
+  let surface = await openExecutionMenu(connection, sleepMs);
+  for (let attempt = 0; attempt < EXECUTION_SLIDER_ATTEMPTS; attempt += 1) {
+    if (surface.slider) return surface;
+    await sleepMs(EXECUTION_MENU_POLL_MS);
+    const observed = await evaluateValue<ExecutionSurface>(connection, executionSurfaceExpression());
+    surface = observed?.menuOpen ? observed : await openExecutionMenu(connection, sleepMs);
+  }
+  return surface;
+}
+
 async function ensureModel(
   connection: CdpConnection,
   targetModel: string,
@@ -337,7 +352,7 @@ async function ensureReasoning(
   effort: WorkerReasoningEffort,
   sleepMs: (ms: number) => Promise<void>,
 ): Promise<WorkerReasoningEffort> {
-  let surface = await openExecutionMenu(connection, sleepMs);
+  let surface = await waitForReasoningSlider(connection, sleepMs);
   const slider = surface.slider;
   if (!slider) {
     throw new DomainError(
