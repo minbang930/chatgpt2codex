@@ -58,6 +58,7 @@ async function launchWorkerBrowser(
       projectId: worker.projectId,
       task: launchTask,
       workerToken: capability.token,
+      executionIntent: worker.executionIntent,
     });
     return { browser, capabilityExpiresAt: capability.expiresAt };
   } catch (error) {
