@@ -108,6 +108,7 @@ function appSuggestionExpression(appName: string): string {
   return `(() => {
     const expected = ${encoded};
     const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLocaleLowerCase();
+    const expectedText = normalize(expected);
     const visible = (element) => {
       if (!(element instanceof HTMLElement)) return false;
       const rect = element.getBoundingClientRect();
@@ -118,8 +119,26 @@ function appSuggestionExpression(appName: string): string {
       '[role="listbox"], [role="menu"], [role="dialog"], [data-radix-popper-content-wrapper], [data-floating-ui-portal]'
     )).filter(visible);
     const selector = '[role="option"], [role="menuitem"], [role="menuitemradio"], [data-radix-collection-item], button';
-    const candidates = roots.flatMap((root) => Array.from(root.querySelectorAll(selector)));
-    const candidate = candidates.find((element) => visible(element) && normalize(element.textContent) === normalize(expected));
+    const candidates = roots
+      .flatMap((root) => Array.from(root.querySelectorAll(selector)))
+      .filter(visible);
+    const exactCandidate = candidates.find((element) => {
+      const labels = [
+        element.textContent,
+        element.getAttribute('aria-label'),
+        element.getAttribute('title'),
+        ...Array.from(element.querySelectorAll('*')).flatMap((child) => [
+          child.textContent,
+          child.getAttribute('aria-label'),
+          child.getAttribute('title'),
+        ]),
+      ];
+      return labels.some((label) => normalize(label) === expectedText);
+    });
+    const prefixMatches = exactCandidate
+      ? []
+      : candidates.filter((element) => normalize(element.textContent).startsWith(expectedText + ' '));
+    const candidate = exactCandidate ?? (prefixMatches.length === 1 ? prefixMatches[0] : undefined);
     if (!(candidate instanceof HTMLElement)) return { ok: false };
     candidate.click();
     return { ok: true, text: String(candidate.textContent || '').trim() };
