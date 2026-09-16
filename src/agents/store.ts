@@ -4,6 +4,11 @@ import path from "node:path";
 import { z } from "zod";
 import { emitSubagentStartHook, emitSubagentStopHook } from "../hooks/subagent-lifecycle.js";
 import { DomainError, ErrorCode } from "../types.js";
+import {
+  WORKER_EXECUTION_FALLBACK_POLICIES,
+  WORKER_REASONING_EFFORTS,
+  type WorkerExecutionIntent,
+} from "./execution-settings.js";
 
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
@@ -47,10 +52,27 @@ export interface WorkerRecord {
   startedAt?: number;
   finishedAt?: number;
   workspace?: WorkerWorkspace;
+  executionIntent?: WorkerExecutionIntent;
   result?: WorkerResult;
   error?: string;
   notification?: WorkerNotification;
 }
+
+const WorkerExecutionPreferenceSchema = z.object({
+  model: z.string().min(1).max(200).optional(),
+  reasoningEffort: z.enum(WORKER_REASONING_EFFORTS).optional(),
+  fallbackPolicy: z.enum(WORKER_EXECUTION_FALLBACK_POLICIES).optional(),
+}).strict();
+
+const WorkerExecutionIntentSchema = z.object({
+  requested: WorkerExecutionPreferenceSchema.optional(),
+  resolved: WorkerExecutionPreferenceSchema.optional(),
+  sources: z.object({
+    model: z.enum(["worker", "project", "global"]).optional(),
+    reasoningEffort: z.enum(["worker", "project", "global"]).optional(),
+    fallbackPolicy: z.enum(["worker", "project", "global", "default"]).optional(),
+  }).strict().optional(),
+}).strict() satisfies z.ZodType<WorkerExecutionIntent>;
 
 const WorkerResultSchema = z.object({
   summary: z.string(),
@@ -85,6 +107,7 @@ const WorkerRecordSchema = z.object({
   startedAt: z.number().int().nonnegative().optional(),
   finishedAt: z.number().int().nonnegative().optional(),
   workspace: WorkerWorkspaceSchema.optional(),
+  executionIntent: WorkerExecutionIntentSchema.optional(),
   result: WorkerResultSchema.optional(),
   error: z.string().optional(),
   notification: WorkerNotificationSchema.optional(),
@@ -198,7 +221,7 @@ async function finalizeWorker(
 
 export async function createWorker(
   stateDir: string,
-  input: { projectId: string; task: string },
+  input: { projectId: string; task: string; executionIntent?: WorkerExecutionIntent },
 ): Promise<WorkerRecord> {
   const projectId = input.projectId.trim();
   const task = input.task.trim();
@@ -209,6 +232,9 @@ export async function createWorker(
     throw new DomainError(ErrorCode.NOT_IMPLEMENTED, "Worker task must not be empty");
   }
 
+  const executionIntent = input.executionIntent
+    ? WorkerExecutionIntentSchema.parse(input.executionIntent)
+    : undefined;
   const now = Date.now();
   const record: WorkerRecord = {
     workerId: `wrk_${randomUUID()}`,
@@ -217,6 +243,7 @@ export async function createWorker(
     status: "pending",
     createdAt: now,
     updatedAt: now,
+    ...(executionIntent ? { executionIntent } : {}),
   };
   await writeWorker(stateDir, record);
   return record;
