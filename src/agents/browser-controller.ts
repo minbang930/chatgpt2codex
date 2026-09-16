@@ -3,7 +3,10 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { DomainError, ErrorCode } from "../types.js";
-import type { WorkerExecutionIntent } from "./execution-settings.js";
+import type {
+  WorkerExecutionIntent,
+  WorkerReasoningEffort,
+} from "./execution-settings.js";
 import { getWorker } from "./store.js";
 
 const DIR_MODE = 0o700;
@@ -27,6 +30,13 @@ export type BrowserWorkerSessionStatus =
   | "stopped"
   | "failed";
 
+export interface BrowserWorkerExecutionDiagnostic {
+  verified: boolean;
+  observedModel?: string;
+  observedReasoningEffort?: WorkerReasoningEffort;
+  error?: string;
+}
+
 export interface BrowserWorkerSession {
   version: 1;
   workerId: string;
@@ -39,6 +49,7 @@ export interface BrowserWorkerSession {
   launchedAt?: number;
   stoppedAt?: number;
   browserHandle?: string;
+  execution?: BrowserWorkerExecutionDiagnostic;
   lastError?: string;
 }
 
@@ -66,6 +77,7 @@ export interface BrowserWorkerLaunchInput {
 
 export interface BrowserWorkerLaunchResult {
   browserHandle: string;
+  execution?: BrowserWorkerExecutionDiagnostic;
 }
 
 export interface BrowserWorkerCancelInput {
@@ -102,6 +114,13 @@ const BrowserWorkerRouteSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("project"), projectRef: ChatGptProjectRefSchema }),
 ]) satisfies z.ZodType<BrowserWorkerRoute>;
 
+const BrowserWorkerExecutionDiagnosticSchema = z.object({
+  verified: z.boolean(),
+  observedModel: z.string().min(1).max(200).optional(),
+  observedReasoningEffort: z.enum(["instant", "medium", "high", "extra-high"]).optional(),
+  error: z.string().min(1).max(4000).optional(),
+}).strict() satisfies z.ZodType<BrowserWorkerExecutionDiagnostic>;
+
 const BrowserWorkerSessionSchema = z.object({
   version: z.literal(1),
   workerId: z.string().regex(WORKER_ID_RE),
@@ -114,6 +133,7 @@ const BrowserWorkerSessionSchema = z.object({
   launchedAt: z.number().int().nonnegative().optional(),
   stoppedAt: z.number().int().nonnegative().optional(),
   browserHandle: z.string().min(1).max(512).optional(),
+  execution: BrowserWorkerExecutionDiagnosticSchema.optional(),
   lastError: z.string().min(1).max(4000).optional(),
 }) satisfies z.ZodType<BrowserWorkerSession>;
 
@@ -364,6 +384,7 @@ export async function markBrowserWorkerRunning(
   stateDir: string,
   workerId: string,
   browserHandle: string,
+  execution?: BrowserWorkerExecutionDiagnostic,
 ): Promise<BrowserWorkerSession> {
   const handle = browserHandle.trim();
   if (!handle) {
@@ -372,6 +393,7 @@ export async function markBrowserWorkerRunning(
   return transitionBrowserWorkerSession(stateDir, workerId, ["launching"], {
     status: "running",
     browserHandle: handle,
+    ...(execution ? { execution: BrowserWorkerExecutionDiagnosticSchema.parse(execution) } : {}),
     launchedAt: Date.now(),
     lastError: undefined,
   });
@@ -394,6 +416,7 @@ export async function markBrowserWorkerFailed(
   stateDir: string,
   workerId: string,
   error: string,
+  execution?: BrowserWorkerExecutionDiagnostic,
 ): Promise<BrowserWorkerSession> {
   const message = error.trim() || "browser worker failed";
   return transitionBrowserWorkerSession(
@@ -402,6 +425,7 @@ export async function markBrowserWorkerFailed(
     ["prepared", "launching", "running", "stopping"],
     {
       status: "failed",
+      ...(execution ? { execution: BrowserWorkerExecutionDiagnosticSchema.parse(execution) } : {}),
       stoppedAt: Date.now(),
       lastError: message,
     },
@@ -410,6 +434,12 @@ export async function markBrowserWorkerFailed(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function executionDiagnosticFromError(error: unknown): BrowserWorkerExecutionDiagnostic | undefined {
+  if (!(error instanceof DomainError)) return undefined;
+  const parsed = BrowserWorkerExecutionDiagnosticSchema.safeParse(error.details?.workerExecution);
+  return parsed.success ? parsed.data : undefined;
 }
 
 /**
@@ -436,9 +466,19 @@ export class BrowserWorkerController {
     await markBrowserWorkerLaunching(this.stateDir, input.workerId);
     try {
       const launched = await this.driver.launch({ ...input, route: prepared.route });
-      return await markBrowserWorkerRunning(this.stateDir, input.workerId, launched.browserHandle);
+      return await markBrowserWorkerRunning(
+        this.stateDir,
+        input.workerId,
+        launched.browserHandle,
+        launched.execution,
+      );
     } catch (error) {
-      await markBrowserWorkerFailed(this.stateDir, input.workerId, errorMessage(error)).catch(() => undefined);
+      await markBrowserWorkerFailed(
+        this.stateDir,
+        input.workerId,
+        errorMessage(error),
+        executionDiagnosticFromError(error),
+      ).catch(() => undefined);
       throw error;
     }
   }
