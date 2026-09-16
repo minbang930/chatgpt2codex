@@ -6,7 +6,7 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **M6 - Worker Execution Configuration**
 
-Active unit: **M6.4 - Status and diagnostics**
+Active unit: **M6.5 - Live validation**
 
 Primary operational handoff: `docs/SESSION-HANDOFF.md`.
 
@@ -215,17 +215,38 @@ Full CI `35131605738` on code HEAD `dcc73abac90cc925137df42a7a03139bcd85ec80`: *
 
 M6.3 code exit criterion is satisfied: an explicit execution intent cannot reach Worker-app selection/bootstrap unless the browser adapter verified the requested state or the durable policy explicitly allows current state. This is not yet a claim that every model label is live-compatible with the user's dedicated Worker profile; that belongs to M6.5.
 
-### M6.4 - Status and diagnostics — active
+### M6.4 - Status and diagnostics — complete
 
-- [ ] Surface durable requested/resolved/source execution intent through existing worker status diagnostics without exposing browser-private identifiers.
-- [ ] Record browser-attempt observed/verified execution state separately from durable intent.
-- [ ] Surface verification failures concisely while preserving existing normal output for unmanaged workers.
-- [ ] Add success/failure/recovery/terminal-state regressions.
+- [x] Browser worker sessions persist a bounded per-attempt execution observation independently from durable `WorkerRecord.executionIntent`.
+- [x] Successful launches persist `verified`, observed model/reasoning, and the browser attempt; `allow-current` can persist `verified=false` plus the bounded verification error.
+- [x] Fail-closed adapter errors carry a structured `workerExecution` diagnostic so the failed browser attempt retains what was observed without mutating durable worker lifecycle state.
+- [x] `agent_status` exposes a top-level `execution` view that separates durable `requested` / `resolved` / `sources` from current-attempt `observed` / `verified` / `error` / `attempt`.
+- [x] `agent_result` exposes the same execution view from durable result state plus the latest browser-attempt telemetry, without performing browser reconciliation during a result read.
+- [x] A later recovery attempt replaces the current browser execution observation while the durable intent remains unchanged.
+- [x] Workers with no durable execution intent and no browser execution observation keep the concise legacy status/result shape with no `execution` key.
+- [x] Browser failure diagnostics never fabricate a durable worker failure or completion.
+- [x] Added success, fail-closed failure, recovery/latest-attempt, unmanaged compatibility, and terminal-result regressions.
+- [x] No private ChatGPT request/conversation identity or raw DOM state is exposed.
+
+Implementation/test sequence: `92827274`, `1a7199ac`, `477bc99c`, `e693b36d`, `a1117d2f`.
+
+Full CI `35132971767` on code HEAD `a1117d2fd08d57f49aa62d55de7a0b7cd8dd499f`: **green on macOS, Ubuntu, and Windows**, including typecheck, execution-diagnostics regressions, existing agent/platform tests, Windows native input/UIA/activity-indicator/hostname/startup-context tests, build, and Windows launcher build.
+
+M6.4 exit criterion is satisfied: the parent can distinguish what execution configuration the durable worker requested/resolved from what the current browser attempt actually observed and whether it verified it.
+
+### M6.5 - Live validation — active
+
+- [ ] Validate legacy/no-explicit-setting worker behavior in the real dedicated Worker Chrome profile.
+- [ ] Validate at least one explicit model + reasoning combination and another reasoning level with `agent_status` diagnostics.
+- [ ] Validate two parallel workers with different durable intents.
+- [ ] Validate target-loss recovery and confirm the same durable intent with a fresh per-attempt observation.
+- [ ] Validate a deliberately unavailable explicit preference fails before task submission and reports useful execution diagnostics.
+- [ ] Confirm mapped ChatGPT Project routing, `/mcp/worker` catalog isolation, and main `/mcp` behavior remain intact.
+- [ ] Record exact live-observed model labels, reasoning slider range/availability, and any dedicated-profile limitations.
 
 ## Current queue
 
-- [ ] Implement M6.4 status/diagnostics only; do not begin M6.5 live validation until the status contract is stable.
-- [ ] In M6.5, live-smoke the dedicated worker profile and record the exact model/reasoning labels/availability actually observed there; extend only the browser adapter if the live UI differs.
+- [ ] Run M6.5 live validation against the actual dedicated worker profile; adapt only `chrome-execution.ts` if the live UI differs, preserving post-interaction verification and fail-closed behavior.
 - [ ] Naturally cross the original 30-minute local-control TTL during normal use and confirm no `LEASE_REQUIRED` regression; this remains non-blocking.
 - [ ] Keep Worker MCP/app/control isolation green while M6 evolves.
 
