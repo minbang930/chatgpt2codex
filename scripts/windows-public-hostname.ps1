@@ -1,3 +1,25 @@
+$startupContextHelper = Join-Path $PSScriptRoot "windows-startup-context.ps1"
+if (Test-Path -LiteralPath $startupContextHelper) {
+    . $startupContextHelper
+
+    # start-chatgpt.ps1 dot-sources this helper before applying its legacy
+    # `$HOME\workspace` fallback. When an active project root was supplied but
+    # no workspace was supplied, make that project the workspace root so the
+    # startup project is guaranteed to be present in scanWorkspace(). Tests
+    # that dot-source this helper without launcher variables remain unaffected.
+    $workspaceVariable = Get-Variable -Name Workspace -Scope 0 -ErrorAction SilentlyContinue
+    $activeProjectVariable = Get-Variable -Name ActiveProjectRoot -Scope 0 -ErrorAction SilentlyContinue
+    if ($workspaceVariable -and $activeProjectVariable -and
+        [string]::IsNullOrWhiteSpace([string]$workspaceVariable.Value) -and
+        -not [string]::IsNullOrWhiteSpace([string]$activeProjectVariable.Value)) {
+        $resolvedWorkspace = Resolve-ChatGPT2CodexWorkspace `
+            -Workspace ([string]$workspaceVariable.Value) `
+            -ActiveProjectRoot ([string]$activeProjectVariable.Value)
+        Set-Variable -Name Workspace -Value $resolvedWorkspace -Scope 0
+        Write-Host "[chatgpt2codex] using active project as workspace: $resolvedWorkspace"
+    }
+}
+
 function Normalize-ChatGPT2CodexPublicHostname([string]$Value) {
     if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
 
