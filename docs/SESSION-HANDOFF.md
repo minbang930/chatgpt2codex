@@ -20,8 +20,8 @@ The only prior stabilization item still open is a non-blocking natural-use obser
 1. **M6.1 - Execution settings foundation — complete**
 2. **M6.2 - Durable per-worker execution intent — complete**
 3. **M6.3 - ChatGPT Web model/reasoning set-and-verify adapter — code/CI complete**
-4. **M6.4 - Status/diagnostics — active**
-5. **M6.5 - Live validation**
+4. **M6.4 - Status/diagnostics — complete**
+5. **M6.5 - Live validation — active**
 
 Design/source of truth: `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
 
@@ -73,7 +73,7 @@ The opaque `workerToken` remains the authority for a specific worker/worktree. W
 
 The established Worker-app routing remains fail closed: the dedicated app must materialize as the selected entity before bootstrap text is submitted. True target-loss recovery has also been live-proven: durable `running` worker remained authoritative, lost target reconciled to browser `failed`, same workerId relaunched in attempt 2, and normal `worker_finish` completion remained durable.
 
-M6.3 inserts execution verification before this existing Worker-app flow when a worker has explicit model/reasoning intent.
+M6.3 inserts execution verification before this existing Worker-app flow when a worker has explicit model/reasoning intent. M6.4 now keeps the browser attempt's verified observation separate from the durable worker intent so recovery diagnostics do not rewrite worker truth.
 
 ### Rolling local control authorization
 
@@ -163,40 +163,79 @@ This is **not yet a live VMware/profile compatibility claim** for every visible 
 
 ### M6.3 tests/CI
 
-Regression coverage includes:
-
-- model + reasoning successful set-and-verify;
-- unavailable/ambiguous model targets;
-- false-positive model interaction that never materializes selected state;
-- reasoning pointer interaction that does not update structural ARIA state;
-- unsupported `extra-high` when the profile exposes too few slider positions;
-- deliberate `allow-current` behavior;
-- unmanaged/no-explicit-setting compatibility;
-- durable intent reaching both initial launch and recovery;
-- execution verification happening before the first Worker-app/bootstrap `Input.insertText`;
-- fail-closed execution failure producing no Worker-app mention, bootstrap insertion, or Enter submission.
+Regression coverage includes model/reasoning success, unavailable/ambiguous model targets, false-positive interactions, unsupported effort, allow-current, unmanaged compatibility, durable intent on launch/recovery, and pre-bootstrap fail-closed ordering.
 
 Implementation/test sequence: `d5741d07`, `2d15d532`, `7e0cedfd`, `c562e130`, `8960867e`, `43c6afae`, `dd423f59`, final type-narrowing fix `dcc73aba`.
-Full CI `35131605738` on code HEAD `dcc73abac90cc925137df42a7a03139bcd85ec80`: **green on macOS, Ubuntu, and Windows**, including Agent tests, Windows native input/UIA/activity-indicator/hostname/startup-context checks, build, and Windows launcher build.
+Full CI `35131605738` on code HEAD `dcc73abac90cc925137df42a7a03139bcd85ec80`: **green on macOS, Ubuntu, and Windows**.
+
+## M6.4 completed contract
+
+M6.4 makes the execution state inspectable without confusing browser telemetry with durable worker truth.
+
+### Per-attempt browser telemetry
+
+`BrowserWorkerSession` now has optional bounded execution diagnostics:
+
+```ts
+execution?: {
+  verified: boolean;
+  observedModel?: string;
+  observedReasoningEffort?: "instant" | "medium" | "high" | "extra-high";
+  error?: string;
+}
+```
+
+The Chrome driver returns this observation after execution set-and-verify. Successful verified launches persist it. `allow-current` can persist `verified: false` with the observed state and bounded error. Fail-closed verification errors attach the same structured diagnostic to the thrown `DomainError`, allowing the browser attempt to record what was observed while the durable worker lifecycle remains unchanged.
+
+A recovery creates a new browser attempt and therefore replaces the current browser execution observation. It does not change or re-resolve `WorkerRecord.executionIntent`.
+
+### Parent-facing status/result shape
+
+When execution intent/telemetry exists, both `agent_status` and `agent_result` expose a top-level view shaped conceptually as:
+
+```text
+execution.requested  = caller/default request stored with durable worker
+execution.resolved   = durable intent actually resolved at spawn
+execution.sources    = worker/project/global/default source metadata
+execution.observed   = model/reasoning observed for the current browser attempt
+execution.verified   = whether that attempt satisfied the durable intent
+execution.error      = bounded verification error when applicable
+execution.attempt    = browser attempt number for the observation
+```
+
+`agent_status` continues to own browser liveness reconciliation. `agent_result` only combines the durable result with already-persisted browser execution telemetry; it does not probe/reconcile the browser during a result read.
+
+Workers with no durable execution intent and no browser execution observation retain the concise legacy output and do not receive an empty `execution` key.
+
+### M6.4 tests/CI
+
+Regression coverage proves successful requested/resolved/observed separation, fail-closed browser-attempt diagnostics without fabricated durable failure, latest-attempt recovery telemetry, unmanaged compatibility, and terminal `agent_result` diagnostics.
+
+Implementation/test sequence: `92827274`, `1a7199ac`, `477bc99c`, `e693b36d`, `a1117d2f`.
+Full CI `35132971767` on code HEAD `a1117d2fd08d57f49aa62d55de7a0b7cd8dd499f`: **green on macOS, Ubuntu, and Windows**.
+
+M6.4 exit criterion is satisfied: the parent can tell what the durable worker requested/resolved and whether the current browser attempt actually verified it.
 
 ## Active unit
 
-**M6.4 - Status and diagnostics.**
+**M6.5 - Live validation.**
 
-Implement only this unit next:
+Use the real dedicated Worker Chrome profile and existing Worker custom app. Validate the already-implemented M6 contract rather than redesigning it:
 
-- expose the durable requested/resolved/source execution intent through existing worker status diagnostics;
-- keep browser-attempt observed/verified state separate from durable intent;
-- record concise execution verification failure information on the browser attempt without turning browser telemetry into durable worker truth;
-- preserve concise output for workers with no explicit execution settings;
-- add success/failure/recovery/terminal-state regressions;
-- do not begin live model/reasoning compatibility claims until M6.5.
+- no-explicit-setting compatibility;
+- at least one explicit model + reasoning combination and a second reasoning level;
+- two parallel workers carrying different durable intents;
+- target-loss recovery with the same durable intent and a fresh per-attempt observation;
+- a deliberately unavailable explicit preference failing before task submission;
+- mapped ChatGPT Project routing;
+- Worker `/mcp/worker` catalog/capability isolation and normal main `/mcp` behavior;
+- exact live model labels, reasoning slider range/availability, and any profile/account limitations.
 
-M6.4 should not widen worker authority, expose private ChatGPT request IDs, or redesign the execution-selection adapter.
+If the actual live UI differs from M6.3 structural assumptions, adapt only `src/agents/chrome-execution.ts` (and focused tests) while preserving post-interaction verification and fail-closed behavior. Do not weaken the durable/introspection contracts to accommodate a UI mismatch.
 
 ## Runtime/update note
 
-`start-chatgpt.ps1` builds only when `dist/cli.js` is missing. After pulling M6 TypeScript changes on the VM, run `npm run build` before restarting. A real dedicated-profile model/reasoning smoke is intentionally deferred to M6.5, after M6.4 gives us stable diagnostics to inspect.
+`start-chatgpt.ps1` builds only when `dist/cli.js` is missing. After pulling these TypeScript changes on the VM, run `npm run build` before restarting through the already-known-good runtime path. M6.5 is the stage where the dedicated worker profile should be exercised live.
 
 ## Source-of-truth documents
 
@@ -221,6 +260,6 @@ Update this file whenever an M6 unit completes, the active unit changes, an exec
 3. Check actual `dev/custom-runtime` HEAD and latest CI.
 4. Read the current M6/current-queue portion of `docs/CUSTOM-RUNTIME-PROGRESS.md`.
 5. If docs and repo disagree, trust repo and correct the docs.
-6. If they match, implement **M6.4 only** and take it through tests/full CI before M6.5.
+6. If they match, run **M6.5 live validation** against the actual dedicated Worker profile; only adjust `chrome-execution.ts` if the live UI requires it.
 
 A future message consisting only of **`SESSION-HANDOFF.md 읽고 M6 이어서 진행해`** should be enough to resume.
