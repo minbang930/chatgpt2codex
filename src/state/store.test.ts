@@ -95,6 +95,7 @@ describe("Store", () => {
     expect(session.mode).toBe("observe");
     expect(session.activeProjectId).toBeNull();
     expect(session.lease).toBeNull();
+    expect(session.controlLease).toBeNull();
   });
 
   it("round-trips a session with an active lease", async () => {
@@ -114,9 +115,10 @@ describe("Store", () => {
     expect(session.activeProjectId).toBe("alpha-app");
     expect(session.mode).toBe("edit");
     expect(session.lease?.leaseId).toBe("lease-1");
+    expect(session.controlLease).toBeNull();
   });
 
-  it("round-trips a control lease", async () => {
+  it("promotes a locally granted control lease into durable control authorization", async () => {
     await store.setSession({
       activeProjectId: "control-app",
       mode: "read",
@@ -132,6 +134,88 @@ describe("Store", () => {
     const session = await store.getSession();
     expect(session.activeProjectId).toBe("control-app");
     expect(session.lease?.preset).toBe("control");
+    expect(session.controlLease?.leaseId).toBe("lease-control");
+  });
+
+  it("preserves durable control authorization when the normal project preset changes", async () => {
+    await store.setSession({
+      activeProjectId: "alpha-app",
+      mode: "read",
+      lease: {
+        projectId: "alpha-app",
+        leaseId: "lease-control",
+        projectRoot: "/workspace/alpha-app",
+        preset: "control",
+        issuedAt: 1000,
+        expiresAt: 2000,
+      },
+    });
+
+    await store.setSession({
+      activeProjectId: "alpha-app",
+      mode: "edit",
+      lease: {
+        projectId: "alpha-app",
+        leaseId: "lease-write",
+        projectRoot: "/workspace/alpha-app",
+        preset: "full-write",
+        issuedAt: 3000,
+        expiresAt: 4000,
+      },
+    });
+
+    const session = await store.getSession();
+    expect(session.lease?.preset).toBe("full-write");
+    expect(session.controlLease?.preset).toBe("control");
+    expect(session.controlLease?.leaseId).toBe("lease-control");
+  });
+
+  it("clears durable control authorization on an explicit empty-session reset", async () => {
+    await store.setSession({
+      activeProjectId: "alpha-app",
+      mode: "read",
+      lease: {
+        projectId: "alpha-app",
+        leaseId: "lease-control",
+        projectRoot: "/workspace/alpha-app",
+        preset: "control",
+        issuedAt: 1000,
+        expiresAt: 2000,
+      },
+    });
+
+    await store.setSession({ activeProjectId: null, mode: "observe", lease: null });
+
+    const session = await store.getSession();
+    expect(session.activeProjectId).toBeNull();
+    expect(session.lease).toBeNull();
+    expect(session.controlLease).toBeNull();
+  });
+
+  it("migrates an older active control lease into the durable control lane when reading", async () => {
+    const { writeFile, mkdir } = await import("node:fs/promises");
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "sessions.json"),
+      JSON.stringify({
+        version: 1,
+        updatedAt: 1000,
+        activeProjectId: "legacy-control",
+        mode: "read",
+        lease: {
+          projectId: "legacy-control",
+          leaseId: "lease-legacy-control",
+          projectRoot: "/workspace/legacy-control",
+          preset: "control",
+          issuedAt: 1000,
+          expiresAt: 2000,
+        },
+      }),
+      "utf8",
+    );
+
+    const session = await store.getSession();
+    expect(session.controlLease?.leaseId).toBe("lease-legacy-control");
   });
 
   it("stamps setSession's updatedAt with an integer epoch-ms value, ignoring caller input", async () => {
