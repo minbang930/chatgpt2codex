@@ -11,6 +11,8 @@ const EXECUTION_MENU_POLL_MS = 100;
 const EXECUTION_SLIDER_ATTEMPTS = 30;
 const EXECUTION_VERIFY_ATTEMPTS = 12;
 const EXECUTION_VERIFY_POLL_MS = 100;
+const EXECUTION_KEY_STEP_RETRIES = 3;
+const EXECUTION_KEY_SETTLE_ATTEMPTS = 4;
 
 interface Point {
   x: number;
@@ -376,27 +378,37 @@ async function ensureReasoning(
   }
   if (slider.value === targetValue) return effort;
 
-  const focused = await evaluateValue<boolean>(connection, executionSliderFocusExpression());
-  if (!focused) {
-    throw new DomainError(
-      ErrorCode.WORKSPACE_NOT_READY,
-      `ChatGPT reasoning effort "${effort}" could not focus the current execution slider`,
-    );
+  let currentValue = slider.value;
+  for (let transition = 0; transition < EXECUTION_VERIFY_ATTEMPTS && currentValue !== targetValue; transition += 1) {
+    let advanced = false;
+    for (let retry = 0; retry < EXECUTION_KEY_STEP_RETRIES && !advanced; retry += 1) {
+      const focused = await evaluateValue<boolean>(connection, executionSliderFocusExpression());
+      if (!focused) {
+        surface = await waitForReasoningSlider(connection, sleepMs);
+        currentValue = surface.slider?.value ?? currentValue;
+        await sleepMs(EXECUTION_VERIFY_POLL_MS);
+        continue;
+      }
+
+      const key = currentValue < targetValue ? "ArrowRight" : "ArrowLeft";
+      await dispatchKey(connection, key);
+      for (let settle = 0; settle < EXECUTION_KEY_SETTLE_ATTEMPTS; settle += 1) {
+        await sleepMs(EXECUTION_VERIFY_POLL_MS);
+        const observed = await evaluateValue<ExecutionSurface>(connection, executionSurfaceExpression());
+        surface = observed?.menuOpen ? observed : await openExecutionMenu(connection, sleepMs);
+        const nextValue = surface.slider?.value;
+        if (nextValue === targetValue) return effort;
+        if (nextValue !== undefined && nextValue !== currentValue) {
+          currentValue = nextValue;
+          advanced = true;
+          break;
+        }
+      }
+    }
+
+    if (!advanced) break;
   }
 
-  const delta = targetValue - slider.value;
-  const key = delta > 0 ? "ArrowRight" : "ArrowLeft";
-  for (let step = 0; step < Math.abs(delta); step += 1) {
-    await dispatchKey(connection, key);
-    await sleepMs(EXECUTION_VERIFY_POLL_MS);
-  }
-
-  for (let attempt = 0; attempt < EXECUTION_VERIFY_ATTEMPTS; attempt += 1) {
-    const observed = await evaluateValue<ExecutionSurface>(connection, executionSurfaceExpression());
-    surface = observed?.menuOpen ? observed : await openExecutionMenu(connection, sleepMs);
-    if (surface.slider?.value === targetValue) return effort;
-    await sleepMs(EXECUTION_VERIFY_POLL_MS);
-  }
   throw new DomainError(
     ErrorCode.WORKSPACE_NOT_READY,
     `ChatGPT reasoning effort did not verify as "${effort}" after the picker interaction`,
