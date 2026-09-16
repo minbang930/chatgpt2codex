@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ErrorCode, type Lease, type ProjectRegistryEntry } from "../types.js";
-import { makeLease, requireLease } from "./project-select.js";
+import { makeLease, renewLease, requireLease } from "./project-select.js";
 
 const alpha: ProjectRegistryEntry = {
   projectId: "alpha-app",
@@ -23,6 +23,27 @@ describe("makeLease", () => {
     const a = makeLease(alpha, "read-only");
     const b = makeLease(alpha, "read-only");
     expect(a.leaseId).not.toBe(b.leaseId);
+  });
+});
+
+describe("renewLease", () => {
+  it("preserves project and preset while issuing a fresh lease window", () => {
+    const original: Lease = {
+      projectId: "alpha-app",
+      leaseId: "lease_old",
+      projectRoot: alpha.root,
+      preset: "control",
+      issuedAt: Date.now() - 120_000,
+      expiresAt: Date.now() - 60_000,
+    };
+
+    const renewed = renewLease(original);
+
+    expect(renewed.projectId).toBe(original.projectId);
+    expect(renewed.projectRoot).toBe(original.projectRoot);
+    expect(renewed.preset).toBe(original.preset);
+    expect(renewed.leaseId).not.toBe(original.leaseId);
+    expect(renewed.expiresAt).toBeGreaterThan(renewed.issuedAt);
   });
 });
 
