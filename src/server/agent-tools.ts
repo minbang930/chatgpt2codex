@@ -17,6 +17,10 @@ import {
   spawnAgent,
   waitForAgentEvents,
 } from "../agents/manager.js";
+import {
+  WORKER_EXECUTION_FALLBACK_POLICIES,
+  WORKER_REASONING_EFFORTS,
+} from "../agents/execution-settings.js";
 import { completeWorker, type WorkerRecord, type WorkerResult } from "../agents/store.js";
 import { revokeWorkerCapability, verifyWorkerCapability } from "../agents/capability.js";
 import { addToolCallProof } from "./tool-proof.js";
@@ -163,12 +167,17 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
     {
       title: "Prepare isolated coding worker",
       description:
-        "Create a durable worker plus its isolated managed Git branch/worktree when the active lease permits worker orchestration. This does not grant the parent direct project-write authority. Browser worker launch is a later step, so do not claim the task is running until the worker becomes running.",
+        "Create a durable worker plus its isolated managed Git branch/worktree when the active lease permits worker orchestration. Optional execution settings override global/project worker defaults for this worker only and are durably resolved at spawn time. This does not grant the parent direct project-write authority. Browser worker launch is a later step, so do not claim the task is running until the worker becomes running.",
       annotations: LOCAL_STATE_ANNOTATIONS,
       _meta: chatGptMeta("Preparing isolated worker...", "Isolated worker prepared"),
       inputSchema: {
         task: z.string().min(1),
         baseRef: z.string().min(1).optional(),
+        execution: z.object({
+          model: z.string().max(200).optional(),
+          reasoningEffort: z.enum(WORKER_REASONING_EFFORTS).optional(),
+          fallbackPolicy: z.enum(WORKER_EXECUTION_FALLBACK_POLICIES).optional(),
+        }).strict().optional(),
       },
     },
     async (input) =>
@@ -182,6 +191,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
           project: { projectId: active.projectId, root: active.root },
           task: input.task,
           baseRef: input.baseRef,
+          execution: input.execution,
         });
         return makeResult(
           {
