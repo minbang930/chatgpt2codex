@@ -190,8 +190,15 @@ export class Store {
     // control lease could only have been granted locally. Treat it as the
     // durable local authorization without forcing the owner to re-arm after
     // upgrading the runtime.
-    if (!parsed.data.controlLease && parsed.data.lease?.preset === "control") {
-      return { ...parsed.data, controlLease: parsed.data.lease };
+    const legacyControlLease = parsed.data.lease;
+    if (!parsed.data.controlLease && legacyControlLease?.preset === "control") {
+      return {
+        ...parsed.data,
+        controlLease: {
+          ...legacyControlLease,
+          preset: "control",
+        },
+      };
     }
     return parsed.data;
   }
