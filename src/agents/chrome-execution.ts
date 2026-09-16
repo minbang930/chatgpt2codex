@@ -5,6 +5,7 @@ import type {
 } from "./execution-settings.js";
 import type { CdpConnection } from "./chrome-cdp.js";
 
+const EXECUTION_CONTROL_ATTEMPTS = 30;
 const EXECUTION_MENU_ATTEMPTS = 20;
 const EXECUTION_MENU_POLL_MS = 100;
 const EXECUTION_VERIFY_ATTEMPTS = 12;
@@ -278,7 +279,12 @@ async function openExecutionMenu(
   let surface = await evaluateValue<ExecutionSurface>(connection, executionSurfaceExpression());
   if (surface?.menuOpen) return surface;
 
-  const point = await evaluateValue<Point | null>(connection, executionControlExpression());
+  let point: Point | null | undefined;
+  for (let attempt = 0; attempt < EXECUTION_CONTROL_ATTEMPTS; attempt += 1) {
+    point = await evaluateValue<Point | null>(connection, executionControlExpression());
+    if (point) break;
+    await sleepMs(EXECUTION_MENU_POLL_MS);
+  }
   if (!point) {
     throw new DomainError(
       ErrorCode.WORKSPACE_NOT_READY,
