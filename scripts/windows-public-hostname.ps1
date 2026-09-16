@@ -14,15 +14,18 @@ function Normalize-ChatGPT2CodexPublicHostname([string]$Value) {
 }
 
 function Get-ChatGPT2CodexEncodedIniSetting([string]$Path, [string]$Key) {
-    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return $null }
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not [System.IO.File]::Exists($Path)) { return $null }
 
     try {
-        foreach ($line in Get-Content -LiteralPath $Path -ErrorAction Stop) {
+        foreach ($rawLine in [System.IO.File]::ReadAllLines($Path, [System.Text.Encoding]::UTF8)) {
+            if ($null -eq $rawLine) { continue }
+            $line = ([string]$rawLine).TrimStart([char]0xFEFF)
             $index = $line.IndexOf('=')
             if ($index -le 0) { continue }
-            if ($line.Substring(0, $index) -ne $Key) { continue }
+            if (-not $line.Substring(0, $index).Equals($Key, [System.StringComparison]::Ordinal)) { continue }
 
-            $encoded = $line.Substring($index + 1)
+            $encoded = $line.Substring($index + 1).Trim()
+            if ([string]::IsNullOrWhiteSpace($encoded)) { return $null }
             $bytes = [System.Convert]::FromBase64String($encoded)
             return [System.Text.Encoding]::UTF8.GetString($bytes)
         }
