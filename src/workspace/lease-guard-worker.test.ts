@@ -5,6 +5,17 @@ import { requireProjectLease } from "./lease-guard.js";
 const projectId = "project-worker-lease";
 const projectRoot = "/tmp/project-worker-lease";
 
+function baseConfig() {
+  return {
+    workspaceRoot: "/tmp",
+    stateDir: "/tmp/state",
+    maxReadBytes: 1024,
+    maxPatchBytes: 1024,
+    defaultCommandTimeoutSec: 30,
+    defaultLeaseTtlMs: 60_000,
+  };
+}
+
 function ctxFor(preset: Lease["preset"]): ToolContext {
   const now = Date.now();
   const lease: Lease = {
@@ -26,26 +37,19 @@ function ctxFor(preset: Lease["preset"]): ToolContext {
       getSession: async () => ({ activeProjectId: projectId, lease }),
       setSession: async () => undefined,
     },
-    config: {
-      workspaceRoot: "/tmp",
-      stateDir: "/tmp/state",
-      maxReadBytes: 1024,
-      maxPatchBytes: 1024,
-      defaultCommandTimeoutSec: 30,
-      defaultLeaseTtlMs: 60_000,
-    },
+    config: baseConfig(),
   };
 }
 
 function expiredCtxFor(preset: Lease["preset"]): {
   ctx: ToolContext;
-  getSession: () => { activeProjectId: string; mode: "read"; lease: Lease };
+  getSession: () => { activeProjectId: string; mode: "read"; lease: Lease; controlLease?: Lease };
   ledgerEvents: Array<{ type: string; [key: string]: unknown }>;
 } {
   const now = Date.now();
-  let session = {
+  let session: { activeProjectId: string; mode: "read"; lease: Lease; controlLease?: Lease } = {
     activeProjectId: projectId,
-    mode: "read" as const,
+    mode: "read",
     lease: {
       projectId,
       projectRoot,
@@ -53,7 +57,7 @@ function expiredCtxFor(preset: Lease["preset"]): {
       leaseId: `expired_${preset}`,
       issuedAt: now - 120_000,
       expiresAt: now - 60_000,
-    } satisfies Lease,
+    },
   };
   const ledgerEvents: Array<{ type: string; [key: string]: unknown }> = [];
   const ctx: ToolContext = {
@@ -73,16 +77,52 @@ function expiredCtxFor(preset: Lease["preset"]): {
         session = next as typeof session;
       },
     },
-    config: {
-      workspaceRoot: "/tmp",
-      stateDir: "/tmp/state",
-      maxReadBytes: 1024,
-      maxPatchBytes: 1024,
-      defaultCommandTimeoutSec: 30,
-      defaultLeaseTtlMs: 60_000,
-    },
+    config: baseConfig(),
   };
   return { ctx, getSession: () => session, ledgerEvents };
+}
+
+function splitAuthorityCtx(): {
+  ctx: ToolContext;
+  getSession: () => { activeProjectId: string; mode: "edit"; lease: Lease; controlLease: Lease };
+} {
+  const now = Date.now();
+  let session = {
+    activeProjectId: projectId,
+    mode: "edit" as const,
+    lease: {
+      projectId,
+      projectRoot,
+      preset: "full-write" as const,
+      leaseId: "lease_write",
+      issuedAt: now,
+      expiresAt: now + 60_000,
+    },
+    controlLease: {
+      projectId,
+      projectRoot,
+      preset: "control" as const,
+      leaseId: "lease_control_old",
+      issuedAt: now - 120_000,
+      expiresAt: now - 60_000,
+    },
+  };
+  const ctx: ToolContext = {
+    workspaceRoot: "/tmp",
+    stateDir: "/tmp/state",
+    registry: [],
+    ledger: { append: async () => undefined },
+    store: {
+      loadProjects: async () => [],
+      saveProjects: async () => undefined,
+      getSession: async () => session,
+      setSession: async (next) => {
+        session = next as typeof session;
+      },
+    },
+    config: baseConfig(),
+  };
+  return { ctx, getSession: () => session };
 }
 
 describe("worker orchestration lease capability", () => {
@@ -96,7 +136,7 @@ describe("worker orchestration lease capability", () => {
     });
   });
 
-  it("keeps full-write worker-capable without granting desktop control", async () => {
+  it("keeps full-write worker-capable without granting desktop control by itself", async () => {
     const ctx = ctxFor("full-write");
 
     await expect(requireProjectLease(ctx, projectId, "worker")).resolves.toMatchObject({ preset: "full-write" });
@@ -106,7 +146,7 @@ describe("worker orchestration lease capability", () => {
     });
   });
 
-  it("does not let read/tests/image presets create workers", async () => {
+  it("does not let read/tests/image presets create workers without a local control grant", async () => {
     for (const preset of ["read-only", "tests-only", "image-only"] as const) {
       await expect(requireProjectLease(ctxFor(preset), projectId, "worker"), preset).rejects.toMatchObject({
         code: "PERMISSION_DENIED",
@@ -114,7 +154,7 @@ describe("worker orchestration lease capability", () => {
     }
   });
 
-  it("transparently rolls an expired control lease and persists the renewed lease", async () => {
+  it("transparently rolls an expired legacy active control lease and persists the renewed lease", async () => {
     const { ctx, getSession, ledgerEvents } = expiredCtxFor("control");
     const before = getSession().lease;
 
@@ -125,12 +165,27 @@ describe("worker orchestration lease capability", () => {
     expect(renewed.issuedAt).toBeGreaterThan(before.issuedAt);
     expect(renewed.expiresAt).toBeGreaterThan(Date.now());
     expect(getSession().lease).toEqual(renewed);
+    expect(getSession().controlLease).toEqual(renewed);
     expect(ledgerEvents).toContainEqual(
       expect.objectContaining({ type: "control.lease.renewed", projectId, leaseId: renewed.leaseId }),
     );
   });
 
-  it("does not auto-renew expired non-control leases", async () => {
+  it("keeps durable local control usable while the active project lease is full-write", async () => {
+    const { ctx, getSession } = splitAuthorityCtx();
+    const activeWriteLeaseId = getSession().lease.leaseId;
+
+    const control = await requireProjectLease(ctx, projectId, "control");
+
+    expect(control.preset).toBe("control");
+    expect(control.leaseId).not.toBe("lease_control_old");
+    expect(getSession().lease.leaseId).toBe(activeWriteLeaseId);
+    expect(getSession().lease.preset).toBe("full-write");
+    expect(getSession().controlLease).toEqual(control);
+    await expect(requireProjectLease(ctx, projectId, "write")).resolves.toMatchObject({ preset: "full-write" });
+  });
+
+  it("does not auto-renew expired non-control leases without a durable control grant", async () => {
     const { ctx, getSession } = expiredCtxFor("full-write");
     const before = getSession().lease;
 
