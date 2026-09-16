@@ -5,7 +5,7 @@ import {
   markBrowserWorkerFailed,
   type BrowserWorkerSession,
 } from "./browser-controller.js";
-import { getWorker, type WorkerStatus } from "./store.js";
+import { getWorker, type WorkerRecord, type WorkerStatus } from "./store.js";
 
 const FALLBACK_COMPLETION_PREFIX = "ChatGPT worker response ended without worker_finish.";
 const MAX_FALLBACK_ASSISTANT_TEXT = 2_800;
@@ -56,6 +56,30 @@ function browserView(session: BrowserWorkerSession, durableStatus: WorkerStatus 
     recoverable:
       durableStatus === "running" && (session.status === "failed" || session.status === "stopped"),
     completionFallback: isFallbackCompletion(session),
+  };
+}
+
+function executionView(
+  worker: WorkerRecord | null,
+  browser: BrowserWorkerSession | null,
+): Record<string, unknown> | undefined {
+  const intent = worker?.executionIntent;
+  const observed = browser?.execution;
+  if (!intent && !observed) return undefined;
+  const observedSettings = observed && (observed.observedModel || observed.observedReasoningEffort)
+    ? {
+        model: observed.observedModel,
+        reasoningEffort: observed.observedReasoningEffort,
+      }
+    : undefined;
+  return {
+    requested: intent?.requested,
+    resolved: intent?.resolved,
+    sources: intent?.sources,
+    observed: observedSettings,
+    verified: observed?.verified,
+    error: observed?.error,
+    attempt: browser?.attempt,
   };
 }
 
@@ -123,10 +147,26 @@ export async function reconcileBrowserWorker(
   return markBrowserWorkerFailed(stateDir, workerId, fallbackFailureMessage(assistantText));
 }
 
+function withExecutionDiagnostics(
+  result: CallToolResultLike,
+  worker: WorkerRecord | null,
+  browser: BrowserWorkerSession | null,
+): CallToolResultLike {
+  const execution = executionView(worker, browser);
+  if (!execution) return result;
+  return {
+    ...result,
+    structuredContent: {
+      ...(result.structuredContent ?? {}),
+      execution,
+    },
+  };
+}
+
 /**
- * Enrich the existing `agent_status` result with reconciled browser state.
- * Liveness/completion are checked on demand rather than by a background
- * poller, keeping Core operation independent from browser health.
+ * Enrich `agent_status` with reconciled browser state and both `agent_status`
+ * and `agent_result` with durable-vs-observed execution diagnostics. Liveness
+ * is reconciled only on status reads; result reads stay durable/read-only.
  */
 export function installAgentStatusBrowserReconciliation(
   server: McpServer,
@@ -135,37 +175,57 @@ export function installAgentStatusBrowserReconciliation(
   completionProbe?: BrowserCompletionProbe,
 ): void {
   const registered = (server as unknown as { _registeredTools?: Record<string, RegisteredToolLike> })._registeredTools;
-  const tool = registered?.agent_status;
-  const original = tool?.handler;
-  if (!tool || !original) return;
+  const statusTool = registered?.agent_status;
+  const originalStatus = statusTool?.handler;
+  if (statusTool && originalStatus) {
+    statusTool.handler = async (...args: unknown[]) => {
+      const input = args[0] as { workerId?: unknown } | undefined;
+      const workerId = typeof input?.workerId === "string" ? input.workerId : undefined;
+      let browser: BrowserWorkerSession | null = null;
+      if (workerId) {
+        browser = await reconcileBrowserWorker(stateDir, workerId, probe, completionProbe).catch(() => null);
+      }
 
-  tool.handler = async (...args: unknown[]) => {
-    const input = args[0] as { workerId?: unknown } | undefined;
-    const workerId = typeof input?.workerId === "string" ? input.workerId : undefined;
-    let browser: BrowserWorkerSession | null = null;
-    if (workerId) {
-      browser = await reconcileBrowserWorker(stateDir, workerId, probe, completionProbe).catch(() => null);
-    }
-
-    const result = await original(...args);
-    if (!browser) return result;
-    const durableWorker = workerId ? await getWorker(stateDir, workerId).catch(() => null) : null;
-    const fallback = isFallbackCompletion(browser);
-    return {
-      ...result,
-      structuredContent: {
-        ...(result.structuredContent ?? {}),
-        browser: browserView(browser, durableWorker?.status),
-      },
-      content: fallback
-        ? [
-            ...(Array.isArray(result.content) ? result.content : []),
-            {
-              type: "text",
-              text: `Browser fallback detected for ${workerId}: ${browser.lastError ?? FALLBACK_COMPLETION_PREFIX}`,
-            },
-          ]
-        : result.content,
+      const result = await originalStatus(...args);
+      const durableWorker = workerId ? await getWorker(stateDir, workerId).catch(() => null) : null;
+      let enriched = withExecutionDiagnostics(result, durableWorker, browser);
+      if (!browser) return enriched;
+      const fallback = isFallbackCompletion(browser);
+      enriched = {
+        ...enriched,
+        structuredContent: {
+          ...(enriched.structuredContent ?? {}),
+          browser: browserView(browser, durableWorker?.status),
+        },
+      };
+      return fallback
+        ? {
+            ...enriched,
+            content: [
+              ...(Array.isArray(enriched.content) ? enriched.content : []),
+              {
+                type: "text",
+                text: `Browser fallback detected for ${workerId}: ${browser.lastError ?? FALLBACK_COMPLETION_PREFIX}`,
+              },
+            ],
+          }
+        : enriched;
     };
-  };
+  }
+
+  const resultTool = registered?.agent_result;
+  const originalResult = resultTool?.handler;
+  if (resultTool && originalResult) {
+    resultTool.handler = async (...args: unknown[]) => {
+      const input = args[0] as { workerId?: unknown } | undefined;
+      const workerId = typeof input?.workerId === "string" ? input.workerId : undefined;
+      const result = await originalResult(...args);
+      if (!workerId) return result;
+      const [worker, browser] = await Promise.all([
+        getWorker(stateDir, workerId).catch(() => null),
+        getBrowserWorkerSession(stateDir, workerId).catch(() => null),
+      ]);
+      return withExecutionDiagnostics(result, worker, browser);
+    };
+  }
 }
