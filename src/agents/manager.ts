@@ -1,6 +1,12 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { DomainError, ErrorCode, type ProjectRegistryEntry } from "../types.js";
 import {
+  getWorkerExecutionSettingsSnapshot,
+  resolveWorkerExecutionIntent,
+  type WorkerExecutionIntent,
+  type WorkerExecutionPreference,
+} from "./execution-settings.js";
+import {
   cancelWorker,
   getWorker,
   listUnnotifiedWorkerEvents,
@@ -19,6 +25,7 @@ export interface AgentSpawnInput {
   project: Pick<ProjectRegistryEntry, "projectId" | "root">;
   task: string;
   baseRef?: string;
+  execution?: WorkerExecutionPreference;
 }
 
 export interface AgentWaitInput {
@@ -60,8 +67,17 @@ function selectEvents(events: AgentEvent[], workerIds: Set<string> | null): Agen
   return events.filter((event) => workerIds.has(event.worker.workerId));
 }
 
+function hasExecutionIntent(intent: WorkerExecutionIntent): boolean {
+  return intent.requested !== undefined || intent.resolved !== undefined || intent.sources !== undefined;
+}
+
 /**
  * Create a durable worker and provision its isolated Git branch/worktree.
+ *
+ * Execution defaults are resolved before durable worker creation. If an
+ * explicit global/project/per-worker preference exists, the resolved intent is
+ * written into the worker record once and becomes immutable launch/recovery
+ * input; later default changes therefore cannot silently alter this worker.
  *
  * This deliberately leaves the worker in `pending`: M2's browser worker
  * controller owns the transition to `running` once a real ChatGPT worker has
@@ -71,9 +87,16 @@ function selectEvents(events: AgentEvent[], workerIds: Set<string> | null): Agen
  */
 export async function spawnAgent(stateDir: string, input: AgentSpawnInput): Promise<WorkerRecord> {
   const { createWorker } = await import("./store.js");
+  const settings = await getWorkerExecutionSettingsSnapshot(stateDir, input.project.projectId);
+  const executionIntent = resolveWorkerExecutionIntent({
+    global: settings.global,
+    project: settings.project,
+    worker: input.execution,
+  });
   const worker = await createWorker(stateDir, {
     projectId: input.project.projectId,
     task: input.task,
+    ...(hasExecutionIntent(executionIntent) ? { executionIntent } : {}),
   });
 
   try {
