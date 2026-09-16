@@ -3,18 +3,22 @@ import { requireLease } from "./project-select.js";
 
 /**
  * Capability ceiling checked against the active project lease's preset.
- * Shared by src/server/tools.ts (file/command/git tools) and
- * src/control/tools.ts (desktop-control tools) so both enforce the same
- * preset -> capability table from a single source of truth.
+ * Shared by src/server/tools.ts (file/command/git tools), worker orchestration,
+ * and src/control/tools.ts (desktop-control tools) so all paths enforce the
+ * same preset -> capability table from a single source of truth.
+ *
+ * `worker` authorizes only bounded worker lifecycle/orchestration operations
+ * such as creating an isolated managed worktree and launching its browser
+ * worker. It does not authorize direct project writes.
  */
-export type LeaseCapability = "read" | "verify" | "write" | "image" | "remote" | "control";
+export type LeaseCapability = "read" | "verify" | "write" | "image" | "remote" | "control" | "worker";
 
 const ALLOWED_CAPABILITIES: Record<LeasePreset, ReadonlySet<LeaseCapability>> = {
   "read-only": new Set(["read"]),
   "tests-only": new Set(["read", "verify"]),
-  "full-write": new Set(["read", "verify", "write", "image", "remote"]),
+  "full-write": new Set(["read", "verify", "write", "image", "remote", "worker"]),
   "image-only": new Set(["read", "image"]),
-  control: new Set(["read", "control"]),
+  control: new Set(["read", "control", "worker"]),
 };
 
 /**
