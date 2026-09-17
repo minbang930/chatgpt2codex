@@ -100,12 +100,14 @@ export async function spawnAgent(stateDir: string, input: AgentSpawnInput): Prom
     task: input.task,
     ...(hasExecutionIntent(executionIntent) ? { executionIntent } : {}),
   });
-  await pinBrowserWorkerPlacement(
-    stateDir,
-    worker.workerId,
-    worker.projectId,
-    input.placement,
-  );
+  if (input.placement || process.env.CHATGPT2CODEX_WORKER_PROJECT_URL?.trim()) {
+    await pinBrowserWorkerPlacement(
+      stateDir,
+      worker.workerId,
+      worker.projectId,
+      input.placement,
+    );
+  }
 
   try {
     return await provisionWorkerWorktree(
