@@ -105,6 +105,7 @@ internal sealed class LauncherForm : Form
     private int port;
     private string preferredLanguage = "auto";
     private string githubRepoUrl;
+    private string workerProjectUrl;
     private bool publicTunnelEnabled;
     private bool launchAtStartup;
     private bool startMcpOnOpen;
@@ -145,6 +146,7 @@ internal sealed class LauncherForm : Form
         settingsFile = Path.Combine(appDataDir, "settings.ini");
         defaultWorkspace = ResolveDefaultWorkspace();
         configuredPublicHost = ResolveConfiguredPublicHost();
+        workerProjectUrl = ResolveWorkerProjectUrl();
         port = ResolvePort();
         publicTunnelEnabled = false;
         githubRepoUrl = Environment.GetEnvironmentVariable("CHATGPT2CODEX_UPDATE_REPO_URL");
@@ -415,6 +417,34 @@ internal sealed class LauncherForm : Form
         return value.TrimEnd('/');
     }
 
+    private static bool TryNormalizeWorkerProjectUrl(string value, out string normalized)
+    {
+        normalized = null;
+        if (string.IsNullOrWhiteSpace(value)) return true;
+
+        Uri uri;
+        if (!Uri.TryCreate(value.Trim(), UriKind.Absolute, out uri) ||
+            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            !(string.Equals(uri.Host, "chatgpt.com", StringComparison.OrdinalIgnoreCase) ||
+              string.Equals(uri.Host, "www.chatgpt.com", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        var builder = new UriBuilder(uri);
+        builder.Fragment = string.Empty;
+        normalized = builder.Uri.AbsoluteUri.TrimEnd('/');
+        return true;
+    }
+
+    private string ResolveWorkerProjectUrl()
+    {
+        var value = GetArgValue("-WorkerProjectUrl");
+        if (string.IsNullOrWhiteSpace(value)) value = Environment.GetEnvironmentVariable("CHATGPT2CODEX_WORKER_PROJECT_URL");
+        string normalized;
+        return TryNormalizeWorkerProjectUrl(value, out normalized) ? normalized : null;
+    }
+
     private string LoadSelectedProjectPath()
     {
         try
@@ -470,6 +500,11 @@ internal sealed class LauncherForm : Form
                 int parsedPort;
                 if (key == "ProjectFolder" && Directory.Exists(value)) selectedProjectPath = Path.GetFullPath(value);
                 else if (key == "Port" && int.TryParse(value, out parsedPort) && parsedPort > 0) port = parsedPort;
+                else if (key == "WorkerProjectUrl")
+                {
+                    string normalized;
+                    workerProjectUrl = TryNormalizeWorkerProjectUrl(value, out normalized) ? normalized : null;
+                }
                 else if (key == "PublicHostname") configuredPublicHost = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
                 else if (key == "EnablePublicTunnel") publicTunnelEnabled = ParseBool(value);
                 else if (key == "LaunchAtStartup") launchAtStartup = ParseBool(value);
@@ -499,6 +534,7 @@ internal sealed class LauncherForm : Form
         var lines = new[]
         {
             "ProjectFolder=" + EncodeSetting(selectedProjectPath ?? string.Empty),
+            "WorkerProjectUrl=" + EncodeSetting(workerProjectUrl ?? string.Empty),
             "Port=" + EncodeSetting(port.ToString()),
             "PublicHostname=" + EncodeSetting(configuredPublicHost ?? string.Empty),
             "EnablePublicTunnel=" + EncodeSetting(publicTunnelEnabled ? "true" : "false"),
@@ -543,7 +579,8 @@ internal sealed class LauncherForm : Form
         var values = new List<string>();
         for (var i = 0; i < args.Length; i++)
         {
-            if (IsOption(args[i], "-Workspace") || IsOption(args[i], "-Port") || IsOption(args[i], "-PublicHostname"))
+            if (IsOption(args[i], "-Workspace") || IsOption(args[i], "-Port") || IsOption(args[i], "-PublicHostname") ||
+                IsOption(args[i], "-WorkerProjectUrl"))
             {
                 i++;
                 continue;
@@ -757,7 +794,7 @@ internal sealed class LauncherForm : Form
         {
             form.Text = L("settingsTitle");
             form.Width = 640;
-            form.Height = 670;
+            form.Height = 750;
             form.StartPosition = FormStartPosition.CenterParent;
             form.FormBorderStyle = FormBorderStyle.FixedDialog;
             form.MaximizeBox = false;
@@ -850,64 +887,102 @@ internal sealed class LauncherForm : Form
             repoBox.SetBounds(180, 378, 342, 24);
             form.Controls.Add(repoBox);
 
-            var copyConnector = NewButton(L("copyConnector"), 24, 426, 156);
+            var korean = string.Equals(ResolveLanguageCode(preferredLanguage), "ko", StringComparison.OrdinalIgnoreCase);
+            form.Controls.Add(NewLabel(korean ? "Worker ChatGPT 프로젝트 URL" : "Worker ChatGPT Project URL", 24, 416, 150));
+            var workerProjectBox = new TextBox();
+            workerProjectBox.Text = workerProjectUrl ?? string.Empty;
+            workerProjectBox.SetBounds(180, 412, 342, 24);
+            form.Controls.Add(workerProjectBox);
+
+            var workerProjectHint = NewLabel(
+                korean
+                    ? "비워두면 자동/유동 배치됩니다. URL을 넣으면 새 Worker가 항상 해당 ChatGPT Project에 생성됩니다."
+                    : "Blank uses automatic/dynamic placement. Set a URL to force every new Worker into that ChatGPT Project.",
+                180,
+                442,
+                342);
+            workerProjectHint.SetBounds(180, 440, 342, 42);
+            workerProjectHint.ForeColor = System.Drawing.SystemColors.GrayText;
+            form.Controls.Add(workerProjectHint);
+
+            var copyConnector = NewButton(L("copyConnector"), 24, 496, 156);
             copyConnector.Click += delegate { CopyMcpUrl(); };
             form.Controls.Add(copyConnector);
 
-            var copyOwner = NewButton(L("copyOwnerToken"), 194, 426, 156);
+            var copyOwner = NewButton(L("copyOwnerToken"), 194, 496, 156);
             copyOwner.Enabled = !string.IsNullOrEmpty(ownerToken);
             copyOwner.Click += delegate { CopyOwnerToken(); };
             form.Controls.Add(copyOwner);
 
-            var generateOwner = NewButton(L("autoGenerateToken"), 364, 426, 158);
+            var generateOwner = NewButton(L("autoGenerateToken"), 364, 496, 158);
             generateOwner.Click += delegate { AutoGenerateOwnerToken(); };
             form.Controls.Add(generateOwner);
 
-            var localHealth = NewButton(L("openLocalHealth"), 24, 464, 156);
+            var localHealth = NewButton(L("openLocalHealth"), 24, 534, 156);
             localHealth.Click += delegate { OpenLocalHealth(); };
             form.Controls.Add(localHealth);
 
-            var publicHealth = NewButton(L("openPublicHealth"), 194, 464, 156);
+            var publicHealth = NewButton(L("openPublicHealth"), 194, 534, 156);
             publicHealth.Click += delegate { OpenPublicHealth(); };
             form.Controls.Add(publicHealth);
 
-            var logs = NewButton(L("showLogs"), 364, 464, 158);
+            var logs = NewButton(L("showLogs"), 364, 534, 158);
             logs.Click += delegate { ShowLogs(); };
             form.Controls.Add(logs);
 
-            var github = NewButton(L("openGithub"), 24, 502, 156);
+            var github = NewButton(L("openGithub"), 24, 572, 156);
             github.Click += delegate { OpenGithub(); };
             form.Controls.Add(github);
 
-            var checkUpdates = NewButton(L("checkUpdates"), 194, 502, 156);
+            var checkUpdates = NewButton(L("checkUpdates"), 194, 572, 156);
             checkUpdates.Click += delegate { CheckUpdates(true); };
             form.Controls.Add(checkUpdates);
 
-            var about = NewButton(L("about"), 364, 502, 158);
+            var about = NewButton(L("about"), 364, 572, 158);
             about.Click += delegate
             {
                 MessageBox.Show(form, "ChatGPT To Codex by ezBuilder\r\nCopyright 2026 ezBuilder. All rights reserved.", "ChatGPT To Codex", MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
             form.Controls.Add(about);
 
-            var copyright = NewLabel("Copyright 2026 ezBuilder. All rights reserved.", 24, 560, 300);
+            var copyright = NewLabel("Copyright 2026 ezBuilder. All rights reserved.", 24, 630, 300);
             form.Controls.Add(copyright);
 
-            var cancel = NewButton(L("cancel"), 356, 554, 78);
+            var cancel = NewButton(L("cancel"), 356, 624, 78);
             cancel.DialogResult = DialogResult.Cancel;
             form.Controls.Add(cancel);
 
-            var save = NewButton(L("save"), 444, 554, 78);
+            var save = NewButton(L("save"), 444, 624, 78);
             save.DialogResult = DialogResult.OK;
             form.AcceptButton = save;
             form.CancelButton = cancel;
             form.Controls.Add(save);
+
+            string normalizedWorkerProjectUrl = workerProjectUrl;
+            form.FormClosing += delegate(object sender, FormClosingEventArgs e)
+            {
+                if (form.DialogResult != DialogResult.OK) return;
+                if (TryNormalizeWorkerProjectUrl(workerProjectBox.Text, out normalizedWorkerProjectUrl)) return;
+
+                MessageBox.Show(
+                    form,
+                    korean
+                        ? "Worker ChatGPT Project URL은 https://chatgpt.com 주소여야 합니다."
+                        : "Worker ChatGPT Project URL must be an https://chatgpt.com URL.",
+                    "ChatGPT To Codex",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                e.Cancel = true;
+                form.DialogResult = DialogResult.None;
+                workerProjectBox.Focus();
+            };
 
             ShowFromTray();
             if (form.ShowDialog(this) != DialogResult.OK) return;
 
             var wasRunning = IsManagedProcessRunning();
             selectedProjectPath = string.IsNullOrWhiteSpace(projectBox.Text) ? null : Path.GetFullPath(projectBox.Text);
+            workerProjectUrl = normalizedWorkerProjectUrl;
             launchAtStartup = launchCheck.Checked;
             startMcpOnOpen = startCheck.Checked;
             autoCheckUpdates = updatesCheck.Checked;
@@ -1287,6 +1362,7 @@ internal sealed class LauncherForm : Form
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
+        process.StartInfo.EnvironmentVariables["CHATGPT2CODEX_WORKER_PROJECT_URL"] = workerProjectUrl ?? string.Empty;
         if (autoGenerateOwnerTokenOnNextStart)
         {
             process.StartInfo.EnvironmentVariables["CHATGPT2CODEX_ROTATE_OWNER_TOKEN"] = "1";

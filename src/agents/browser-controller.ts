@@ -65,6 +65,15 @@ interface ProjectRoutesFile {
   mappings: ProjectRouteEntry[];
 }
 
+interface BrowserWorkerPlacement {
+  version: 1;
+  workerId: string;
+  projectId: string;
+  route: BrowserWorkerRoute;
+  source: "fixed" | "mapping" | "standalone" | "legacy-session";
+  createdAt: number;
+}
+
 export interface BrowserWorkerLaunchInput {
   workerId: string;
   projectId: string;
@@ -149,6 +158,15 @@ const ProjectRoutesFileSchema = z.object({
   mappings: z.array(ProjectRouteEntrySchema),
 }) satisfies z.ZodType<ProjectRoutesFile>;
 
+const BrowserWorkerPlacementSchema = z.object({
+  version: z.literal(1),
+  workerId: z.string().regex(WORKER_ID_RE),
+  projectId: z.string().min(1),
+  route: BrowserWorkerRouteSchema,
+  source: z.enum(["fixed", "mapping", "standalone", "legacy-session"]),
+  createdAt: z.number().int().nonnegative(),
+}) satisfies z.ZodType<BrowserWorkerPlacement>;
+
 function agentsDir(stateDir: string): string {
   return path.join(stateDir, "agents");
 }
@@ -157,8 +175,19 @@ function browserSessionsDir(stateDir: string): string {
   return path.join(agentsDir(stateDir), "browser-sessions");
 }
 
+function browserPlacementsDir(stateDir: string): string {
+  return path.join(agentsDir(stateDir), "browser-placements");
+}
+
 function projectRoutesPath(stateDir: string): string {
   return path.join(agentsDir(stateDir), "chatgpt-project-routes.json");
+}
+
+function placementPath(stateDir: string, workerId: string): string {
+  if (!WORKER_ID_RE.test(workerId) || path.basename(workerId) !== workerId) {
+    throw new DomainError(ErrorCode.PERMISSION_DENIED, `Invalid browser worker id: ${workerId}`);
+  }
+  return path.join(browserPlacementsDir(stateDir), `${workerId}.json`);
 }
 
 function sessionPath(stateDir: string, workerId: string): string {
@@ -274,6 +303,86 @@ export async function resolveBrowserWorkerRoute(stateDir: string, projectId: str
   return mapping ? { mode: "project", projectRef: mapping.projectRef } : { mode: "standalone" };
 }
 
+async function readBrowserWorkerPlacement(
+  stateDir: string,
+  workerId: string,
+): Promise<BrowserWorkerPlacement | null> {
+  try {
+    const raw = JSON.parse(await fs.readFile(placementPath(stateDir, workerId), "utf8"));
+    const parsed = BrowserWorkerPlacementSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new DomainError(ErrorCode.WORKSPACE_NOT_READY, `Stored browser placement failed validation: ${workerId}`);
+    }
+    return parsed.data;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function writeBrowserWorkerPlacement(
+  stateDir: string,
+  placement: BrowserWorkerPlacement,
+): Promise<void> {
+  await atomicWriteJson(
+    placementPath(stateDir, placement.workerId),
+    BrowserWorkerPlacementSchema.parse(placement),
+  );
+}
+
+async function resolveDurableBrowserWorkerRoute(
+  stateDir: string,
+  workerId: string,
+  projectId: string,
+  legacyRoute?: BrowserWorkerRoute,
+): Promise<BrowserWorkerRoute> {
+  const stored = await readBrowserWorkerPlacement(stateDir, workerId);
+  if (stored) {
+    if (stored.projectId !== projectId) {
+      throw new DomainError(
+        ErrorCode.PERMISSION_DENIED,
+        `Browser worker ${workerId} placement is bound to project ${stored.projectId}`,
+      );
+    }
+    return stored.route;
+  }
+
+  let route: BrowserWorkerRoute;
+  let source: BrowserWorkerPlacement["source"];
+  if (legacyRoute) {
+    route = BrowserWorkerRouteSchema.parse(legacyRoute);
+    source = "legacy-session";
+  } else {
+    const fixedUrl = process.env.CHATGPT2CODEX_WORKER_PROJECT_URL?.trim();
+    if (fixedUrl) {
+      route = {
+        mode: "project",
+        projectRef: normalizeProjectRef({ url: fixedUrl }),
+      };
+      source = "fixed";
+    } else {
+      const mapping = await getChatGptProjectMapping(stateDir, projectId);
+      if (mapping) {
+        route = { mode: "project", projectRef: mapping.projectRef };
+        source = "mapping";
+      } else {
+        route = { mode: "standalone" };
+        source = "standalone";
+      }
+    }
+  }
+
+  await writeBrowserWorkerPlacement(stateDir, {
+    version: 1,
+    workerId,
+    projectId,
+    route,
+    source,
+    createdAt: Date.now(),
+  });
+  return route;
+}
+
 async function writeBrowserWorkerSession(stateDir: string, session: BrowserWorkerSession): Promise<void> {
   const validated = BrowserWorkerSessionSchema.parse(session);
   await atomicWriteJson(sessionPath(stateDir, session.workerId), validated);
@@ -335,7 +444,7 @@ export async function prepareBrowserWorkerSession(
     version: 1,
     workerId: input.workerId,
     projectId,
-    route: await resolveBrowserWorkerRoute(stateDir, projectId),
+    route: await resolveDurableBrowserWorkerRoute(stateDir, input.workerId, projectId, current?.route),
     status: "prepared",
     attempt: (current?.attempt ?? 0) + 1,
     createdAt: current?.createdAt ?? now,
