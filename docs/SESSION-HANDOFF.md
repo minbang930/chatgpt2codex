@@ -11,9 +11,11 @@ Operational handoff for continuing `chatgpt2codex` across ChatGPT sessions. Veri
 
 ## Current phase
 
-M0-M5, blocking post-M5 stabilization, and **M6 - Worker Execution Configuration are complete**.
+M0-M5, blocking post-M5 stabilization, **M6 - Worker Execution Configuration**, and **M7 - Worker Placement Policy are complete**.
 
 Final M6 cross-platform CI: GitHub Actions run `35172617811` on post-validation HEAD `5dac24f96bd9ae162ad26a0b29bfeb96883526bd` passed Ubuntu, macOS, and Windows.
+
+Final M7 cross-platform CI: GitHub Actions run `35175254790` on `1eaf8fa75c24bf814b37090e5f0b4a02bfabb7bd` passed Ubuntu, macOS, and Windows, including the Windows launcher build.
 
 The only prior stabilization item still open is a non-blocking natural-use observation: eventually cross the original 30-minute local-control TTL and confirm no `LEASE_REQUIRED` regression. Renewal is already code/CI-proven and this does not block milestone progress.
 
@@ -28,6 +30,31 @@ The only prior stabilization item still open is a non-blocking natural-use obser
 
 Design/source of truth: `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
 Detailed live evidence: `docs/M6-LIVE-VALIDATION.md`.
+
+## M7 completed contract
+
+M7 adds a Worker placement policy without changing repository authority or Worker MCP isolation. The Windows launcher exposes a `Worker ChatGPT Project URL` setting. When non-empty, it is passed to the runtime as `CHATGPT2CODEX_WORKER_PROJECT_URL` and forces new workers into that ChatGPT Project. When blank, placement stays dynamic.
+
+Placement precedence for a new Worker is:
+
+```text
+existing durable Worker placement (recovery)
+  > EXE fixed Worker Project URL
+  > explicit per-worker placement from agent_spawn
+  > existing local-project -> ChatGPT-Project mapping
+  > standalone ChatGPT
+```
+
+Compatibility detail: when neither a fixed EXE URL nor an explicit per-worker placement exists, project mapping is intentionally resolved at first launch rather than at spawn. This preserves the established `agent_spawn -> agent_project_route_set -> agent_launch` workflow. Once the first route is resolved, it is persisted for that Worker.
+
+Live Windows evidence:
+
+- fixed URL with no Project mention created the Worker in the configured Project;
+- worker `wrk_0dc5fe1c-d919-46a2-9f3e-4cbbce5995b8` requested `standalone` while the EXE fixed URL was set, but launched in the fixed Project and completed with `changedFiles=[]`;
+- worker `wrk_f3f6ddb0-a6f5-4706-9090-6aa04b8e0900` launched standalone when the EXE field was blank and completed with `changedFiles=[]`;
+- worker `wrk_caa6c047-cd2f-4ff7-bf6c-f750fdcd5f2e` requested a specific Project while the EXE field was blank, and the actual `browser.projectUrl` matched exactly before task submission.
+
+Detailed evidence: `docs/M7-WORKER-PLACEMENT.md`.
 
 ## How to work with the user
 
@@ -210,6 +237,7 @@ M6 is complete. Final authoritative CI evidence:
 
 - `docs/WORKER-EXECUTION-CONFIG-DESIGN.md` — M6 design and implementation order.
 - `docs/M6-LIVE-VALIDATION.md` — detailed M6.5 live evidence and final CI.
+- `docs/M7-WORKER-PLACEMENT.md` — M7 placement policy, implementation, live validation, and final CI.
 - `docs/CUSTOM-RUNTIME-PROGRESS.md` — milestone/history and CI evidence.
 - `docs/CUSTOM-RUNTIME-PLAN.md` — architecture/roadmap.
 - `docs/CHATGPT-WORKER-APP-SETUP.md` — two-app configuration.
@@ -229,6 +257,7 @@ Keep detailed chronological evidence in `CUSTOM-RUNTIME-PROGRESS.md` and `M6-LIV
 2. Check actual `dev/custom-runtime` HEAD and latest CI.
 3. Read `docs/CUSTOM-RUNTIME-PROGRESS.md` and the next roadmap unit before making changes.
 4. Read `docs/M6-LIVE-VALIDATION.md` only when execution-configuration/live Worker details are relevant.
-5. If docs and repo disagree, trust repo and correct the docs.
+5. Read `docs/M7-WORKER-PLACEMENT.md` when Worker ChatGPT Project placement/routing is relevant.
+6. If docs and repo disagree, trust repo and correct the docs.
 
-M6 no longer needs further live validation unless a future ChatGPT UI/account change breaks the established adapter contract.
+M6 and M7 core contracts are complete. Revalidate only when future ChatGPT UI/account changes or placement-policy changes affect the established behavior.

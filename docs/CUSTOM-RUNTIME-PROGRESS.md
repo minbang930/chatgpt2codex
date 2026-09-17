@@ -4,12 +4,12 @@ Implementation status for `dev/custom-runtime`.
 
 ## Current status
 
-Overall phase: **M6 - Worker Execution Configuration — complete**
+Overall phase: **M7 - Worker Placement Policy — complete**
 
-Active unit: **M6 complete; select the next roadmap unit before implementation**
+Active unit: **M7 complete; select the next roadmap unit before implementation**
 
 Primary operational handoff: `docs/SESSION-HANDOFF.md`.
-Detailed live-validation record: `docs/M6-LIVE-VALIDATION.md`.
+Detailed live-validation records: `docs/M6-LIVE-VALIDATION.md` and `docs/M7-WORKER-PLACEMENT.md`.
 
 Detailed design documents:
 
@@ -224,9 +224,24 @@ Full CI `35132971767`: green on macOS, Ubuntu, and Windows.
 - [x] Worker `/mcp/worker` catalog/capability isolation and normal main `/mcp` behavior verified.
 - [x] Final cross-platform CI green: run `35172617811` on `5dac24f96bd9ae162ad26a0b29bfeb96883526bd`.
 
+## M7 - Worker Placement Policy — complete
+
+Design/live evidence: `docs/M7-WORKER-PLACEMENT.md`.
+
+- [x] Windows EXE settings expose `Worker ChatGPT Project URL`.
+- [x] A configured fixed URL forces every new Worker into that ChatGPT Project.
+- [x] Fixed EXE placement outranks an explicit per-worker `standalone` request.
+- [x] With the EXE URL blank, `agent_spawn` can request either `standalone` or a specific ChatGPT Project URL per worker.
+- [x] With no per-worker request, the existing local-project -> ChatGPT-Project mapping remains available, with standalone fallback.
+- [x] Placement is persisted durably per Worker once resolved so later mutable settings do not silently move an existing Worker.
+- [x] Existing `agent_project_route_set` deferred-routing behavior remains compatible.
+- [x] Invalid/non-ChatGPT fixed URLs fail before browser submission.
+- [x] Final cross-platform CI green: run `35175254790` on `1eaf8fa75c24bf814b37090e5f0b4a02bfabb7bd`.
+- [x] Live Windows validation confirmed fixed placement, fixed-over-standalone precedence, blank+standalone, and blank+specific-project placement.
+
 ## Current queue
 
-- [ ] Select the next roadmap unit before implementation; M6 requires no further validation unless ChatGPT UI/account behavior changes.
+- [ ] Select the next roadmap unit before implementation; M7 core placement behavior is complete.
 - [ ] Naturally cross the original 30-minute local-control TTL during normal use and confirm no `LEASE_REQUIRED` regression; this remains non-blocking.
 - [ ] Keep Worker MCP/app/control isolation green while future work evolves.
 

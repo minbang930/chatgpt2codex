@@ -4,7 +4,7 @@ This document extends the custom runtime plan for Web worker organization and me
 
 ## Goal
 
-When a local repository is linked to a ChatGPT Project, new worker chats should be created inside that ChatGPT Project. Project placement is only for UI organization. Repository authority comes from the dedicated worker MCP app plus the existing worker capability/worktree model.
+Worker chats can be placed dynamically or forced into one ChatGPT Project. Project placement is only for UI organization. Repository authority comes from the dedicated worker MCP app plus the existing worker capability/worktree model.
 
 ## Mapping
 
@@ -14,6 +14,18 @@ local repository -> optional ChatGPT Project reference
 
 Recommended default: one repository per ChatGPT Project.
 
+M7 adds a Windows EXE-level fixed placement setting and per-worker placement requests. Effective precedence is:
+
+```text
+existing durable Worker placement (recovery)
+  > fixed EXE Worker Project URL
+  > explicit per-worker placement
+  > local repository mapping
+  > standalone
+```
+
+If the EXE setting is blank, callers may request `placement.mode="standalone"` or `placement.mode="project"` with a `projectUrl` in `agent_spawn`. If they omit placement, the existing repository mapping/fallback behavior is preserved.
+
 Project metadata may later include an optional `chatgptProjectRef` field.
 
 ## Launch flow
@@ -21,9 +33,11 @@ Project metadata may later include an optional `chatgptProjectRef` field.
 ```text
 agent_spawn
  -> resolve local project
- -> resolve optional ChatGPT Project reference
+ -> apply fixed EXE placement when configured, otherwise accept optional per-worker placement
  -> prepare isolated worker workspace
- -> open the mapped ChatGPT Project, or use a standalone chat when no mapping exists
+ -> if still unresolved, resolve current local-project mapping at first launch
+ -> persist the resolved Worker placement
+ -> open that ChatGPT Project or standalone chat
  -> select the dedicated ChatGPT To Codex Worker app for the task message
  -> send the worker task + scoped worker capability
  -> mark the worker running after launch succeeds
@@ -65,3 +79,13 @@ Project memory can help related chats, but every worker still receives its task 
 - Use Project/tab state only for browser recovery and fallback detection.
 
 Automatic creation or renaming of ChatGPT Projects is deferred until simple mapping to an existing Project is proven.
+
+## M7 Worker Placement Policy
+
+M7 is complete. The Windows launcher stores `WorkerProjectUrl` in its settings and exports the normalized value to the runtime as `CHATGPT2CODEX_WORKER_PROJECT_URL`. A non-empty value is authoritative for new Worker placement and overrides per-worker placement requests.
+
+When the setting is empty, placement is dynamic. `agent_spawn` accepts an optional per-worker placement request, while callers that omit it continue using the established project mapping or standalone fallback. Existing Workers keep their resolved route through browser attempts rather than being silently moved by later setting changes.
+
+The implementation deliberately preserves deferred project mapping: a Worker with neither fixed nor explicit per-worker placement is not pinned at spawn, so `agent_project_route_set` may still be called before the first `agent_launch`.
+
+Live Windows validation covered fixed placement, fixed-over-standalone precedence, explicit standalone with an empty setting, and explicit Project placement with an empty setting. Final CI run `35175254790` passed Ubuntu, macOS, and Windows, including the Windows launcher build. See `docs/M7-WORKER-PLACEMENT.md` for the detailed evidence.
