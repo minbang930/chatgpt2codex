@@ -12,7 +12,7 @@ Validation environment:
 
 ## Result
 
-M6.5 live validation is complete. The code change discovered during validation is commit `3cb220986a4a9219d239e7638a9184f41cbbc2bf` (`Retry execution picker activation before fail-close`). Final cross-platform CI for the post-validation HEAD is tracked separately and must be confirmed before declaring the entire M6 milestone CI-complete.
+M6.5 live validation is complete. The code change discovered during validation is commit `3cb220986a4a9219d239e7638a9184f41cbbc2bf` (`Retry execution picker activation before fail-close`). Final cross-platform CI also completed successfully on post-validation HEAD `5dac24f96bd9ae162ad26a0b29bfeb96883526bd`: GitHub Actions run `35172617811` passed Ubuntu, macOS, and Windows. The M6 milestone is therefore complete.
 
 ## No-explicit-setting compatibility
 
@@ -81,7 +81,7 @@ Focused validation after the change:
 - `npx vitest run src/agents/chrome-cdp-execution.test.ts` -> 2/2 passed.
 - `npm run typecheck` -> passed.
 
-The local full `npm test` run still contained unrelated Windows/platform-dependent failures, so it is not recorded as globally green.
+The local full `npm test` run still contained unrelated Windows/platform-dependent failures, so it is not recorded as globally green. Cross-platform GitHub Actions run `35172617811` is the authoritative final CI result and passed all supported jobs.
 
 ## Target-loss recovery
 
@@ -160,6 +160,7 @@ All planned M6.5 live-validation items are satisfied:
 - [x] unavailable explicit preference failing before task submission;
 - [x] mapped ChatGPT Project routing;
 - [x] Worker `/mcp/worker` catalog/capability isolation and normal main `/mcp` behavior;
-- [x] exact live model label and reasoning availability/profile limitation recorded.
+- [x] exact live model label and reasoning availability/profile limitation recorded;
+- [x] final cross-platform CI green: run `35172617811` on `5dac24f96bd9ae162ad26a0b29bfeb96883526bd`.
 
-Remaining milestone-close action: confirm final cross-platform CI on the post-validation branch HEAD, then record the CI run/SHA and mark M6 fully complete.
+M6 is complete.

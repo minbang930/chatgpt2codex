@@ -4,9 +4,9 @@ Implementation status for `dev/custom-runtime`.
 
 ## Current status
 
-Overall phase: **M6 - Worker Execution Configuration**
+Overall phase: **M6 - Worker Execution Configuration — complete**
 
-Active unit: **M6.5 live validation complete; final post-validation CI confirmation pending**
+Active unit: **M6 complete; select the next roadmap unit before implementation**
 
 Primary operational handoff: `docs/SESSION-HANDOFF.md`.
 Detailed live-validation record: `docs/M6-LIVE-VALIDATION.md`.
@@ -157,14 +157,15 @@ Code CI `35090954861` green on macOS, Ubuntu, and Windows. The exact 30-minute w
 
 CI `35111157222` green on macOS, Ubuntu, and Windows.
 
-## M6 - Worker Execution Configuration
+## M6 - Worker Execution Configuration — complete
 
 Design/source of truth: `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
+Detailed live evidence: `docs/M6-LIVE-VALIDATION.md`.
 
 ### M6.1 - Execution settings foundation — complete
 
 - [x] Added normalized `WorkerExecutionPreference` / `WorkerExecutionIntent` contracts.
-- [x] Initial reasoning keys are `instant | medium | high | extra-high`; model remains a normalized string target owned by the future browser adapter.
+- [x] Initial reasoning keys are `instant | medium | high | extra-high`; model remains a normalized string target owned by the browser adapter.
 - [x] Added `fallbackPolicy = fail-closed | allow-current` with automatic `fail-closed` when model/reasoning resolves explicitly without a configured policy.
 - [x] Added deterministic per-field precedence `worker > project > global` with source metadata.
 - [x] Added versioned atomic persistence at `<stateDir>/agents/worker-execution-settings.json` for one global default and optional project overrides.
@@ -172,96 +173,63 @@ Design/source of truth: `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
 - [x] Added main-agent-only `worker_execution_settings_get`, `worker_execution_settings_set`, and `worker_execution_settings_clear`.
 - [x] Global/project mutations reuse the existing `worker` capability; no new authorization primitive was added.
 - [x] The new settings tools are not registered on `/mcp/worker`.
-- [x] Existing browser launch/bootstrap code remained unchanged in M6.1.
 
 Implementation sequence: `f3a763f0`, `418495d1`, `19a4ff65`, `451dab05`, `ff568723`, `fdc9c6af`.
-Full CI `35125045144` on code HEAD `fdc9c6af07821870dfd2ca02b83563ea696be590`: **green on macOS, Ubuntu, and Windows**.
+Full CI `35125045144`: green on macOS, Ubuntu, and Windows.
 
 ### M6.2 - Durable per-worker intent — complete
 
 - [x] `agent_spawn` accepts an optional normalized `execution` override without changing existing callers.
-- [x] Global/project/per-worker execution preferences are resolved **before** durable worker creation.
-- [x] The resolved/requested/source metadata is persisted as optional `WorkerRecord.executionIntent` before browser launch.
-- [x] Older worker JSON and workers created with no execution settings remain readable and retain no `executionIntent` field.
-- [x] Resolution remains per field, so worker/project/global values can compose deterministically.
-- [x] Later global/project default changes do not mutate an already-created worker's execution intent.
-- [x] Initial launch and running-worker recovery reuse the same durable worker record and do not re-resolve mutable defaults.
-- [x] Lifecycle regression proves an intent survives default changes, initial browser launch, target failure, and same-worker recovery unchanged.
-- [x] MCP regression proves a per-worker `agent_spawn.execution` override wins over project/global defaults and is durable before launch.
-- [x] M6.2 does not yet automate or verify the ChatGPT model/reasoning UI; that begins in M6.3.
+- [x] Global/project/per-worker execution preferences are resolved before durable worker creation.
+- [x] Requested/resolved/source metadata is persisted as optional `WorkerRecord.executionIntent` before browser launch.
+- [x] Older/no-settings workers remain compatible.
+- [x] Initial launch and running-worker recovery reuse the same durable intent without re-resolving mutable defaults.
 
 Implementation/test sequence: `b234c58f`, `ff13722c`, `9e5de414`, `da5a10ca`, `c3017969`, `ecb1f076`.
+Full CI `35129481274`: green on macOS, Ubuntu, and Windows.
 
-Full CI `35129481274` on code HEAD `ecb1f0764f6fd4080012e202304ea09c4d2a2a7a`: **green on macOS, Ubuntu, and Windows**, including typecheck, new durable-intent/agent tests, existing agent/skills/plugins/hooks tests, Windows native input/UIA/activity-indicator/hostname/startup-context tests, build, and Windows launcher build.
+### M6.3 - ChatGPT Web model/reasoning set-and-verify adapter — complete
 
-M6.2 exit criterion is satisfied: every explicitly configured new worker has stable durable execution intent before browser launch, and recovery cannot silently re-resolve changed defaults.
+- [x] Narrow `chrome-execution.ts` adapter owns structural picker/slider interaction.
+- [x] Model/reasoning interactions use native CDP events followed by fresh structural verification.
+- [x] `fail-closed` blocks Worker-app/bootstrap submission when requested execution cannot be verified.
+- [x] No explicit model/reasoning preference preserves the legacy unmanaged/current-ChatGPT path.
+- [x] Initial launch and recovery receive the exact durable execution intent.
+- [x] Live transient menu-activation race fixed by `3cb220986a4a9219d239e7638a9184f41cbbc2bf`: 2 bounded activation attempts, fresh control observation, unchanged total two-second menu-observation budget.
 
-### M6.3 - ChatGPT Web model/reasoning set-and-verify adapter — code/CI complete
-
-- [x] Added a narrow `chrome-execution.ts` adapter instead of mixing model/reasoning selectors into durable worker or Agent Manager state.
-- [x] The adapter uses bounded structural discovery for the current unified intelligence picker/composer pill and the structural `[data-model-reasoning-effort-slider] [role="slider"]` ARIA state.
-- [x] Model/reasoning interactions use native CDP pointer events and are followed by fresh observation; a click alone is never accepted as success.
-- [x] `instant | medium | high | extra-high` map to the first four structural effort positions exposed by the current slider; unavailable positions fail closed.
-- [x] Explicit model targets require one unambiguous normalized picker match and post-selection verification.
-- [x] `fail-closed` blocks Worker-app selection/bootstrap when requested execution cannot be verified; only an explicitly persisted `allow-current` may continue unverified.
-- [x] Workers with no explicit model/reasoning preference keep the legacy unmanaged/current-ChatGPT path without touching execution controls.
-- [x] Initial browser launch and same-worker recovery receive the exact durable `WorkerRecord.executionIntent`; mutable defaults are not re-read.
-- [x] Execution verification runs before `@ChatGPT To Codex Worker` selection and before any bootstrap text is inserted.
-- [x] Added regressions for unavailable/ambiguous model targets, false-positive model clicks, reasoning clicks that do not change ARIA state, unsupported effort levels, explicit `allow-current`, unmanaged workers, launch ordering, and pre-bootstrap fail-closed behavior.
-- [x] Public/current ChatGPT implementations were inspected for the current unified picker/composer-pill and ARIA-slider structure before freezing the bounded adapter. Exact labels/account availability were then validated in M6.5.
-
-Implementation/test sequence: `d5741d07`, `2d15d532`, `7e0cedfd`, `c562e130`, `8960867e`, `43c6afae`, `dd423f59`, type-narrowing fix `dcc73aba`.
-
-Full CI `35131605738` on code HEAD `dcc73abac90cc925137df42a7a03139bcd85ec80`: **green on macOS, Ubuntu, and Windows**, including typecheck, new execution adapter/integration/recovery tests, existing agent tests, Windows native input/UIA/activity-indicator/hostname/startup-context tests, build, and Windows launcher build.
-
-M6.3 code exit criterion is satisfied: an explicit execution intent cannot reach Worker-app/bootstrap submission unless the browser adapter verified the requested state or the durable policy explicitly allows current state.
+Original M6.3 CI `35131605738`: green on macOS, Ubuntu, and Windows.
+Post-fix focused checks: `chrome-execution` 14/14, `chrome-cdp-execution` 2/2, typecheck passed.
+Final M6 CI `35172617811`: green on Ubuntu, macOS, and Windows.
 
 ### M6.4 - Status and diagnostics — complete
 
-- [x] Browser worker sessions persist a bounded per-attempt execution observation independently from durable `WorkerRecord.executionIntent`.
-- [x] Successful launches persist `verified`, observed model/reasoning, and the browser attempt; `allow-current` can persist `verified=false` plus the bounded verification error.
-- [x] Fail-closed adapter errors carry a structured `workerExecution` diagnostic so the failed browser attempt retains what was observed without mutating durable worker lifecycle state.
-- [x] `agent_status` exposes a top-level `execution` view that separates durable `requested` / `resolved` / `sources` from current-attempt `observed` / `verified` / `error` / `attempt`.
-- [x] `agent_result` exposes the same execution view from durable result state plus the latest browser-attempt telemetry, without performing browser reconciliation during a result read.
-- [x] A later recovery attempt replaces the current browser execution observation while the durable intent remains unchanged.
-- [x] Workers with no durable execution intent and no browser execution observation keep the concise legacy status/result shape with no `execution` key.
-- [x] Browser failure diagnostics never fabricate a durable worker failure or completion.
-- [x] Added success, fail-closed failure, recovery/latest-attempt, unmanaged compatibility, and terminal-result regressions.
-- [x] No private ChatGPT request/conversation identity or raw DOM state is exposed.
+- [x] Attempt-scoped browser execution observation remains separate from durable `WorkerRecord.executionIntent`.
+- [x] `agent_status`/`agent_result` expose requested/resolved/sources separately from observed/verified/error/attempt.
+- [x] Recovery replaces attempt-scoped observation without changing durable intent.
+- [x] Unmanaged workers retain concise legacy output with no empty execution object.
 
 Implementation/test sequence: `92827274`, `1a7199ac`, `477bc99c`, `e693b36d`, `a1117d2f`.
-
-Full CI `35132971767` on code HEAD `a1117d2fd08d57f49aa62d55de7a0b7cd8dd499f`: **green on macOS, Ubuntu, and Windows**, including typecheck, execution-diagnostics regressions, existing agent/platform tests, Windows native input/UIA/activity-indicator/hostname/startup-context tests, build, and Windows launcher build.
-
-M6.4 exit criterion is satisfied: the parent can distinguish what execution configuration the durable worker requested/resolved from what the current browser attempt actually observed and whether it verified it.
+Full CI `35132971767`: green on macOS, Ubuntu, and Windows.
 
 ### M6.5 - Live validation — complete
 
-- [x] Legacy/no-explicit-setting worker path remained unmanaged: no execution telemetry was emitted through attempts 1->2, and the same durable worker completed after lifecycle recovery.
-- [x] Exact live model label is `GPT-5.6 Sol`; `instant`, `medium`, and `high` were selectable and verified.
-- [x] `extra-high` is unavailable on the current account/profile and failed closed before task submission; the stable runtime key remains supported by the adapter contract.
-- [x] Two parallel workers with `medium` and `high` durable intents were simultaneously durable/browser `running` and `verified=true` on attempt 1 after the picker-race fix.
-- [x] Target-loss recovery preserved the same durable `GPT-5.6 Sol / high / fail-closed` intent, advanced browser attempt 1->2, changed browser handle, and recorded a fresh verified observation.
-- [x] Deliberately unavailable model `__c2c_nonexistent_model__` failed before task submission while preserving bounded current-state diagnostics.
-- [x] Mapped ChatGPT Project routing was exercised successfully.
-- [x] Worker `/mcp/worker` catalog/capability isolation and normal main `/mcp` behavior were revalidated live.
-- [x] Live picker activation race was fixed by `3cb220986a4a9219d239e7638a9184f41cbbc2bf` using two bounded activations with fresh control observation and unchanged two-second menu-observation budget.
-
-Post-fix focused checks:
-
-- `npx vitest run src/agents/chrome-execution.test.ts` -> 14/14 passed.
-- `npx vitest run src/agents/chrome-cdp-execution.test.ts` -> 2/2 passed.
-- `npm run typecheck` -> passed.
-- Local Windows full `npm test` was not globally green because of pre-existing/platform-dependent macOS desktop-control, file-permission, and local-E2E failures; do not represent it as a clean full-suite result.
-
-Detailed worker IDs, telemetry, and failure boundaries: `docs/M6-LIVE-VALIDATION.md`.
+- [x] Legacy/no-explicit-setting worker path remained unmanaged across attempts and completed normally after lifecycle recovery.
+- [x] Exact live model label: `GPT-5.6 Sol`.
+- [x] `instant`, `medium`, and `high` selectable and verified.
+- [x] `extra-high` unavailable on the current account/profile and correctly fail-closed before task submission.
+- [x] Parallel `medium` and `high` workers simultaneously durable/browser `running` and `verified=true` after the picker-race fix.
+- [x] Target-loss recovery preserved durable `GPT-5.6 Sol / high / fail-closed` intent, advanced browser attempt 1->2, changed browser handle, and recorded a fresh verified observation.
+- [x] Deliberately unavailable model `__c2c_nonexistent_model__` failed before task submission with bounded diagnostics.
+- [x] Mapped ChatGPT Project routing verified.
+- [x] Worker `/mcp/worker` catalog/capability isolation and normal main `/mcp` behavior verified.
+- [x] Final cross-platform CI green: run `35172617811` on `5dac24f96bd9ae162ad26a0b29bfeb96883526bd`.
 
 ## Current queue
 
-- [ ] Confirm final cross-platform GitHub Actions CI on the post-validation branch HEAD, then record the run/SHA and mark M6 fully complete.
+- [ ] Select the next roadmap unit before implementation; M6 requires no further validation unless ChatGPT UI/account behavior changes.
 - [ ] Naturally cross the original 30-minute local-control TTL during normal use and confirm no `LEASE_REQUIRED` regression; this remains non-blocking.
 - [ ] Keep Worker MCP/app/control isolation green while future work evolves.
 
 ## Update policy
 
-Update this file whenever an M6 unit is completed, blocked, materially redesigned, or moved in scope. Keep `docs/SESSION-HANDOFF.md`, `docs/M6-LIVE-VALIDATION.md`, and `docs/WORKER-EXECUTION-CONFIG-DESIGN.md` synchronized with the current milestone state.
+Update this file whenever a milestone/unit is completed, blocked, materially redesigned, or moved in scope. Keep `docs/SESSION-HANDOFF.md` and relevant design/live-validation documents synchronized with the current milestone state.

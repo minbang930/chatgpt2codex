@@ -11,29 +11,31 @@ Operational handoff for continuing `chatgpt2codex` across ChatGPT sessions. Veri
 
 ## Current phase
 
-M0-M5 and blocking post-M5 stabilization are complete. **M6 - Worker Execution Configuration has completed live validation; final cross-platform CI confirmation on the post-validation HEAD is pending.**
+M0-M5, blocking post-M5 stabilization, and **M6 - Worker Execution Configuration are complete**.
 
-The only prior stabilization item still open is a non-blocking natural-use observation: eventually cross the original 30-minute local-control TTL and confirm no `LEASE_REQUIRED` regression. Renewal is already code/CI-proven; do not delay M6 closure or force a wait for it.
+Final M6 cross-platform CI: GitHub Actions run `35172617811` on post-validation HEAD `5dac24f96bd9ae162ad26a0b29bfeb96883526bd` passed Ubuntu, macOS, and Windows.
+
+The only prior stabilization item still open is a non-blocking natural-use observation: eventually cross the original 30-minute local-control TTL and confirm no `LEASE_REQUIRED` regression. Renewal is already code/CI-proven and this does not block milestone progress.
 
 ### M6 implementation order
 
 1. **M6.1 - Execution settings foundation — complete**
 2. **M6.2 - Durable per-worker execution intent — complete**
-3. **M6.3 - ChatGPT Web model/reasoning set-and-verify adapter — code/CI complete**
+3. **M6.3 - ChatGPT Web model/reasoning set-and-verify adapter — complete**
 4. **M6.4 - Status/diagnostics — complete**
 5. **M6.5 - Live validation — complete**
-6. **Final post-validation CI confirmation — pending**
+6. **Final post-validation CI confirmation — complete** (`35172617811`)
 
 Design/source of truth: `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
 Detailed live evidence: `docs/M6-LIVE-VALIDATION.md`.
 
 ## How to work with the user
 
-The user prefers implementation-first progress. When they say `진행해`, `이어가자`, or otherwise authorize the next unit, inspect the repository/CI and perform the work in the same turn. Work one coherent unit at a time and use the sequence **implement -> focused tests/full CI -> fix failures -> update progress/handoff/design docs**. Windows/VMware is the active live-validation target while Ubuntu/macOS CI must remain healthy.
+The user prefers implementation-first progress. When they say `진행해`, `이어가자`, or otherwise authorize the next unit, inspect the repository/CI and perform the work in the same turn. Work one coherent unit at a time and use the sequence **implement -> focused tests/full CI -> fix failures -> update progress/handoff/design docs**. Windows/VMware remains the active live-validation environment while Ubuntu/macOS CI must remain healthy.
 
 ## Persistent engineering boundaries
 
-Do not weaken these contracts for M6:
+Do not weaken these contracts:
 
 - Durable worker state is the source of truth for worker lifecycle/results.
 - Full-write workers use isolated Git branches/worktrees and scoped opaque worker capabilities.
@@ -134,13 +136,11 @@ Full CI `35125045144` on `fdc9c6af07821870dfd2ca02b83563ea696be590` passed macOS
 Implementation/test sequence: `b234c58f`, `ff13722c`, `9e5de414`, `da5a10ca`, `c3017969`, `ecb1f076`.
 Full CI `35129481274` on `ecb1f0764f6fd4080012e202304ea09c4d2a2a7a`: **green on macOS, Ubuntu, and Windows**.
 
-## M6.3 completed code contract
+## M6.3 completed contract
 
 M6.3 adds a narrow set-and-verify browser adapter at `src/agents/chrome-execution.ts` and wires the durable intent into both initial browser launch and recovery.
 
-### Launch ordering
-
-For workers with explicit model/reasoning intent, current launch order is:
+For workers with explicit model/reasoning intent, launch order is:
 
 ```text
 open ChatGPT / wait for composer
@@ -155,80 +155,24 @@ open ChatGPT / wait for composer
 
 No explicit execution intent means the adapter returns immediately without touching execution controls, preserving legacy behavior. M6.5 confirmed this path remained unmanaged across two browser attempts and still completed normally after lifecycle recovery.
 
-### Current structural adapter
+The adapter uses structural picker/composer signals, exact normalized model matching, ARIA reasoning-slider state, and native CDP pointer events followed by fresh observation. A dispatched click is never accepted as success by itself.
 
-The adapter is intentionally bounded near the CDP layer. It supports:
+M6.5 found one live transient race: after control discovery, a single pointer dispatch did not always materialize the execution menu during parallel launch. Commit `3cb220986a4a9219d239e7638a9184f41cbbc2bf` keeps the same two-second menu observation budget but splits it across two bounded activation attempts, re-observing the execution control before each activation. Focused execution tests and typecheck passed, the post-fix parallel live validation succeeded on attempt 1 for both medium and high workers, and final cross-platform CI run `35172617811` passed.
 
-- the existing model-switcher test-id when present;
-- the newer neutral composer-pill/unified intelligence-picker structure when that test-id is absent;
-- exact normalized model-row matching with unique-match requirements;
-- structural reasoning observation through `[data-model-reasoning-effort-slider] [role="slider"]` and its ARIA min/max/current value;
-- runtime effort mapping to the first four structural positions: `instant`, `medium`, `high`, `extra-high`;
-- native CDP pointer events followed by fresh observation rather than accepting a synthetic/picker click as success.
-
-M6.5 found one live transient race: after control discovery, a single successful pointer dispatch did not always materialize the execution menu during parallel launch. Commit `3cb220986a4a9219d239e7638a9184f41cbbc2bf` keeps the same two-second menu observation budget but splits it across two bounded activation attempts, re-observing the execution control before each activation. Focused execution tests and typecheck passed, and the post-fix parallel live validation succeeded on attempt 1 for both medium and high workers.
-
-### Fallback policy
-
-- `fail-closed`: unsupported, ambiguous, missing, or non-materializing requested execution state aborts before Worker-app selection/bootstrap.
-- `allow-current`: the adapter may continue unverified only because that permission was already persisted in the durable worker intent.
-
-### M6.3 tests/CI
-
-Regression coverage includes model/reasoning success, unavailable/ambiguous model targets, false-positive interactions, unsupported effort, allow-current, unmanaged compatibility, durable intent on launch/recovery, and pre-bootstrap fail-closed ordering.
-
-Implementation/test sequence: `d5741d07`, `2d15d532`, `7e0cedfd`, `c562e130`, `8960867e`, `43c6afae`, `dd423f59`, final type-narrowing fix `dcc73aba`.
-Full CI `35131605738` on code HEAD `dcc73abac90cc925137df42a7a03139bcd85ec80`: **green on macOS, Ubuntu, and Windows**.
-
-Post-M6.5 race-fix focused verification on `3cb2209`: `chrome-execution` 14/14, `chrome-cdp-execution` 2/2, and `npm run typecheck` passed. Final cross-platform CI for the post-validation HEAD is still pending.
+Implementation/test sequence before live fix: `d5741d07`, `2d15d532`, `7e0cedfd`, `c562e130`, `8960867e`, `43c6afae`, `dd423f59`, `dcc73aba`.
+Original M6.3 CI: `35131605738` green on macOS, Ubuntu, and Windows.
+Post-M6.5 race fix: `3cb2209`; focused `chrome-execution` 14/14, `chrome-cdp-execution` 2/2, typecheck passed; final M6 CI `35172617811` green on Ubuntu/macOS/Windows.
 
 ## M6.4 completed contract
 
 M6.4 makes the execution state inspectable without confusing browser telemetry with durable worker truth.
 
-### Per-attempt browser telemetry
+`BrowserWorkerSession` optionally keeps bounded current-attempt execution diagnostics separately from durable requested/resolved/source metadata. A recovery creates a fresh browser attempt and replaces current-attempt observation without re-resolving the durable intent.
 
-`BrowserWorkerSession` has optional bounded execution diagnostics:
-
-```ts
-execution?: {
-  verified: boolean;
-  observedModel?: string;
-  observedReasoningEffort?: "instant" | "medium" | "high" | "extra-high";
-  error?: string;
-}
-```
-
-The Chrome driver returns this observation after execution set-and-verify. Successful verified launches persist it. `allow-current` can persist `verified: false` with the observed state and bounded error. Fail-closed verification errors attach the same structured diagnostic to the thrown `DomainError`, allowing the browser attempt to record what was observed while the durable worker lifecycle remains unchanged.
-
-A recovery creates a new browser attempt and therefore replaces the current browser execution observation. It does not change or re-resolve `WorkerRecord.executionIntent`.
-
-### Parent-facing status/result shape
-
-When execution intent/telemetry exists, both `agent_status` and `agent_result` expose a top-level view shaped conceptually as:
-
-```text
-execution.requested  = caller/default request stored with durable worker
-execution.resolved   = durable intent actually resolved at spawn
-execution.sources    = worker/project/global/default source metadata
-execution.observed   = model/reasoning observed for the current browser attempt
-execution.verified   = whether that attempt satisfied the durable intent
-execution.error      = bounded verification error when applicable
-execution.attempt    = browser attempt number for the observation
-```
-
-`agent_status` continues to own browser liveness reconciliation. `agent_result` only combines the durable result with already-persisted browser execution telemetry; it does not probe/reconcile the browser during a result read.
-
-Workers with no durable execution intent and no browser execution observation retain the concise legacy output and do not receive an empty `execution` key.
-
-### M6.4 tests/CI
-
-Regression coverage proves successful requested/resolved/observed separation, fail-closed browser-attempt diagnostics without fabricated durable failure, latest-attempt recovery telemetry, unmanaged compatibility, and terminal `agent_result` diagnostics.
+`agent_status` and `agent_result` expose requested/resolved/sources separately from observed/verified/error/attempt when relevant. Workers with neither durable execution intent nor browser execution telemetry retain the concise legacy shape.
 
 Implementation/test sequence: `92827274`, `1a7199ac`, `477bc99c`, `e693b36d`, `a1117d2f`.
-Full CI `35132971767` on code HEAD `a1117d2fd08d57f49aa62d55de7a0b7cd8dd499f`: **green on macOS, Ubuntu, and Windows**.
-
-M6.4 exit criterion is satisfied: the parent can tell what the durable worker requested/resolved and whether the current browser attempt actually verified it.
+Full CI `35132971767` on `a1117d2fd08d57f49aa62d55de7a0b7cd8dd499f`: **green on macOS, Ubuntu, and Windows**.
 
 ## M6.5 completed live validation
 
@@ -248,9 +192,15 @@ Validated live on the real dedicated Worker profile:
 
 M6.5 discovered the transient picker activation race fixed by `3cb2209`; the post-fix parallel live retest passed.
 
-## Remaining milestone-close action
+## M6 completion
 
-**Run/confirm cross-platform CI on the post-validation branch HEAD.** Do not claim the entire M6 milestone CI-complete until that run is green on the supported matrix. Once confirmed, record the run/SHA in the progress and handoff docs and mark M6 complete.
+M6 is complete. Final authoritative CI evidence:
+
+- post-validation HEAD: `5dac24f96bd9ae162ad26a0b29bfeb96883526bd`;
+- GitHub Actions run: `35172617811`;
+- Ubuntu: success;
+- macOS: success;
+- Windows: success.
 
 ## Runtime/update note
 
@@ -259,7 +209,7 @@ M6.5 discovered the transient picker activation race fixed by `3cb2209`; the pos
 ## Source-of-truth documents
 
 - `docs/WORKER-EXECUTION-CONFIG-DESIGN.md` — M6 design and implementation order.
-- `docs/M6-LIVE-VALIDATION.md` — detailed M6.5 live evidence.
+- `docs/M6-LIVE-VALIDATION.md` — detailed M6.5 live evidence and final CI.
 - `docs/CUSTOM-RUNTIME-PROGRESS.md` — milestone/history and CI evidence.
 - `docs/CUSTOM-RUNTIME-PLAN.md` — architecture/roadmap.
 - `docs/CHATGPT-WORKER-APP-SETUP.md` — two-app configuration.
@@ -271,16 +221,14 @@ M6.5 discovered the transient picker activation race fixed by `3cb2209`; the pos
 
 ## Handoff maintenance rule
 
-Update this file whenever an M6 unit completes, the active unit changes, an execution-setting contract changes, or live validation changes the next session's operational context. Keep detailed chronological evidence in `CUSTOM-RUNTIME-PROGRESS.md` and `M6-LIVE-VALIDATION.md`, and detailed M6 design decisions in `WORKER-EXECUTION-CONFIG-DESIGN.md`.
+Keep detailed chronological evidence in `CUSTOM-RUNTIME-PROGRESS.md` and `M6-LIVE-VALIDATION.md`, and detailed execution-configuration design decisions in `WORKER-EXECUTION-CONFIG-DESIGN.md`.
 
 ## New-session start procedure
 
 1. Read this file.
-2. Read `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
-3. Read `docs/M6-LIVE-VALIDATION.md`.
-4. Check actual `dev/custom-runtime` HEAD and latest CI.
-5. Read the current M6/current-queue portion of `docs/CUSTOM-RUNTIME-PROGRESS.md`.
-6. If docs and repo disagree, trust repo and correct the docs.
-7. If the post-validation HEAD CI is green, record its run/SHA and mark M6 fully complete; otherwise fix only the failing regression before closing M6.
+2. Check actual `dev/custom-runtime` HEAD and latest CI.
+3. Read `docs/CUSTOM-RUNTIME-PROGRESS.md` and the next roadmap unit before making changes.
+4. Read `docs/M6-LIVE-VALIDATION.md` only when execution-configuration/live Worker details are relevant.
+5. If docs and repo disagree, trust repo and correct the docs.
 
-A future message consisting only of **`SESSION-HANDOFF.md 읽고 M6 이어서 진행해`** should be enough to resume.
+M6 no longer needs further live validation unless a future ChatGPT UI/account change breaks the established adapter contract.
