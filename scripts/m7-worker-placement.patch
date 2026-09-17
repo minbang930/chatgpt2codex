@@ -1,0 +1,499 @@
+diff --git a/src/agents/browser-controller.ts b/src/agents/browser-controller.ts
+index d4d85a7..0000000 100644
+--- a/src/agents/browser-controller.ts
++++ b/src/agents/browser-controller.ts
+@@ -47,6 +47,16 @@ interface ProjectRoutesFile {
+   mappings: ProjectRouteEntry[];
+ }
+ 
++interface BrowserWorkerPlacement {
++  version: 1;
++  workerId: string;
++  projectId: string;
++  route: BrowserWorkerRoute;
++  source: "fixed" | "mapping" | "standalone" | "legacy-session";
++  createdAt: number;
++}
++
+ export interface BrowserWorkerLaunchInput {
+   workerId: string;
+   projectId: string;
+@@ -115,6 +125,15 @@ const ProjectRoutesFileSchema = z.object({
+   mappings: z.array(ProjectRouteEntrySchema),
+ }) satisfies z.ZodType<ProjectRoutesFile>;
+ 
++const BrowserWorkerPlacementSchema = z.object({
++  version: z.literal(1),
++  workerId: z.string().regex(WORKER_ID_RE),
++  projectId: z.string().min(1),
++  route: BrowserWorkerRouteSchema,
++  source: z.enum(["fixed", "mapping", "standalone", "legacy-session"]),
++  createdAt: z.number().int().nonnegative(),
++}) satisfies z.ZodType<BrowserWorkerPlacement>;
++
+ function agentsDir(stateDir: string): string {
+   return path.join(stateDir, "agents");
+ }
+@@ -123,10 +142,21 @@ function browserSessionsDir(stateDir: string): string {
+   return path.join(agentsDir(stateDir), "browser-sessions");
+ }
+ 
++function browserPlacementsDir(stateDir: string): string {
++  return path.join(agentsDir(stateDir), "browser-placements");
++}
++
+ function projectRoutesPath(stateDir: string): string {
+   return path.join(agentsDir(stateDir), "chatgpt-project-routes.json");
+ }
+ 
++function placementPath(stateDir: string, workerId: string): string {
++  if (!WORKER_ID_RE.test(workerId) || path.basename(workerId) !== workerId) {
++    throw new DomainError(ErrorCode.PERMISSION_DENIED, `Invalid browser worker id: ${workerId}`);
++  }
++  return path.join(browserPlacementsDir(stateDir), `${workerId}.json`);
++}
++
+ function sessionPath(stateDir: string, workerId: string): string {
+   if (!WORKER_ID_RE.test(workerId) || path.basename(workerId) !== workerId) {
+     throw new DomainError(ErrorCode.PERMISSION_DENIED, `Invalid browser worker id: ${workerId}`);
+@@ -229,6 +259,77 @@ export async function resolveBrowserWorkerRoute(stateDir: string, projectId: str
+   return mapping ? { mode: "project", projectRef: mapping.projectRef } : { mode: "standalone" };
+ }
+ 
++async function readBrowserWorkerPlacement(
++  stateDir: string,
++  workerId: string,
++): Promise<BrowserWorkerPlacement | null> {
++  try {
++    const raw = JSON.parse(await fs.readFile(placementPath(stateDir, workerId), "utf8"));
++    const parsed = BrowserWorkerPlacementSchema.safeParse(raw);
++    if (!parsed.success) {
++      throw new DomainError(ErrorCode.WORKSPACE_NOT_READY, `Stored browser placement failed validation: ${workerId}`);
++    }
++    return parsed.data;
++  } catch (error) {
++    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
++    throw error;
++  }
++}
++
++async function writeBrowserWorkerPlacement(
++  stateDir: string,
++  placement: BrowserWorkerPlacement,
++): Promise<void> {
++  await atomicWriteJson(
++    placementPath(stateDir, placement.workerId),
++    BrowserWorkerPlacementSchema.parse(placement),
++  );
++}
++
++async function resolveDurableBrowserWorkerRoute(
++  stateDir: string,
++  workerId: string,
++  projectId: string,
++  legacyRoute?: BrowserWorkerRoute,
++): Promise<BrowserWorkerRoute> {
++  const stored = await readBrowserWorkerPlacement(stateDir, workerId);
++  if (stored) {
++    if (stored.projectId !== projectId) {
++      throw new DomainError(
++        ErrorCode.PERMISSION_DENIED,
++        `Browser worker ${workerId} placement is bound to project ${stored.projectId}`,
++      );
++    }
++    return stored.route;
++  }
++
++  let route: BrowserWorkerRoute;
++  let source: BrowserWorkerPlacement["source"];
++  if (legacyRoute) {
++    route = BrowserWorkerRouteSchema.parse(legacyRoute);
++    source = "legacy-session";
++  } else {
++    const fixedUrl = process.env.CHATGPT2CODEX_WORKER_PROJECT_URL?.trim();
++    if (fixedUrl) {
++      route = {
++        mode: "project",
++        projectRef: normalizeProjectRef({ url: fixedUrl }),
++      };
++      source = "fixed";
++    } else {
++      const mapping = await getChatGptProjectMapping(stateDir, projectId);
++      if (mapping) {
++        route = { mode: "project", projectRef: mapping.projectRef };
++        source = "mapping";
++      } else {
++        route = { mode: "standalone" };
++        source = "standalone";
++      }
++    }
++  }
++
++  await writeBrowserWorkerPlacement(stateDir, {
++    version: 1,
++    workerId,
++    projectId,
++    route,
++    source,
++    createdAt: Date.now(),
++  });
++  return route;
++}
++
+ async function writeBrowserWorkerSession(stateDir: string, session: BrowserWorkerSession): Promise<void> {
+   const validated = BrowserWorkerSessionSchema.parse(session);
+   await atomicWriteJson(sessionPath(stateDir, session.workerId), validated);
+@@ -285,7 +386,7 @@ export async function prepareBrowserWorkerSession(
+     version: 1,
+     workerId: input.workerId,
+     projectId,
+-    route: await resolveBrowserWorkerRoute(stateDir, projectId),
++    route: await resolveDurableBrowserWorkerRoute(stateDir, input.workerId, projectId, current?.route),
+     status: "prepared",
+     attempt: (current?.attempt ?? 0) + 1,
+     createdAt: current?.createdAt ?? now,
+diff --git a/windows/ChatGPTToCodexLauncher.cs b/windows/ChatGPTToCodexLauncher.cs
+index 3494f7c..0000000 100644
+--- a/windows/ChatGPTToCodexLauncher.cs
++++ b/windows/ChatGPTToCodexLauncher.cs
+@@ -147,6 +147,7 @@ internal sealed class LauncherForm : Form
+     private int port;
+     private string preferredLanguage = "auto";
+     private string githubRepoUrl;
++    private string workerProjectUrl;
+     private bool publicTunnelEnabled;
+     private bool launchAtStartup;
+     private bool startMcpOnOpen;
+@@ -181,6 +182,7 @@ internal sealed class LauncherForm : Form
+         settingsFile = Path.Combine(appDataDir, "settings.ini");
+         defaultWorkspace = ResolveDefaultWorkspace();
+         configuredPublicHost = ResolveConfiguredPublicHost();
++        workerProjectUrl = ResolveWorkerProjectUrl();
+         port = ResolvePort();
+         publicTunnelEnabled = false;
+         githubRepoUrl = Environment.GetEnvironmentVariable("CHATGPT2CODEX_UPDATE_REPO_URL");
+@@ -410,6 +412,36 @@ internal sealed class LauncherForm : Form
+         return value.TrimEnd('/');
+     }
+ 
++    private static bool TryNormalizeWorkerProjectUrl(string value, out string normalized)
++    {
++        normalized = null;
++        if (string.IsNullOrWhiteSpace(value)) return true;
++
++        Uri uri;
++        if (!Uri.TryCreate(value.Trim(), UriKind.Absolute, out uri) ||
++            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
++            !(string.Equals(uri.Host, "chatgpt.com", StringComparison.OrdinalIgnoreCase) ||
++              string.Equals(uri.Host, "www.chatgpt.com", StringComparison.OrdinalIgnoreCase)))
++        {
++            return false;
++        }
++
++        var builder = new UriBuilder(uri);
++        builder.Fragment = string.Empty;
++        normalized = builder.Uri.AbsoluteUri.TrimEnd('/');
++        return true;
++    }
++
++    private string ResolveWorkerProjectUrl()
++    {
++        var value = GetArgValue("-WorkerProjectUrl");
++        if (string.IsNullOrWhiteSpace(value)) value = Environment.GetEnvironmentVariable("CHATGPT2CODEX_WORKER_PROJECT_URL");
++        string normalized;
++        return TryNormalizeWorkerProjectUrl(value, out normalized) ? normalized : null;
++    }
++
+     private string LoadSelectedProjectPath()
+     {
+         try
+@@ -480,6 +512,12 @@ internal sealed class LauncherForm : Form
+                 int parsedPort;
+                 if (key == "ProjectFolder" && Directory.Exists(value)) selectedProjectPath = Path.GetFullPath(value);
+                 else if (key == "Port" && int.TryParse(value, out parsedPort) && parsedPort > 0) port = parsedPort;
++                else if (key == "WorkerProjectUrl")
++                {
++                    string normalized;
++                    workerProjectUrl = TryNormalizeWorkerProjectUrl(value, out normalized) ? normalized : null;
++                }
+                 else if (key == "PublicHostname") configuredPublicHost = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+                 else if (key == "EnablePublicTunnel") publicTunnelEnabled = ParseBool(value);
+                 else if (key == "LaunchAtStartup") launchAtStartup = ParseBool(value);
+@@ -508,6 +546,7 @@ internal sealed class LauncherForm : Form
+         var lines = new[]
+         {
+             "ProjectFolder=" + EncodeSetting(selectedProjectPath ?? string.Empty),
++            "WorkerProjectUrl=" + EncodeSetting(workerProjectUrl ?? string.Empty),
+             "Port=" + EncodeSetting(port.ToString()),
+             "PublicHostname=" + EncodeSetting(configuredPublicHost ?? string.Empty),
+             "EnablePublicTunnel=" + EncodeSetting(publicTunnelEnabled ? "true" : "false"),
+@@ -547,7 +586,8 @@ internal sealed class LauncherForm : Form
+         var values = new List<string>();
+         for (var i = 0; i < args.Length; i++)
+         {
+-            if (IsOption(args[i], "-Workspace") || IsOption(args[i], "-Port") || IsOption(args[i], "-PublicHostname"))
++            if (IsOption(args[i], "-Workspace") || IsOption(args[i], "-Port") || IsOption(args[i], "-PublicHostname") ||
++                IsOption(args[i], "-WorkerProjectUrl"))
+             {
+                 i++;
+                 continue;
+@@ -745,7 +785,7 @@ internal sealed class LauncherForm : Form
+         using (var form = new Form())
+         {
+             form.Text = L("settingsTitle");
+             form.Width = 640;
+-            form.Height = 670;
++            form.Height = 750;
+             form.StartPosition = FormStartPosition.CenterParent;
+             form.FormBorderStyle = FormBorderStyle.FixedDialog;
+             form.MaximizeBox = false;
+@@ -842,48 +882,77 @@ internal sealed class LauncherForm : Form
+             repoBox.SetBounds(180, 378, 342, 24);
+             form.Controls.Add(repoBox);
+ 
+-            var copyConnector = NewButton(L("copyConnector"), 24, 426, 156);
++            var korean = string.Equals(ResolveLanguageCode(preferredLanguage), "ko", StringComparison.OrdinalIgnoreCase);
++            form.Controls.Add(NewLabel(korean ? "Worker ChatGPT 프로젝트 URL" : "Worker ChatGPT Project URL", 24, 416, 150));
++            var workerProjectBox = new TextBox();
++            workerProjectBox.Text = workerProjectUrl ?? string.Empty;
++            workerProjectBox.SetBounds(180, 412, 342, 24);
++            form.Controls.Add(workerProjectBox);
++
++            var workerProjectHint = NewLabel(
++                korean
++                    ? "비워두면 자동/유동 배치됩니다. URL을 넣으면 새 Worker가 항상 해당 ChatGPT Project에 생성됩니다."
++                    : "Blank uses automatic/dynamic placement. Set a URL to force every new Worker into that ChatGPT Project.",
++                180,
++                442,
++                342);
++            workerProjectHint.SetBounds(180, 440, 342, 42);
++            workerProjectHint.ForeColor = System.Drawing.SystemColors.GrayText;
++            form.Controls.Add(workerProjectHint);
++
++            var copyConnector = NewButton(L("copyConnector"), 24, 496, 156);
+             copyConnector.Click += delegate { CopyMcpUrl(); };
+             form.Controls.Add(copyConnector);
+ 
+-            var copyOwner = NewButton(L("copyOwnerToken"), 194, 426, 156);
++            var copyOwner = NewButton(L("copyOwnerToken"), 194, 496, 156);
+             copyOwner.Enabled = !string.IsNullOrEmpty(ownerToken);
+             copyOwner.Click += delegate { CopyOwnerToken(); };
+             form.Controls.Add(copyOwner);
+ 
+-            var generateOwner = NewButton(L("autoGenerateToken"), 364, 426, 158);
++            var generateOwner = NewButton(L("autoGenerateToken"), 364, 496, 158);
+             generateOwner.Click += delegate { AutoGenerateOwnerToken(); };
+             form.Controls.Add(generateOwner);
+ 
+-            var localHealth = NewButton(L("openLocalHealth"), 24, 464, 156);
++            var localHealth = NewButton(L("openLocalHealth"), 24, 534, 156);
+             localHealth.Click += delegate { OpenLocalHealth(); };
+             form.Controls.Add(localHealth);
+ 
+-            var publicHealth = NewButton(L("openPublicHealth"), 194, 464, 156);
++            var publicHealth = NewButton(L("openPublicHealth"), 194, 534, 156);
+             publicHealth.Click += delegate { OpenPublicHealth(); };
+             form.Controls.Add(publicHealth);
+ 
+-            var logs = NewButton(L("showLogs"), 364, 464, 158);
++            var logs = NewButton(L("showLogs"), 364, 534, 158);
+             logs.Click += delegate { ShowLogs(); };
+             form.Controls.Add(logs);
+ 
+-            var github = NewButton(L("openGithub"), 24, 502, 156);
++            var github = NewButton(L("openGithub"), 24, 572, 156);
+             github.Click += delegate { OpenGithub(); };
+             form.Controls.Add(github);
+ 
+-            var checkUpdates = NewButton(L("checkUpdates"), 194, 502, 156);
++            var checkUpdates = NewButton(L("checkUpdates"), 194, 572, 156);
+             checkUpdates.Click += delegate { CheckUpdates(true); };
+             form.Controls.Add(checkUpdates);
+ 
+-            var about = NewButton(L("about"), 364, 502, 158);
++            var about = NewButton(L("about"), 364, 572, 158);
+             about.Click += delegate
+             {
+                 MessageBox.Show(form, "ChatGPT To Codex by ezBuilder\r\nCopyright 2026 ezBuilder. All rights reserved.", "ChatGPT To Codex", MessageBoxButtons.OK, MessageBoxIcon.Information);
+             };
+             form.Controls.Add(about);
+ 
+-            var copyright = NewLabel("Copyright 2026 ezBuilder. All rights reserved.", 24, 560, 300);
++            var copyright = NewLabel("Copyright 2026 ezBuilder. All rights reserved.", 24, 630, 300);
+             form.Controls.Add(copyright);
+ 
+-            var cancel = NewButton(L("cancel"), 356, 554, 78);
++            var cancel = NewButton(L("cancel"), 356, 624, 78);
+             cancel.DialogResult = DialogResult.Cancel;
+             form.Controls.Add(cancel);
+ 
+-            var save = NewButton(L("save"), 444, 554, 78);
++            var save = NewButton(L("save"), 444, 624, 78);
+             save.DialogResult = DialogResult.OK;
+             form.AcceptButton = save;
+             form.CancelButton = cancel;
+             form.Controls.Add(save);
++
++            string normalizedWorkerProjectUrl = workerProjectUrl;
++            form.FormClosing += delegate(object sender, FormClosingEventArgs e)
++            {
++                if (form.DialogResult != DialogResult.OK) return;
++                if (TryNormalizeWorkerProjectUrl(workerProjectBox.Text, out normalizedWorkerProjectUrl)) return;
++
++                MessageBox.Show(
++                    form,
++                    korean
++                        ? "Worker ChatGPT Project URL은 https://chatgpt.com 주소여야 합니다."
++                        : "Worker ChatGPT Project URL must be an https://chatgpt.com URL.",
++                    "ChatGPT To Codex",
++                    MessageBoxButtons.OK,
++                    MessageBoxIcon.Warning);
++                e.Cancel = true;
++                form.DialogResult = DialogResult.None;
++                workerProjectBox.Focus();
++            };
+ 
+             ShowFromTray();
+             if (form.ShowDialog(this) != DialogResult.OK) return;
+ 
+             var wasRunning = IsManagedProcessRunning();
+             selectedProjectPath = string.IsNullOrWhiteSpace(projectBox.Text) ? null : Path.GetFullPath(projectBox.Text);
++            workerProjectUrl = normalizedWorkerProjectUrl;
+             launchAtStartup = launchCheck.Checked;
+             startMcpOnOpen = startCheck.Checked;
+             autoCheckUpdates = updatesCheck.Checked;
+@@ -1193,6 +1262,7 @@ internal sealed class LauncherForm : Form
+             RedirectStandardOutput = true,
+             RedirectStandardError = true
+         };
++        process.StartInfo.EnvironmentVariables["CHATGPT2CODEX_WORKER_PROJECT_URL"] = workerProjectUrl ?? string.Empty;
+         if (autoGenerateOwnerTokenOnNextStart)
+         {
+             process.StartInfo.EnvironmentVariables["CHATGPT2CODEX_ROTATE_OWNER_TOKEN"] = "1";
+diff --git a/src/agents/browser-placement-policy.test.ts b/src/agents/browser-placement-policy.test.ts
+new file mode 100644
+index 0000000..0000000
+--- /dev/null
++++ b/src/agents/browser-placement-policy.test.ts
+@@ -0,0 +1,132 @@
++import { mkdtemp, rm } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import path from "node:path";
++import { afterEach, describe, expect, it } from "vitest";
++import {
++  markBrowserWorkerFailed,
++  markBrowserWorkerLaunching,
++  prepareBrowserWorkerSession,
++  setChatGptProjectMapping,
++} from "./browser-controller.js";
++import { createWorker } from "./store.js";
++
++const tempDirs: string[] = [];
++const originalFixedProjectUrl = process.env.CHATGPT2CODEX_WORKER_PROJECT_URL;
++
++async function makeTempDir(prefix: string): Promise<string> {
++  const dir = await mkdtemp(path.join(tmpdir(), prefix));
++  tempDirs.push(dir);
++  return dir;
++}
++
++afterEach(async () => {
++  if (originalFixedProjectUrl === undefined) {
++    delete process.env.CHATGPT2CODEX_WORKER_PROJECT_URL;
++  } else {
++    process.env.CHATGPT2CODEX_WORKER_PROJECT_URL = originalFixedProjectUrl;
++  }
++  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
++});
++
++describe("browser worker placement policy", () => {
++  it("uses the fixed EXE/runtime project URL ahead of a project mapping and pins it across recovery", async () => {
++    const stateDir = await makeTempDir("chatgpt2codex-placement-state-");
++    const worker = await createWorker(stateDir, { projectId: "project-1", task: "Pinned placement" });
++    await setChatGptProjectMapping(stateDir, "project-1", {
++      url: "https://chatgpt.com/g/g-p-mapped/project",
++    });
++    process.env.CHATGPT2CODEX_WORKER_PROJECT_URL = "https://chatgpt.com/g/g-p-fixed/project#fragment";
++
++    const first = await prepareBrowserWorkerSession(stateDir, {
++      workerId: worker.workerId,
++      projectId: "project-1",
++    });
++    expect(first.route).toEqual({
++      mode: "project",
++      projectRef: { url: "https://chatgpt.com/g/g-p-fixed/project" },
++    });
++
++    await markBrowserWorkerLaunching(stateDir, worker.workerId);
++    await markBrowserWorkerFailed(stateDir, worker.workerId, "target lost");
++    process.env.CHATGPT2CODEX_WORKER_PROJECT_URL = "https://chatgpt.com/g/g-p-changed/project";
++    await setChatGptProjectMapping(stateDir, "project-1", {
++      url: "https://chatgpt.com/g/g-p-mapped-changed/project",
++    });
++
++    const recovered = await prepareBrowserWorkerSession(stateDir, {
++      workerId: worker.workerId,
++      projectId: "project-1",
++    });
++    expect(recovered.attempt).toBe(2);
++    expect(recovered.route).toEqual(first.route);
++  });
++
++  it("uses project mapping or standalone routing when the fixed setting is blank", async () => {
++    const stateDir = await makeTempDir("chatgpt2codex-placement-state-");
++    process.env.CHATGPT2CODEX_WORKER_PROJECT_URL = "";
++    await setChatGptProjectMapping(stateDir, "project-1", {
++      url: "https://chatgpt.com/g/g-p-mapped/project",
++    });
++
++    const mappedWorker = await createWorker(stateDir, { projectId: "project-1", task: "Mapped" });
++    const standaloneWorker = await createWorker(stateDir, { projectId: "project-2", task: "Standalone" });
++
++    expect((await prepareBrowserWorkerSession(stateDir, {
++      workerId: mappedWorker.workerId,
++      projectId: "project-1",
++    })).route).toEqual({
++      mode: "project",
++      projectRef: { url: "https://chatgpt.com/g/g-p-mapped/project" },
++    });
++    expect((await prepareBrowserWorkerSession(stateDir, {
++      workerId: standaloneWorker.workerId,
++      projectId: "project-2",
++    })).route).toEqual({ mode: "standalone" });
++  });
++
++  it("keeps a pre-policy browser session route when recovering an older worker", async () => {
++    const stateDir = await makeTempDir("chatgpt2codex-placement-state-");
++    delete process.env.CHATGPT2CODEX_WORKER_PROJECT_URL;
++    await setChatGptProjectMapping(stateDir, "project-1", {
++      url: "https://chatgpt.com/g/g-p-original/project",
++    });
++    const worker = await createWorker(stateDir, { projectId: "project-1", task: "Legacy recovery" });
++    const first = await prepareBrowserWorkerSession(stateDir, {
++      workerId: worker.workerId,
++      projectId: "project-1",
++    });
++    await markBrowserWorkerLaunching(stateDir, worker.workerId);
++    await markBrowserWorkerFailed(stateDir, worker.workerId, "target lost");
++
++    await rm(path.join(stateDir, "agents", "browser-placements", `${worker.workerId}.json`), { force: true });
++    process.env.CHATGPT2CODEX_WORKER_PROJECT_URL = "https://chatgpt.com/g/g-p-new-fixed/project";
++
++    const recovered = await prepareBrowserWorkerSession(stateDir, {
++      workerId: worker.workerId,
++      projectId: "project-1",
++    });
++    expect(recovered.route).toEqual(first.route);
++  });
++
++  it("rejects an invalid fixed Worker Project URL before browser launch", async () => {
++    const stateDir = await makeTempDir("chatgpt2codex-placement-state-");
++    const worker = await createWorker(stateDir, { projectId: "project-1", task: "Invalid fixed route" });
++    process.env.CHATGPT2CODEX_WORKER_PROJECT_URL = "https://example.com/not-chatgpt";
++
++    await expect(prepareBrowserWorkerSession(stateDir, {
++      workerId: worker.workerId,
++      projectId: "project-1",
++    })).rejects.toThrow(/ChatGPT Project URL/);
++  });
++});
