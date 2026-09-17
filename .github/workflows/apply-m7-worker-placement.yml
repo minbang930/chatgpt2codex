@@ -19,12 +19,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Apply patch
+      - name: Apply source transformation
         shell: bash
         run: |
           set -euo pipefail
-          git apply --check scripts/m7-worker-placement.patch
-          git apply scripts/m7-worker-placement.patch
+          python scripts/m7-worker-placement.patch
+          git diff --check
           git status --short
       - name: Commit source changes
         shell: bash
