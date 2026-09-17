@@ -6,6 +6,7 @@ import type { WorkerExecutionIntent } from "./execution-settings.js";
 interface FakeOptions {
   modelAvailable?: boolean;
   modelClickMaterializes?: boolean;
+  menuActivationResults?: boolean[];
   sliderKeyboardMaterializes?: boolean;
   sliderIgnoredKeyUps?: number;
   sliderMax?: number;
@@ -21,6 +22,7 @@ class FakeExecutionConnection implements CdpConnection {
   menuOpen = false;
   selectedModel: string;
   sliderValue: number;
+  controlActivations = 0;
   private pendingPoint: "control" | "model" | undefined;
   private controlEvaluations = 0;
   private sliderEvaluations = 0;
@@ -92,7 +94,11 @@ class FakeExecutionConnection implements CdpConnection {
     if (method === "Input.dispatchMouseEvent" && params?.type === "mouseReleased") {
       const x = Number(params.x);
       if (x === 10) {
-        this.menuOpen = true;
+        this.controlActivations += 1;
+        const activationResults = this.options.menuActivationResults;
+        this.menuOpen = activationResults
+          ? (activationResults[this.controlActivations - 1] ?? false)
+          : true;
       } else if (x === 20) {
         if (this.options.modelClickMaterializes ?? true) this.selectedModel = "GPT-5.6 Sol";
         this.menuOpen = false;
@@ -251,6 +257,53 @@ describe("agents/chrome-execution", () => {
       (call) => call.method === "Runtime.evaluate"
         && String(call.params?.expression ?? "").includes("C2C_EXECUTION_CONTROL"),
     )).toHaveLength(4);
+  });
+
+  it("re-observes and re-activates the execution control when the first menu activation does not materialize", async () => {
+    const connection = new FakeExecutionConnection({
+      selectedModel: "GPT-5.6 Sol",
+      sliderValue: 2,
+      menuActivationResults: [false, true],
+    });
+
+    await expect(applyWorkerExecutionIntent(
+      connection,
+      intent({
+        model: "GPT-5.6 Sol",
+        reasoningEffort: "high",
+        fallbackPolicy: "fail-closed",
+      }),
+      noSleep,
+    )).resolves.toEqual({
+      verified: true,
+      observedModel: "GPT-5.6 Sol",
+      observedReasoningEffort: "high",
+    });
+    expect(connection.controlActivations).toBe(2);
+    expect(connection.calls.filter(
+      (call) => call.method === "Runtime.evaluate"
+        && String(call.params?.expression ?? "").includes("C2C_EXECUTION_CONTROL"),
+    )).toHaveLength(2);
+    expect(connection.calls.filter(
+      (call) => call.method === "Input.dispatchMouseEvent"
+        && call.params?.type === "mouseReleased"
+        && call.params?.x === 10,
+    )).toHaveLength(2);
+  });
+
+  it("fails closed when every bounded execution-menu activation fails to materialize", async () => {
+    const connection = new FakeExecutionConnection({
+      selectedModel: "GPT-5.6 Sol",
+      sliderValue: 2,
+      menuActivationResults: [false, false],
+    });
+
+    await expect(applyWorkerExecutionIntent(
+      connection,
+      intent({ reasoningEffort: "high", fallbackPolicy: "fail-closed" }),
+      noSleep,
+    )).rejects.toThrow(/did not expose the model\/reasoning menu after activation/i);
+    expect(connection.controlActivations).toBe(2);
   });
 
   it("waits for the structural reasoning slider to hydrate after the picker opens", async () => {

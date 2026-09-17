@@ -6,7 +6,8 @@ import type {
 import type { CdpConnection } from "./chrome-cdp.js";
 
 const EXECUTION_CONTROL_ATTEMPTS = 30;
-const EXECUTION_MENU_ATTEMPTS = 20;
+const EXECUTION_MENU_ACTIVATION_ATTEMPTS = 2;
+const EXECUTION_MENU_POLLS_PER_ACTIVATION = 10;
 const EXECUTION_MENU_POLL_MS = 100;
 const EXECUTION_SLIDER_ATTEMPTS = 30;
 const EXECUTION_VERIFY_ATTEMPTS = 12;
@@ -289,23 +290,34 @@ async function openExecutionMenu(
   let surface = await evaluateValue<ExecutionSurface>(connection, executionSurfaceExpression());
   if (surface?.menuOpen) return surface;
 
-  let point: Point | null | undefined;
-  for (let attempt = 0; attempt < EXECUTION_CONTROL_ATTEMPTS; attempt += 1) {
-    point = await evaluateValue<Point | null>(connection, executionControlExpression());
-    if (point) break;
-    await sleepMs(EXECUTION_MENU_POLL_MS);
-  }
-  if (!point) {
-    throw new DomainError(
-      ErrorCode.WORKSPACE_NOT_READY,
-      "ChatGPT execution controls are unavailable: no unique model/reasoning composer control was found",
-    );
-  }
-  await clickPoint(connection, point);
-  for (let attempt = 0; attempt < EXECUTION_MENU_ATTEMPTS; attempt += 1) {
-    await sleepMs(EXECUTION_MENU_POLL_MS);
-    surface = await evaluateValue<ExecutionSurface>(connection, executionSurfaceExpression());
-    if (surface?.menuOpen) return surface;
+  for (let activation = 0; activation < EXECUTION_MENU_ACTIVATION_ATTEMPTS; activation += 1) {
+    if (activation > 0) {
+      surface = await evaluateValue<ExecutionSurface>(connection, executionSurfaceExpression());
+      if (surface?.menuOpen) return surface;
+    }
+
+    let point: Point | null | undefined;
+    for (let attempt = 0; attempt < EXECUTION_CONTROL_ATTEMPTS; attempt += 1) {
+      point = await evaluateValue<Point | null>(connection, executionControlExpression());
+      if (point) break;
+      await sleepMs(EXECUTION_MENU_POLL_MS);
+    }
+    if (!point) {
+      if (activation === 0) {
+        throw new DomainError(
+          ErrorCode.WORKSPACE_NOT_READY,
+          "ChatGPT execution controls are unavailable: no unique model/reasoning composer control was found",
+        );
+      }
+      break;
+    }
+
+    await clickPoint(connection, point);
+    for (let attempt = 0; attempt < EXECUTION_MENU_POLLS_PER_ACTIVATION; attempt += 1) {
+      await sleepMs(EXECUTION_MENU_POLL_MS);
+      surface = await evaluateValue<ExecutionSurface>(connection, executionSurfaceExpression());
+      if (surface?.menuOpen) return surface;
+    }
   }
   throw new DomainError(
     ErrorCode.WORKSPACE_NOT_READY,
