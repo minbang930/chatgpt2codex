@@ -6,6 +6,7 @@ import {
   type WorkerExecutionIntent,
   type WorkerExecutionPreference,
 } from "./execution-settings.js";
+import { pinBrowserWorkerPlacement, type BrowserWorkerRoute } from "./browser-controller.js";
 import {
   cancelWorker,
   getWorker,
@@ -26,6 +27,7 @@ export interface AgentSpawnInput {
   task: string;
   baseRef?: string;
   execution?: WorkerExecutionPreference;
+  placement?: BrowserWorkerRoute;
 }
 
 export interface AgentWaitInput {
@@ -98,6 +100,12 @@ export async function spawnAgent(stateDir: string, input: AgentSpawnInput): Prom
     task: input.task,
     ...(hasExecutionIntent(executionIntent) ? { executionIntent } : {}),
   });
+  await pinBrowserWorkerPlacement(
+    stateDir,
+    worker.workerId,
+    worker.projectId,
+    input.placement,
+  );
 
   try {
     return await provisionWorkerWorktree(

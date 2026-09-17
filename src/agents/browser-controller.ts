@@ -70,7 +70,7 @@ interface BrowserWorkerPlacement {
   workerId: string;
   projectId: string;
   route: BrowserWorkerRoute;
-  source: "fixed" | "mapping" | "standalone" | "legacy-session";
+  source: "fixed" | "worker-project" | "worker-standalone" | "mapping" | "standalone" | "legacy-session";
   createdAt: number;
 }
 
@@ -163,7 +163,7 @@ const BrowserWorkerPlacementSchema = z.object({
   workerId: z.string().regex(WORKER_ID_RE),
   projectId: z.string().min(1),
   route: BrowserWorkerRouteSchema,
-  source: z.enum(["fixed", "mapping", "standalone", "legacy-session"]),
+  source: z.enum(["fixed", "worker-project", "worker-standalone", "mapping", "standalone", "legacy-session"]),
   createdAt: z.number().int().nonnegative(),
 }) satisfies z.ZodType<BrowserWorkerPlacement>;
 
@@ -330,10 +330,11 @@ async function writeBrowserWorkerPlacement(
   );
 }
 
-async function resolveDurableBrowserWorkerRoute(
+export async function pinBrowserWorkerPlacement(
   stateDir: string,
   workerId: string,
   projectId: string,
+  requestedRoute?: BrowserWorkerRoute,
   legacyRoute?: BrowserWorkerRoute,
 ): Promise<BrowserWorkerRoute> {
   const stored = await readBrowserWorkerPlacement(stateDir, workerId);
@@ -360,6 +361,14 @@ async function resolveDurableBrowserWorkerRoute(
         projectRef: normalizeProjectRef({ url: fixedUrl }),
       };
       source = "fixed";
+    } else if (requestedRoute) {
+      if (requestedRoute.mode === "project") {
+        route = { mode: "project", projectRef: normalizeProjectRef(requestedRoute.projectRef) };
+        source = "worker-project";
+      } else {
+        route = { mode: "standalone" };
+        source = "worker-standalone";
+      }
     } else {
       const mapping = await getChatGptProjectMapping(stateDir, projectId);
       if (mapping) {
@@ -444,7 +453,7 @@ export async function prepareBrowserWorkerSession(
     version: 1,
     workerId: input.workerId,
     projectId,
-    route: await resolveDurableBrowserWorkerRoute(stateDir, input.workerId, projectId, current?.route),
+    route: await pinBrowserWorkerPlacement(stateDir, input.workerId, projectId, undefined, current?.route),
     status: "prepared",
     attempt: (current?.attempt ?? 0) + 1,
     createdAt: current?.createdAt ?? now,

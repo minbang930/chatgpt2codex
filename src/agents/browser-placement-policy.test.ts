@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   markBrowserWorkerFailed,
   markBrowserWorkerLaunching,
+  pinBrowserWorkerPlacement,
   prepareBrowserWorkerSession,
   setChatGptProjectMapping,
 } from "./browser-controller.js";
@@ -36,6 +37,10 @@ describe("browser worker placement policy", () => {
       url: "https://chatgpt.com/g/g-p-mapped/project",
     });
     process.env.CHATGPT2CODEX_WORKER_PROJECT_URL = "https://chatgpt.com/g/g-p-fixed/project#fragment";
+    await pinBrowserWorkerPlacement(stateDir, worker.workerId, "project-1", {
+      mode: "project",
+      projectRef: { url: "https://chatgpt.com/g/g-p-worker-request/project" },
+    });
 
     const first = await prepareBrowserWorkerSession(stateDir, {
       workerId: worker.workerId,

@@ -167,7 +167,7 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
     {
       title: "Prepare isolated coding worker",
       description:
-        "Create a durable worker plus its isolated managed Git branch/worktree when the active lease permits worker orchestration. Optional execution settings override global/project worker defaults for this worker only and are durably resolved at spawn time. This does not grant the parent direct project-write authority. Browser worker launch is a later step, so do not claim the task is running until the worker becomes running.",
+        "Create a durable worker plus its isolated managed Git branch/worktree when the active lease permits worker orchestration. Optional execution settings override global/project worker defaults for this worker only. Optional placement can request standalone ChatGPT or one ChatGPT Project for this worker; an EXE-configured fixed Worker Project URL always takes precedence. Execution and placement are durably resolved at spawn time. This does not grant the parent direct project-write authority. Browser worker launch is a later step, so do not claim the task is running until the worker becomes running.",
       annotations: LOCAL_STATE_ANNOTATIONS,
       _meta: chatGptMeta("Preparing isolated worker...", "Isolated worker prepared"),
       inputSchema: {
@@ -178,6 +178,13 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
           reasoningEffort: z.enum(WORKER_REASONING_EFFORTS).optional(),
           fallbackPolicy: z.enum(WORKER_EXECUTION_FALLBACK_POLICIES).optional(),
         }).strict().optional(),
+        placement: z.discriminatedUnion("mode", [
+          z.object({ mode: z.literal("standalone") }).strict(),
+          z.object({
+            mode: z.literal("project"),
+            projectUrl: z.string().url().max(2048),
+          }).strict(),
+        ]).optional(),
       },
     },
     async (input) =>
@@ -192,6 +199,11 @@ export function registerAgentTools(server: McpServer, ctx: ToolContext): void {
           task: input.task,
           baseRef: input.baseRef,
           execution: input.execution,
+          placement: input.placement?.mode === "project"
+            ? { mode: "project", projectRef: { url: input.placement.projectUrl } }
+            : input.placement?.mode === "standalone"
+              ? { mode: "standalone" }
+              : undefined,
         });
         return makeResult(
           {
