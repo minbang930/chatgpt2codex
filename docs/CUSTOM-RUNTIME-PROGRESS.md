@@ -6,9 +6,10 @@ Implementation status for `dev/custom-runtime`.
 
 Overall phase: **M6 - Worker Execution Configuration**
 
-Active unit: **M6.5 - Live validation**
+Active unit: **M6.5 live validation complete; final post-validation CI confirmation pending**
 
 Primary operational handoff: `docs/SESSION-HANDOFF.md`.
+Detailed live-validation record: `docs/M6-LIVE-VALIDATION.md`.
 
 Detailed design documents:
 
@@ -207,13 +208,13 @@ M6.2 exit criterion is satisfied: every explicitly configured new worker has sta
 - [x] Initial browser launch and same-worker recovery receive the exact durable `WorkerRecord.executionIntent`; mutable defaults are not re-read.
 - [x] Execution verification runs before `@ChatGPT To Codex Worker` selection and before any bootstrap text is inserted.
 - [x] Added regressions for unavailable/ambiguous model targets, false-positive model clicks, reasoning clicks that do not change ARIA state, unsupported effort levels, explicit `allow-current`, unmanaged workers, launch ordering, and pre-bootstrap fail-closed behavior.
-- [x] Public/current ChatGPT implementations were inspected for the current unified picker/composer-pill and ARIA-slider structure before freezing the bounded adapter. Exact labels/account availability still require dedicated-profile live validation in M6.5.
+- [x] Public/current ChatGPT implementations were inspected for the current unified picker/composer-pill and ARIA-slider structure before freezing the bounded adapter. Exact labels/account availability were then validated in M6.5.
 
 Implementation/test sequence: `d5741d07`, `2d15d532`, `7e0cedfd`, `c562e130`, `8960867e`, `43c6afae`, `dd423f59`, type-narrowing fix `dcc73aba`.
 
 Full CI `35131605738` on code HEAD `dcc73abac90cc925137df42a7a03139bcd85ec80`: **green on macOS, Ubuntu, and Windows**, including typecheck, new execution adapter/integration/recovery tests, existing agent tests, Windows native input/UIA/activity-indicator/hostname/startup-context tests, build, and Windows launcher build.
 
-M6.3 code exit criterion is satisfied: an explicit execution intent cannot reach Worker-app selection/bootstrap unless the browser adapter verified the requested state or the durable policy explicitly allows current state. This is not yet a claim that every model label is live-compatible with the user's dedicated Worker profile; that belongs to M6.5.
+M6.3 code exit criterion is satisfied: an explicit execution intent cannot reach Worker-app/bootstrap submission unless the browser adapter verified the requested state or the durable policy explicitly allows current state.
 
 ### M6.4 - Status and diagnostics — complete
 
@@ -234,22 +235,33 @@ Full CI `35132971767` on code HEAD `a1117d2fd08d57f49aa62d55de7a0b7cd8dd499f`: *
 
 M6.4 exit criterion is satisfied: the parent can distinguish what execution configuration the durable worker requested/resolved from what the current browser attempt actually observed and whether it verified it.
 
-### M6.5 - Live validation — active
+### M6.5 - Live validation — complete
 
-- [ ] Validate legacy/no-explicit-setting worker behavior in the real dedicated Worker Chrome profile.
-- [ ] Validate at least one explicit model + reasoning combination and another reasoning level with `agent_status` diagnostics.
-- [ ] Validate two parallel workers with different durable intents.
-- [ ] Validate target-loss recovery and confirm the same durable intent with a fresh per-attempt observation.
-- [ ] Validate a deliberately unavailable explicit preference fails before task submission and reports useful execution diagnostics.
-- [ ] Confirm mapped ChatGPT Project routing, `/mcp/worker` catalog isolation, and main `/mcp` behavior remain intact.
-- [ ] Record exact live-observed model labels, reasoning slider range/availability, and any dedicated-profile limitations.
+- [x] Legacy/no-explicit-setting worker path remained unmanaged: no execution telemetry was emitted through attempts 1->2, and the same durable worker completed after lifecycle recovery.
+- [x] Exact live model label is `GPT-5.6 Sol`; `instant`, `medium`, and `high` were selectable and verified.
+- [x] `extra-high` is unavailable on the current account/profile and failed closed before task submission; the stable runtime key remains supported by the adapter contract.
+- [x] Two parallel workers with `medium` and `high` durable intents were simultaneously durable/browser `running` and `verified=true` on attempt 1 after the picker-race fix.
+- [x] Target-loss recovery preserved the same durable `GPT-5.6 Sol / high / fail-closed` intent, advanced browser attempt 1->2, changed browser handle, and recorded a fresh verified observation.
+- [x] Deliberately unavailable model `__c2c_nonexistent_model__` failed before task submission while preserving bounded current-state diagnostics.
+- [x] Mapped ChatGPT Project routing was exercised successfully.
+- [x] Worker `/mcp/worker` catalog/capability isolation and normal main `/mcp` behavior were revalidated live.
+- [x] Live picker activation race was fixed by `3cb220986a4a9219d239e7638a9184f41cbbc2bf` using two bounded activations with fresh control observation and unchanged two-second menu-observation budget.
+
+Post-fix focused checks:
+
+- `npx vitest run src/agents/chrome-execution.test.ts` -> 14/14 passed.
+- `npx vitest run src/agents/chrome-cdp-execution.test.ts` -> 2/2 passed.
+- `npm run typecheck` -> passed.
+- Local Windows full `npm test` was not globally green because of pre-existing/platform-dependent macOS desktop-control, file-permission, and local-E2E failures; do not represent it as a clean full-suite result.
+
+Detailed worker IDs, telemetry, and failure boundaries: `docs/M6-LIVE-VALIDATION.md`.
 
 ## Current queue
 
-- [ ] Run M6.5 live validation against the actual dedicated worker profile; adapt only `chrome-execution.ts` if the live UI differs, preserving post-interaction verification and fail-closed behavior.
+- [ ] Confirm final cross-platform GitHub Actions CI on the post-validation branch HEAD, then record the run/SHA and mark M6 fully complete.
 - [ ] Naturally cross the original 30-minute local-control TTL during normal use and confirm no `LEASE_REQUIRED` regression; this remains non-blocking.
-- [ ] Keep Worker MCP/app/control isolation green while M6 evolves.
+- [ ] Keep Worker MCP/app/control isolation green while future work evolves.
 
 ## Update policy
 
-Update this file whenever an M6 unit is completed, blocked, materially redesigned, or moved in scope. Keep `docs/SESSION-HANDOFF.md` and `docs/WORKER-EXECUTION-CONFIG-DESIGN.md` synchronized with the active M6 unit.
+Update this file whenever an M6 unit is completed, blocked, materially redesigned, or moved in scope. Keep `docs/SESSION-HANDOFF.md`, `docs/M6-LIVE-VALIDATION.md`, and `docs/WORKER-EXECUTION-CONFIG-DESIGN.md` synchronized with the current milestone state.

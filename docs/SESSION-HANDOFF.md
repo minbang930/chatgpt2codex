@@ -11,9 +11,9 @@ Operational handoff for continuing `chatgpt2codex` across ChatGPT sessions. Veri
 
 ## Current phase
 
-M0-M5 and blocking post-M5 stabilization are complete. **M6 - Worker Execution Configuration** is active.
+M0-M5 and blocking post-M5 stabilization are complete. **M6 - Worker Execution Configuration has completed live validation; final cross-platform CI confirmation on the post-validation HEAD is pending.**
 
-The only prior stabilization item still open is a non-blocking natural-use observation: eventually cross the original 30-minute local-control TTL and confirm no `LEASE_REQUIRED` regression. Renewal is already code/CI-proven; do not delay M6 or force a wait for it.
+The only prior stabilization item still open is a non-blocking natural-use observation: eventually cross the original 30-minute local-control TTL and confirm no `LEASE_REQUIRED` regression. Renewal is already code/CI-proven; do not delay M6 closure or force a wait for it.
 
 ### M6 implementation order
 
@@ -21,9 +21,11 @@ The only prior stabilization item still open is a non-blocking natural-use obser
 2. **M6.2 - Durable per-worker execution intent — complete**
 3. **M6.3 - ChatGPT Web model/reasoning set-and-verify adapter — code/CI complete**
 4. **M6.4 - Status/diagnostics — complete**
-5. **M6.5 - Live validation — active**
+5. **M6.5 - Live validation — complete**
+6. **Final post-validation CI confirmation — pending**
 
 Design/source of truth: `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
+Detailed live evidence: `docs/M6-LIVE-VALIDATION.md`.
 
 ## How to work with the user
 
@@ -67,13 +69,13 @@ main ChatGPT app   -> /mcp         -> normal main-agent Core catalog
 worker ChatGPT app -> /mcp/worker  -> worker_finish + worker_* mirrors only
 ```
 
-The opaque `workerToken` remains the authority for a specific worker/worktree. Worker catalog excludes ordinary main file/shell/git tools, plugins, Skills, Agent Manager, and Computer Use.
+The opaque `workerToken` remains the authority for a specific worker/worktree. Worker catalog excludes ordinary main file/shell/git tools, plugins, Skills, Agent Manager, and Computer Use. M6.5 revalidated this boundary live while confirming the normal main `/mcp` catalog remained intact.
 
 ### Browser worker routing/recovery
 
-The established Worker-app routing remains fail closed: the dedicated app must materialize as the selected entity before bootstrap text is submitted. True target-loss recovery has also been live-proven: durable `running` worker remained authoritative, lost target reconciled to browser `failed`, same workerId relaunched in attempt 2, and normal `worker_finish` completion remained durable.
+The established Worker-app routing remains fail closed: the dedicated app must materialize as the selected entity before bootstrap text is submitted. True target-loss recovery is live-proven both generally and with M6 execution intent: durable `running` worker remained authoritative, lost target reconciled to browser `failed`, same workerId relaunched in attempt 2, the durable execution intent remained unchanged, and a fresh verified execution observation was recorded for the new browser attempt.
 
-M6.3 inserts execution verification before this existing Worker-app flow when a worker has explicit model/reasoning intent. M6.4 now keeps the browser attempt's verified observation separate from the durable worker intent so recovery diagnostics do not rewrite worker truth.
+M6.3 inserts execution verification before this existing Worker-app flow when a worker has explicit model/reasoning intent. M6.4 keeps the browser attempt's verified observation separate from the durable worker intent so recovery diagnostics do not rewrite worker truth.
 
 ### Rolling local control authorization
 
@@ -101,6 +103,16 @@ fallbackPolicy  = fail-closed | allow-current
 ```
 
 `model` remains a normalized string target. The browser adapter owns matching it to the current ChatGPT execution picker and must verify the resulting state before submission.
+
+Live M6.5 account/profile observations:
+
+```text
+model label: GPT-5.6 Sol
+available reasoning: instant | medium | high
+unavailable on this account/profile: extra-high
+```
+
+`extra-high` remains a valid runtime adapter key; its current unavailability is a profile/account capability limitation and explicit requests correctly fail closed before task submission.
 
 ## M6.1 completed contract
 
@@ -141,11 +153,11 @@ open ChatGPT / wait for composer
  -> submit
 ```
 
-No explicit execution intent means the adapter returns immediately without touching execution controls, preserving legacy behavior.
+No explicit execution intent means the adapter returns immediately without touching execution controls, preserving legacy behavior. M6.5 confirmed this path remained unmanaged across two browser attempts and still completed normally after lifecycle recovery.
 
 ### Current structural adapter
 
-The adapter is intentionally bounded near the CDP layer. Based on current public ChatGPT Web implementation evidence available during M6.3, it supports:
+The adapter is intentionally bounded near the CDP layer. It supports:
 
 - the existing model-switcher test-id when present;
 - the newer neutral composer-pill/unified intelligence-picker structure when that test-id is absent;
@@ -154,7 +166,7 @@ The adapter is intentionally bounded near the CDP layer. Based on current public
 - runtime effort mapping to the first four structural positions: `instant`, `medium`, `high`, `extra-high`;
 - native CDP pointer events followed by fresh observation rather than accepting a synthetic/picker click as success.
 
-This is **not yet a live VMware/profile compatibility claim** for every visible model label. The exact model names/account availability in the user's dedicated Worker Chrome profile still belong to M6.5 live validation. If the live UI differs, extend only the browser adapter without weakening fail-closed verification.
+M6.5 found one live transient race: after control discovery, a single successful pointer dispatch did not always materialize the execution menu during parallel launch. Commit `3cb220986a4a9219d239e7638a9184f41cbbc2bf` keeps the same two-second menu observation budget but splits it across two bounded activation attempts, re-observing the execution control before each activation. Focused execution tests and typecheck passed, and the post-fix parallel live validation succeeded on attempt 1 for both medium and high workers.
 
 ### Fallback policy
 
@@ -168,13 +180,15 @@ Regression coverage includes model/reasoning success, unavailable/ambiguous mode
 Implementation/test sequence: `d5741d07`, `2d15d532`, `7e0cedfd`, `c562e130`, `8960867e`, `43c6afae`, `dd423f59`, final type-narrowing fix `dcc73aba`.
 Full CI `35131605738` on code HEAD `dcc73abac90cc925137df42a7a03139bcd85ec80`: **green on macOS, Ubuntu, and Windows**.
 
+Post-M6.5 race-fix focused verification on `3cb2209`: `chrome-execution` 14/14, `chrome-cdp-execution` 2/2, and `npm run typecheck` passed. Final cross-platform CI for the post-validation HEAD is still pending.
+
 ## M6.4 completed contract
 
 M6.4 makes the execution state inspectable without confusing browser telemetry with durable worker truth.
 
 ### Per-attempt browser telemetry
 
-`BrowserWorkerSession` now has optional bounded execution diagnostics:
+`BrowserWorkerSession` has optional bounded execution diagnostics:
 
 ```ts
 execution?: {
@@ -216,30 +230,36 @@ Full CI `35132971767` on code HEAD `a1117d2fd08d57f49aa62d55de7a0b7cd8dd499f`: *
 
 M6.4 exit criterion is satisfied: the parent can tell what the durable worker requested/resolved and whether the current browser attempt actually verified it.
 
-## Active unit
+## M6.5 completed live validation
 
-**M6.5 - Live validation.**
+Detailed evidence is recorded in `docs/M6-LIVE-VALIDATION.md`.
 
-Use the real dedicated Worker Chrome profile and existing Worker custom app. Validate the already-implemented M6 contract rather than redesigning it:
+Validated live on the real dedicated Worker profile:
 
-- no-explicit-setting compatibility;
-- at least one explicit model + reasoning combination and a second reasoning level;
-- two parallel workers carrying different durable intents;
-- target-loss recovery with the same durable intent and a fresh per-attempt observation;
-- a deliberately unavailable explicit preference failing before task submission;
+- no-explicit-setting compatibility with no execution telemetry emitted;
+- exact live model label `GPT-5.6 Sol`;
+- `instant`, `medium`, and `high` selectable and verified;
+- `extra-high` unavailable on the current account/profile and correctly fail-closed before task submission;
+- two parallel workers carrying different durable intents simultaneously `running` and `verified=true`;
+- target-loss recovery preserving the same durable intent while replacing the browser attempt and recording fresh verified observation;
+- deliberately nonexistent explicit model failing before task submission with useful bounded diagnostics;
 - mapped ChatGPT Project routing;
-- Worker `/mcp/worker` catalog/capability isolation and normal main `/mcp` behavior;
-- exact live model labels, reasoning slider range/availability, and any profile/account limitations.
+- Worker `/mcp/worker` catalog/capability isolation and normal main `/mcp` behavior.
 
-If the actual live UI differs from M6.3 structural assumptions, adapt only `src/agents/chrome-execution.ts` (and focused tests) while preserving post-interaction verification and fail-closed behavior. Do not weaken the durable/introspection contracts to accommodate a UI mismatch.
+M6.5 discovered the transient picker activation race fixed by `3cb2209`; the post-fix parallel live retest passed.
+
+## Remaining milestone-close action
+
+**Run/confirm cross-platform CI on the post-validation branch HEAD.** Do not claim the entire M6 milestone CI-complete until that run is green on the supported matrix. Once confirmed, record the run/SHA in the progress and handoff docs and mark M6 complete.
 
 ## Runtime/update note
 
-`start-chatgpt.ps1` builds only when `dist/cli.js` is missing. After pulling these TypeScript changes on the VM, run `npm run build` before restarting through the already-known-good runtime path. M6.5 is the stage where the dedicated worker profile should be exercised live.
+`start-chatgpt.ps1` builds only when `dist/cli.js` is missing. After pulling TypeScript changes on the VM, run `npm run build` before restarting through the known-good runtime path.
 
 ## Source-of-truth documents
 
 - `docs/WORKER-EXECUTION-CONFIG-DESIGN.md` — M6 design and implementation order.
+- `docs/M6-LIVE-VALIDATION.md` — detailed M6.5 live evidence.
 - `docs/CUSTOM-RUNTIME-PROGRESS.md` — milestone/history and CI evidence.
 - `docs/CUSTOM-RUNTIME-PLAN.md` — architecture/roadmap.
 - `docs/CHATGPT-WORKER-APP-SETUP.md` — two-app configuration.
@@ -251,15 +271,16 @@ If the actual live UI differs from M6.3 structural assumptions, adapt only `src/
 
 ## Handoff maintenance rule
 
-Update this file whenever an M6 unit completes, the active unit changes, an execution-setting contract changes, or live validation changes the next session's operational context. Keep detailed chronological evidence in `CUSTOM-RUNTIME-PROGRESS.md` and detailed M6 design decisions in `WORKER-EXECUTION-CONFIG-DESIGN.md`.
+Update this file whenever an M6 unit completes, the active unit changes, an execution-setting contract changes, or live validation changes the next session's operational context. Keep detailed chronological evidence in `CUSTOM-RUNTIME-PROGRESS.md` and `M6-LIVE-VALIDATION.md`, and detailed M6 design decisions in `WORKER-EXECUTION-CONFIG-DESIGN.md`.
 
 ## New-session start procedure
 
 1. Read this file.
 2. Read `docs/WORKER-EXECUTION-CONFIG-DESIGN.md`.
-3. Check actual `dev/custom-runtime` HEAD and latest CI.
-4. Read the current M6/current-queue portion of `docs/CUSTOM-RUNTIME-PROGRESS.md`.
-5. If docs and repo disagree, trust repo and correct the docs.
-6. If they match, run **M6.5 live validation** against the actual dedicated Worker profile; only adjust `chrome-execution.ts` if the live UI requires it.
+3. Read `docs/M6-LIVE-VALIDATION.md`.
+4. Check actual `dev/custom-runtime` HEAD and latest CI.
+5. Read the current M6/current-queue portion of `docs/CUSTOM-RUNTIME-PROGRESS.md`.
+6. If docs and repo disagree, trust repo and correct the docs.
+7. If the post-validation HEAD CI is green, record its run/SHA and mark M6 fully complete; otherwise fix only the failing regression before closing M6.
 
 A future message consisting only of **`SESSION-HANDOFF.md 읽고 M6 이어서 진행해`** should be enough to resume.
