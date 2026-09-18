@@ -27,7 +27,8 @@ import { intakeFromClipboard, intakeFromDownload, intakeFromPath, readClipboardT
 import { fetchImageFromUrl } from "../assets/image-url.js";
 import { prepareChatGptImagesApp } from "../assets/chatgpt-images-app.js";
 import { listCommands, runCommand } from "../exec/command-runner.js";
-import { runLocalShell } from "../exec/local-shell.js";
+import { runLocalShell, shellCommandNeedsNetwork } from "../exec/local-shell.js";
+import { isNetworkChatGptEnabled } from "../policy/network.js";
 import { createE2eScreenshotShare } from "../e2e/screenshot-share.js";
 import { addToolCallProof, TOOL_AVAILABILITY_GATE } from "./tool-proof.js";
 import {
@@ -844,7 +845,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
             securityModel: [
               "Local-first: ChatGPT cannot self-elevate into local writes; a current-turn ChatGPT_To_Codex tool proof and project lease are required.",
               "Lease-scoped: project_select chooses one project and preset; full-write is required for edits, control is separate, and remote control preset is rejected on /mcp.",
-              "Approval-scoped: network/destructive commands, commits, pushes, and desktop-control input stay behind explicit human intent or local approval gates.",
+              "Approval-scoped: network commands are off by default and require owner opt-in plus remote lease authority; destructive commands and desktop-control input remain approval-gated.",
               "Audit-scoped: every meaningful local action should leave status, diff, command output, screenshot, checkpoint, or ledger evidence.",
               "Prompt-injection posture: avoid broad context packs, distrust remote tool descriptions, keep sensitive actions behind allowlists and approvals.",
             ],
@@ -903,7 +904,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
                 "Call project_select with preset=full-write, or omit preset because the GPT Actions bridge defaults to full-write.",
                 "Use code_search first, then narrow file_read_slice calls to inspect the repo. Avoid broad context-pack calls in ChatGPT because OpenAI safety may block them before they reach chatgpt2codex.",
                 "Apply changes directly with file_apply_patch or file_create. Never hand the user a script to paste when the action bridge is reachable.",
-                "Use command_run or local_shell_run for verification; network/destructive shell intents remain approval-gated by the tool.",
+                "Use command_run or local_shell_run for verification; network commands require the owner-controlled network opt-in plus a remote-capable full-write lease, while destructive shell intents remain blocked.",
                 "Use repo status/diff/show changes and then commit/push only when requested.",
               ],
               imageSaveFlow: [
@@ -1713,8 +1714,21 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
         const commandsForPolicy = await listCommands(entry.root);
         const commandForPolicy = commandsForPolicy.find((c) => c.commandId === input.commandId);
-        const capability = commandForPolicy?.riskTier === "verify" ? "verify" : commandForPolicy?.riskTier === "read" ? "read" : "remote";
+        const needsNetwork = input.intent?.needsNetwork === true || commandForPolicy?.riskTier === "network";
+        const capability = needsNetwork
+          ? "remote"
+          : commandForPolicy?.riskTier === "verify"
+            ? "verify"
+            : commandForPolicy?.riskTier === "read"
+              ? "read"
+              : "remote";
         await requireProjectLease(ctx, input.projectId, capability);
+        if (needsNetwork && !isNetworkChatGptEnabled()) {
+          throw new DomainError(
+            ErrorCode.APPROVAL_REQUIRED,
+            "This project command requires network access; enable 'Allow ChatGPT network commands' in the owner-controlled app settings",
+          );
+        }
         await ctx.ledger.append({
           type: "process.started",
           projectId: input.projectId,
@@ -1771,9 +1785,20 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     },
     async (input) => {
       return withErrorMapping(ctx, "local_shell_run", input, async () => {
-        await requireProjectLease(ctx, input.projectId, input.intent?.writesWorkspace ? "write" : "verify");
-        if (input.intent?.needsNetwork || input.intent?.destructive) {
-          throw new DomainError(ErrorCode.APPROVAL_REQUIRED, "This local shell request requires explicit approval");
+        const needsNetwork = input.intent?.needsNetwork === true || shellCommandNeedsNetwork(input.command);
+        await requireProjectLease(
+          ctx,
+          input.projectId,
+          needsNetwork ? "remote" : input.intent?.writesWorkspace ? "write" : "verify",
+        );
+        if (input.intent?.destructive) {
+          throw new DomainError(ErrorCode.APPROVAL_REQUIRED, "This local shell request is destructive and requires explicit approval");
+        }
+        if (needsNetwork && !isNetworkChatGptEnabled()) {
+          throw new DomainError(
+            ErrorCode.APPROVAL_REQUIRED,
+            "This local shell request requires network access; enable 'Allow ChatGPT network commands' in the owner-controlled app settings",
+          );
         }
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
         await ctx.ledger.append({
@@ -1830,9 +1855,20 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     },
     async (input) => {
       return withErrorMapping(ctx, "e2e_start_server", { ...input, command: redact(input.command) }, async () => {
-        await requireProjectLease(ctx, input.projectId, input.intent?.writesWorkspace ? "write" : "verify");
-        if (input.intent?.needsNetwork || input.intent?.destructive) {
-          throw new DomainError(ErrorCode.APPROVAL_REQUIRED, "This E2E server request requires explicit approval");
+        const needsNetwork = input.intent?.needsNetwork === true || shellCommandNeedsNetwork(input.command);
+        await requireProjectLease(
+          ctx,
+          input.projectId,
+          needsNetwork ? "remote" : input.intent?.writesWorkspace ? "write" : "verify",
+        );
+        if (input.intent?.destructive) {
+          throw new DomainError(ErrorCode.APPROVAL_REQUIRED, "This E2E server request is destructive and requires explicit approval");
+        }
+        if (needsNetwork && !isNetworkChatGptEnabled()) {
+          throw new DomainError(
+            ErrorCode.APPROVAL_REQUIRED,
+            "This E2E server request requires network access; enable 'Allow ChatGPT network commands' in the owner-controlled app settings",
+          );
         }
         if (input.waitUrl && !/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(?::|\/|$)/i.test(input.waitUrl)) {
           throw new DomainError(ErrorCode.APPROVAL_REQUIRED, "Waiting on a non-local URL requires explicit approval");
@@ -1944,9 +1980,20 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
     },
     async (input) => {
       return withErrorMapping(ctx, "e2e_run_command", { ...input, command: redact(input.command) }, async () => {
-        await requireProjectLease(ctx, input.projectId, input.intent?.writesWorkspace ? "write" : "verify");
-        if (input.intent?.needsNetwork || input.intent?.destructive) {
-          throw new DomainError(ErrorCode.APPROVAL_REQUIRED, "This E2E command request requires explicit approval");
+        const needsNetwork = input.intent?.needsNetwork === true || shellCommandNeedsNetwork(input.command);
+        await requireProjectLease(
+          ctx,
+          input.projectId,
+          needsNetwork ? "remote" : input.intent?.writesWorkspace ? "write" : "verify",
+        );
+        if (input.intent?.destructive) {
+          throw new DomainError(ErrorCode.APPROVAL_REQUIRED, "This E2E command request is destructive and requires explicit approval");
+        }
+        if (needsNetwork && !isNetworkChatGptEnabled()) {
+          throw new DomainError(
+            ErrorCode.APPROVAL_REQUIRED,
+            "This E2E command request requires network access; enable 'Allow ChatGPT network commands' in the owner-controlled app settings",
+          );
         }
         const entry = await resolveOrThrow(ctx, { projectId: input.projectId });
         await ctx.ledger.append({
@@ -2048,6 +2095,18 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
           const discovered = autoDiscovered;
           const autoServerCommand = discovered.devCommand;
           const autoWaitUrl = discovered.devUrl;
+          const discoveredNeedsNetwork = [autoServerCommand, discovered.command].some(
+            (command) => typeof command === "string" && shellCommandNeedsNetwork(command),
+          );
+          if (discoveredNeedsNetwork) {
+            await requireProjectLease(ctx, project.projectId, "remote");
+            if (!isNetworkChatGptEnabled()) {
+              throw new DomainError(
+                ErrorCode.APPROVAL_REQUIRED,
+                "The discovered E2E command requires network access; enable 'Allow ChatGPT network commands' in the owner-controlled app settings",
+              );
+            }
+          }
           let serverStopped: { stopped: boolean; error?: string } | undefined;
           let stopAttempted = false;
           const stopAutoServer = async (): Promise<void> => {

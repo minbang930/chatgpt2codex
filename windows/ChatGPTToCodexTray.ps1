@@ -68,6 +68,7 @@ $Localization = @{
     language = @("Language", "언어", "言語", "语言", "語言", "Idioma", "Langue", "Sprache", "Idioma", "Lingua", "Taal", "Język", "Язык", "Dil", "Ngôn ngữ", "Bahasa", "ภาษา", "اللغة", "भाषा", "Мова")
     projectFolder = @("Project folder", "프로젝트 폴더", "プロジェクトフォルダ", "项目文件夹", "專案資料夾", "Carpeta del proyecto", "Dossier du projet", "Projektordner", "Pasta do projeto", "Cartella progetto", "Projectmap", "Folder projektu", "Папка проекта", "Proje klasörü", "Thư mục dự án", "Folder proyek", "โฟลเดอร์โปรเจกต์", "مجلد المشروع", "प्रोजेक्ट फ़ोल्डर", "Тека проєкту")
     browse = @("Browse...", "찾아보기...", "参照...", "浏览...", "瀏覽...", "Examinar...", "Parcourir...", "Durchsuchen...", "Procurar...", "Sfoglia...", "Bladeren...", "Przeglądaj...", "Обзор...", "Gözat...", "Duyệt...", "Telusuri...", "เรียกดู...", "استعراض...", "ब्राउज़...", "Огляд...")
+    networkChatGptSetting = @("Allow ChatGPT network commands", "ChatGPT 네트워크 명령 허용")
     publicHostname = @("Owned fixed domain (optional)", "본인 소유 고정 도메인 (선택)", "所有する固定ドメイン (任意)", "自有固定域名（可选）", "自有固定網域（選填）", "Dominio fijo propio (opcional)", "Domaine fixe personnel (facultatif)", "Eigene feste Domain (optional)", "Domínio fixo próprio (opcional)", "Dominio fisso personale (opzionale)", "Eigen vast domein (optioneel)", "Własna stała domena (opcjonalnie)", "Собственный постоянный домен (необязательно)", "Kendi sabit alan adınız (isteğe bağlı)", "Tên miền cố định của bạn (tùy chọn)", "Domain tetap milik Anda (opsional)", "โดเมนคงที่ของคุณ (ไม่บังคับ)", "نطاق ثابت تملكه (اختياري)", "आपका स्थिर डोमेन (वैकल्पिक)", "Власний сталий домен (необов'язково)")
     publicHostnameHint = @("Blank uses a temporary Quick Tunnel URL. It changes on restart, so ChatGPT must reconnect. For daily use, enter your own Cloudflare Named Tunnel hostname.", "비워두면 임시 Quick Tunnel URL을 사용합니다. 재시작하면 주소가 바뀌므로 ChatGPT를 다시 연결해야 합니다. 매일 쓰려면 본인 Cloudflare Named Tunnel 호스트명을 입력하세요.", "空欄では一時 Quick Tunnel URL を使います。再起動で変わるため ChatGPT の再接続が必要です。日常利用は自分の Cloudflare Named Tunnel ホスト名を入力してください。", "留空会使用临时 Quick Tunnel URL。重启后会变化，因此需要重新连接 ChatGPT。日常使用请填写自己的 Cloudflare Named Tunnel 主机名。", "留空會使用臨時 Quick Tunnel URL。重新啟動後會變更，因此需要重新連接 ChatGPT。日常使用請填入自己的 Cloudflare Named Tunnel 主機名稱。", "En blanco usa una URL temporal de Quick Tunnel. Cambia al reiniciar, así que ChatGPT debe reconectarse. Para uso diario, introduce tu propio hostname de Cloudflare Named Tunnel.", "Vide, utilise une URL Quick Tunnel temporaire. Elle change au redémarrage, donc ChatGPT doit être reconnecté. Pour l'usage quotidien, entrez votre hostname Cloudflare Named Tunnel.", "Leer nutzt eine temporäre Quick-Tunnel-URL. Sie ändert sich beim Neustart, daher muss ChatGPT neu verbunden werden. Für den Alltag den eigenen Cloudflare-Named-Tunnel-Hostnamen eintragen.", "Em branco usa uma URL temporária do Quick Tunnel. Ela muda ao reiniciar, então reconecte o ChatGPT. Para uso diário, informe seu hostname do Cloudflare Named Tunnel.", "Vuoto usa un URL Quick Tunnel temporaneo. Cambia al riavvio, quindi ChatGPT va riconnesso. Per l'uso quotidiano inserisci il tuo hostname Cloudflare Named Tunnel.", "Leeg gebruikt een tijdelijke Quick Tunnel-URL. Die wijzigt na herstart, dus ChatGPT moet opnieuw verbinden. Vul voor dagelijks gebruik je eigen Cloudflare Named Tunnel-hostnaam in.", "Puste pole używa tymczasowego URL Quick Tunnel. Zmienia się po restarcie, więc ChatGPT trzeba połączyć ponownie. Do codziennego użycia wpisz własny hostname Cloudflare Named Tunnel.", "Пустое поле использует временный URL Quick Tunnel. После перезапуска он меняется, поэтому ChatGPT нужно подключить заново. Для постоянной работы укажите свой hostname Cloudflare Named Tunnel.", "Boş bırakılırsa geçici Quick Tunnel URL kullanılır. Yeniden başlatınca değişir, bu yüzden ChatGPT yeniden bağlanmalıdır. Günlük kullanım için kendi Cloudflare Named Tunnel hostname'inizi girin.", "Để trống sẽ dùng URL Quick Tunnel tạm thời. URL đổi khi khởi động lại, nên phải kết nối lại ChatGPT. Dùng hằng ngày thì nhập hostname Cloudflare Named Tunnel của bạn.", "Kosong memakai URL Quick Tunnel sementara. URL berubah saat restart, jadi ChatGPT harus disambungkan ulang. Untuk penggunaan harian, masukkan hostname Cloudflare Named Tunnel milik Anda.", "เว้นว่างเพื่อใช้ URL Quick Tunnel ชั่วคราว ซึ่งจะเปลี่ยนเมื่อรีสตาร์ท จึงต้องเชื่อมต่อ ChatGPT ใหม่ ใช้งานประจำให้ใส่ hostname Cloudflare Named Tunnel ของคุณ", "عند تركه فارغا يستخدم رابط Quick Tunnel مؤقتا. يتغير بعد إعادة التشغيل، لذلك يجب إعادة توصيل ChatGPT. للاستخدام اليومي أدخل اسم مضيف Cloudflare Named Tunnel الخاص بك.", "खाली छोड़ने पर अस्थायी Quick Tunnel URL इस्तेमाल होगा। रीस्टार्ट पर यह बदलता है, इसलिए ChatGPT को फिर जोड़ना होगा। रोज़ाना उपयोग के लिए अपना Cloudflare Named Tunnel hostname डालें।", "Порожнє поле використовує тимчасовий URL Quick Tunnel. Після перезапуску він змінюється, тому ChatGPT треба підключити знову. Для щоденного використання введіть власний hostname Cloudflare Named Tunnel.")
     githubRepositoryURL = @("GitHub repository URL", "GitHub 저장소 URL", "GitHub リポジトリ URL", "GitHub 仓库 URL", "GitHub 儲存庫 URL", "URL del repositorio GitHub", "URL du dépôt GitHub", "GitHub-Repository-URL", "URL do repositório GitHub", "URL repository GitHub", "GitHub-repository-URL", "URL repozytorium GitHub", "URL репозитория GitHub", "GitHub depo URL'si", "URL kho GitHub", "URL repositori GitHub", "URL GitHub repository", "رابط مستودع GitHub", "GitHub रिपॉज़िटरी URL", "URL репозиторію GitHub")
@@ -128,6 +129,7 @@ function Load-Settings {
         Port = 7979
         PublicHostname = ""
         EnablePublicTunnel = $false
+        AllowChatGptNetwork = $false
         LaunchAtLogin = $false
         StartMcpOnLaunch = $false
         AutoCheckUpdates = $false
@@ -146,6 +148,7 @@ foreach ($entry in @{
     Port = 7979
     PublicHostname = ""
     EnablePublicTunnel = $false
+    AllowChatGptNetwork = $false
     LaunchAtLogin = $false
     StartMcpOnLaunch = $false
     AutoCheckUpdates = $false
@@ -176,6 +179,14 @@ function Get-EnablePublicTunnel {
     if ($env:CHATGPT2CODEX_EXPOSE_WEB -eq "1") { return $true }
     if ($env:PUBLIC_HOSTNAME) { return $true }
     return [bool]$script:Settings.EnablePublicTunnel
+}
+
+function Get-AllowChatGptNetwork {
+    if ($null -ne $env:CHATGPT2CODEX_NETWORK_CHATGPT -and $env:CHATGPT2CODEX_NETWORK_CHATGPT -ne "") {
+        $normalized = $env:CHATGPT2CODEX_NETWORK_CHATGPT.Trim().ToLowerInvariant()
+        return @("1", "true", "on", "yes") -contains $normalized
+    }
+    return [bool]$script:Settings.AllowChatGptNetwork
 }
 
 function Test-Health {
@@ -269,6 +280,11 @@ function Start-Service {
     } else {
         $psi.EnvironmentVariables.Remove("CHATGPT2CODEX_EXPOSE_WEB")
         $psi.EnvironmentVariables.Remove("PUBLIC_HOSTNAME")
+    }
+    if (Get-AllowChatGptNetwork) {
+        $psi.EnvironmentVariables["CHATGPT2CODEX_NETWORK_CHATGPT"] = "1"
+    } else {
+        $psi.EnvironmentVariables["CHATGPT2CODEX_NETWORK_CHATGPT"] = "0"
     }
     $activeRoot = Get-ActiveProjectRoot
     if ($activeRoot) {
@@ -373,7 +389,7 @@ function Show-Settings {
     $form = [System.Windows.Forms.Form]::new()
     $form.Text = L "settingsTitle"
     $form.Width = 520
-    $form.Height = 560
+    $form.Height = 592
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = "FixedDialog"
     $form.MaximizeBox = $false
@@ -445,53 +461,57 @@ function Show-Settings {
     $publicTunnel.Text = L "publicTunnelSetting"
     $publicTunnel.Checked = Get-EnablePublicTunnel
     $publicTunnel.SetBounds(18, 328, 472, 26)
+    $network = [System.Windows.Forms.CheckBox]::new()
+    $network.Text = L "networkChatGptSetting"
+    $network.Checked = Get-AllowChatGptNetwork
+    $network.SetBounds(18, 354, 472, 26)
 
     $copyButton = [System.Windows.Forms.Button]::new()
     $copyButton.Text = L "copyConnector"
-    $copyButton.SetBounds(18, 364, 150, 28)
+    $copyButton.SetBounds(18, 396, 150, 28)
     $copyButton.Add_Click({ Copy-ConnectorUrl })
     $localHealthButton = [System.Windows.Forms.Button]::new()
     $localHealthButton.Text = L "openLocalHealth"
-    $localHealthButton.SetBounds(178, 364, 150, 28)
+    $localHealthButton.SetBounds(178, 396, 150, 28)
     $localHealthButton.Add_Click({ Open-Url "http://127.0.0.1:$(Get-Port)/healthz" })
     $publicHealthButton = [System.Windows.Forms.Button]::new()
     $publicHealthButton.Text = L "openPublicHealth"
-    $publicHealthButton.SetBounds(338, 364, 152, 28)
+    $publicHealthButton.SetBounds(338, 396, 152, 28)
     $publicHealthButton.Add_Click({
         $base = Discover-PublicBaseUrl
         if ($base) { Open-Url "$base/healthz" }
     })
     $repoButton = [System.Windows.Forms.Button]::new()
     $repoButton.Text = L "openGithub"
-    $repoButton.SetBounds(18, 398, 150, 28)
+    $repoButton.SetBounds(18, 430, 150, 28)
     $repoButton.Add_Click({ Open-Url (Get-RepoUrl) })
     $updatesButton = [System.Windows.Forms.Button]::new()
     $updatesButton.Text = L "checkUpdates"
-    $updatesButton.SetBounds(178, 398, 150, 28)
+    $updatesButton.SetBounds(178, 430, 150, 28)
     $updatesButton.Add_Click({ Check-Updates $true })
     $logsButton = [System.Windows.Forms.Button]::new()
     $logsButton.Text = L "showLogs"
-    $logsButton.SetBounds(338, 398, 152, 28)
+    $logsButton.SetBounds(338, 430, 152, 28)
     $logsButton.Add_Click({ if (-not (Test-Path $LogPath)) { New-Item -ItemType File -Force -Path $LogPath | Out-Null }; Start-Process notepad.exe $LogPath })
     $logFolderButton = [System.Windows.Forms.Button]::new()
     $logFolderButton.Text = L "openLogFolder"
-    $logFolderButton.SetBounds(18, 432, 150, 28)
+    $logFolderButton.SetBounds(18, 464, 150, 28)
     $logFolderButton.Add_Click({ Start-Process explorer.exe $LogDir })
     $copyright = [System.Windows.Forms.Label]::new()
     $copyright.Text = "Copyright 2026 ezBuilder. All rights reserved."
-    $copyright.SetBounds(178, 437, 300, 22)
+    $copyright.SetBounds(178, 469, 300, 22)
 
     $ok = [System.Windows.Forms.Button]::new()
     $ok.Text = L "save"
     $ok.DialogResult = [System.Windows.Forms.DialogResult]::OK
-    $ok.SetBounds(318, 472, 82, 30)
+    $ok.SetBounds(318, 504, 82, 30)
     $cancel = [System.Windows.Forms.Button]::new()
     $cancel.Text = L "cancel"
     $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-    $cancel.SetBounds(408, 472, 82, 30)
+    $cancel.SetBounds(408, 504, 82, 30)
     $form.AcceptButton = $ok
     $form.CancelButton = $cancel
-    $form.Controls.AddRange(@($languageLabel, $languageBox, $projectLabel, $projectBox, $browse, $hostLabel, $hostBox, $hostHint, $portLabel, $portBox, $launch, $start, $updates, $publicTunnel, $copyButton, $localHealthButton, $publicHealthButton, $repoButton, $updatesButton, $logsButton, $logFolderButton, $copyright, $ok, $cancel))
+    $form.Controls.AddRange(@($languageLabel, $languageBox, $projectLabel, $projectBox, $browse, $hostLabel, $hostBox, $hostHint, $portLabel, $portBox, $launch, $start, $updates, $publicTunnel, $network, $copyButton, $localHealthButton, $publicHealthButton, $repoButton, $updatesButton, $logsButton, $logFolderButton, $copyright, $ok, $cancel))
 
     if ($form.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         $wasRunning = $script:LatestHealth
@@ -502,6 +522,7 @@ function Show-Settings {
         $script:Settings.StartMcpOnLaunch = $start.Checked
         $script:Settings.AutoCheckUpdates = $updates.Checked
         $script:Settings.EnablePublicTunnel = $publicTunnel.Checked
+        $script:Settings.AllowChatGptNetwork = $network.Checked
         Save-Settings $script:Settings
         Set-LaunchAtLogin $launch.Checked
         if ($wasRunning) { Restart-Service }

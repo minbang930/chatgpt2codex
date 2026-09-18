@@ -5,6 +5,7 @@ import { DomainError, ErrorCode } from "../types.js";
 import { redact } from "../policy/secrets.js";
 import { resolveInProject } from "../policy/paths.js";
 import { buildSafeChildEnv } from "./command-runner.js";
+import { isNetworkChatGptEnabled } from "../policy/network.js";
 
 const DEFAULT_TIMEOUT_SEC = 60;
 const MAX_TIMEOUT_SEC = 900;
@@ -52,6 +53,10 @@ const NETWORK_COMMAND_PATTERNS = [
   /\bgit\s+(pull|fetch|clone|push)\b/i,
 ];
 
+export function shellCommandNeedsNetwork(command: string): boolean {
+  return NETWORK_COMMAND_PATTERNS.some((pattern) => pattern.test(command));
+}
+
 function truncateOutput(buf: Buffer): { text: string; truncated: boolean } {
   const limit = OUTPUT_HEAD_BYTES + OUTPUT_TAIL_BYTES;
   if (buf.length <= limit) {
@@ -65,7 +70,7 @@ function truncateOutput(buf: Buffer): { text: string; truncated: boolean } {
   };
 }
 
-export function guardShellCommand(command: string): void {
+export function guardShellCommand(command: string, options?: { allowNetwork?: boolean }): void {
   for (const pattern of SECRET_COMMAND_PATTERNS) {
     if (pattern.test(command)) {
       throw new DomainError(
@@ -82,19 +87,16 @@ export function guardShellCommand(command: string): void {
       );
     }
   }
-  // The caller (src/server/tools.ts local_shell_run) only requires approval
-  // when the model *self-declares* intent.needsNetwork/destructive — a
-  // prompt-injected model can simply omit that flag. Make this guard, not
-  // the declared intent, the actual authority for network/egress commands:
-  // reject them here unconditionally, matching how a declared needsNetwork
-  // is already always rejected by the caller.
-  for (const pattern of NETWORK_COMMAND_PATTERNS) {
-    if (pattern.test(command)) {
-      throw new DomainError(
-        ErrorCode.APPROVAL_REQUIRED,
-        "local_shell_run blocked a network/egress command that requires explicit approval",
-      );
-    }
+  // Network access is an owner-controlled opt-in. Detection stays in the
+  // runtime guard so a model cannot bypass it by omitting intent.needsNetwork.
+  // Even when enabled, callers must still hold the full-write preset's remote
+  // capability before invoking a network command.
+  const allowNetwork = options?.allowNetwork ?? isNetworkChatGptEnabled();
+  if (shellCommandNeedsNetwork(command) && !allowNetwork) {
+    throw new DomainError(
+      ErrorCode.APPROVAL_REQUIRED,
+      "local_shell_run blocked a network/egress command; enable 'Allow ChatGPT network commands' in the owner-controlled app settings",
+    );
   }
 }
 

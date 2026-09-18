@@ -149,7 +149,7 @@ automation.
 - Patch application uses line/hash context.
 - Owner Token approval is required for remote Actions access.
 - Secret-looking values are redacted from tool output.
-- Destructive, network, and sensitive operations remain approval-gated.
+- Network shell/install/fetch operations are off by default and require an explicit owner opt-in; destructive and sensitive operations remain gated.
 
 Do not expose the connector URL publicly unless you understand the tunnel and
 token model. Do not paste Owner Tokens into issues, screenshots, or shared logs.

@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DomainError, ErrorCode } from "../types.js";
+import { isNetworkChatGptEnabled } from "../policy/network.js";
 
 /**
  * Command metadata as discovered from project manifests. `argv` is the
@@ -284,10 +285,17 @@ export async function runCommand(
     );
   }
 
-  if (found.riskTier === "destructive" || found.riskTier === "network") {
+  if (found.riskTier === "destructive") {
     throw new DomainError(
       ErrorCode.APPROVAL_REQUIRED,
       `command "${commandId}" requires explicit human approval (riskTier=${found.riskTier})`,
+      { commandId, riskTier: found.riskTier },
+    );
+  }
+  if (found.riskTier === "network" && !isNetworkChatGptEnabled()) {
+    throw new DomainError(
+      ErrorCode.APPROVAL_REQUIRED,
+      `command "${commandId}" requires network access; enable 'Allow ChatGPT network commands' in the owner-controlled app settings`,
       { commandId, riskTier: found.riskTier },
     );
   }

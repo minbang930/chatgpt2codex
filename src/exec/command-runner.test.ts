@@ -13,6 +13,7 @@ describe("command-runner", () => {
   });
 
   afterEach(async () => {
+    delete process.env.CHATGPT2CODEX_NETWORK_CHATGPT;
     await rm(root, { recursive: true, force: true });
   });
 
@@ -166,7 +167,7 @@ describe("command-runner", () => {
       expect(result.stdoutSummary).toContain("truncated");
     });
 
-    it("requires approval for scripts whose body performs network work", async () => {
+    it("requires approval for scripts whose body performs network work when owner opt-in is off", async () => {
       await writeFile(
         join(root, "package.json"),
         JSON.stringify({ scripts: { check: "curl https://example.com" } }),
@@ -175,6 +176,18 @@ describe("command-runner", () => {
       await expect(runCommand(root, "npm:check", [])).rejects.toMatchObject({
         code: ErrorCode.APPROVAL_REQUIRED,
       });
+    });
+
+    it("runs a network-tier command after explicit owner opt-in", async () => {
+      process.env.CHATGPT2CODEX_NETWORK_CHATGPT = "1";
+      await writeFile(
+        join(root, "package.json"),
+        JSON.stringify({ scripts: { install: "node -e \"console.log('network-tier-ok')\"" } }),
+      );
+
+      const result = await runCommand(root, "npm:install", [], 30);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdoutSummary).toContain("network-tier-ok");
     });
 
     it("requires approval for destructive/network commands instead of running them", async () => {

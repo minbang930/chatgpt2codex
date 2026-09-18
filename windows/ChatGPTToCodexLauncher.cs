@@ -63,6 +63,7 @@ internal sealed class LauncherForm : Form
         {"startOnOpenSetting", new[] {"Start MCP automatically when the app opens", "앱 열 때 MCP 자동 시작", "アプリ起動時に MCP を自動開始", "应用打开时自动启动 MCP", "App 開啟時自動啟動 MCP", "Iniciar MCP automáticamente al abrir la app", "Démarrer MCP automatiquement à l'ouverture", "MCP beim Öffnen automatisch starten", "Iniciar MCP automaticamente ao abrir o app", "Avvia MCP automaticamente all'apertura", "Start MCP automatisch bij openen", "Automatycznie uruchamiaj MCP przy otwarciu", "Автоматически запускать MCP при открытии", "Uygulama açılınca MCP otomatik başlasın", "Tự động khởi động MCP khi mở ứng dụng", "Mulai MCP otomatis saat app dibuka", "เริ่ม MCP อัตโนมัติเมื่อเปิดแอป", "بدء MCP تلقائيا عند فتح التطبيق", "ऐप खुलने पर MCP अपने-आप शुरू करें", "Автоматично запускати MCP під час відкриття"}},
         {"autoUpdatesSetting", new[] {"Check for updates automatically", "업데이트 자동 확인", "更新を自動確認", "自动检查更新", "自動檢查更新", "Buscar actualizaciones automáticamente", "Recherche automatique des mises à jour", "Automatisch nach Updates suchen", "Verificar atualizações automaticamente", "Controlla aggiornamenti automaticamente", "Automatisch updates zoeken", "Automatycznie sprawdzaj aktualizacje", "Автоматически проверять обновления", "Güncellemeleri otomatik denetle", "Tự động kiểm tra cập nhật", "Periksa pembaruan otomatis", "ตรวจอัปเดตอัตโนมัติ", "التحقق التلقائي من التحديثات", "अपडेट अपने-आप जांचें", "Автоматично перевіряти оновлення"}},
         {"publicTunnelSetting", new[] {"Enable ChatGPT web connector", "ChatGPT 웹 커넥터 사용", "ChatGPT Web コネクタを有効化", "启用 ChatGPT 网页连接器", "啟用 ChatGPT 網頁連接器", "Activar conector web de ChatGPT", "Activer le connecteur web ChatGPT", "ChatGPT-Web-Connector aktivieren", "Ativar conector web do ChatGPT", "Abilita connettore web ChatGPT", "ChatGPT-webconnector inschakelen", "Włącz konektor web ChatGPT", "Включить веб-коннектор ChatGPT", "ChatGPT web bağlayıcısını etkinleştir", "Bật trình kết nối web ChatGPT", "Aktifkan konektor web ChatGPT", "เปิดตัวเชื่อมต่อเว็บ ChatGPT", "تفعيل موصل ChatGPT على الويب", "ChatGPT वेब कनेक्टर चालू करें", "Увімкнути веб-конектор ChatGPT"}},
+        {"networkChatGptSetting", new[] {"Allow ChatGPT network commands", "ChatGPT 네트워크 명령 허용"}},
         {"publicHostname", new[] {"Owned fixed domain (optional)", "본인 소유 고정 도메인 (선택)", "所有する固定ドメイン (任意)", "自有固定域名（可选）", "自有固定網域（選填）", "Dominio fijo propio (opcional)", "Domaine fixe personnel (facultatif)", "Eigene feste Domain (optional)", "Domínio fixo próprio (opcional)", "Dominio fisso personale (opzionale)", "Eigen vast domein (optioneel)", "Własna stała domena (opcjonalnie)", "Собственный постоянный домен (необязательно)", "Kendi sabit alan adınız (isteğe bağlı)", "Tên miền cố định của bạn (tùy chọn)", "Domain tetap milik Anda (opsional)", "โดเมนคงที่ของคุณ (ไม่บังคับ)", "نطاق ثابت تملكه (اختياري)", "आपका स्थिर डोमेन (वैकल्पिक)", "Власний сталий домен (необов'язково)"}},
         {"publicHostnameHint", new[] {"Blank uses a temporary Quick Tunnel URL. It changes on restart, so reconnect ChatGPT. Use your own Cloudflare Named Tunnel hostname for daily use.", "비워두면 임시 Quick Tunnel URL을 씁니다. 재시작하면 주소가 바뀌므로 ChatGPT를 다시 연결해야 합니다. 상시 사용은 본인 Cloudflare Named Tunnel 호스트명을 입력하세요.", "空欄なら一時 Quick Tunnel URL を使います。再起動で変わるため ChatGPT の再接続が必要です。常用は自分の Cloudflare Named Tunnel ホスト名を入力してください。", "留空会使用临时 Quick Tunnel URL。重启后会变化，需要重新连接 ChatGPT。日常使用请输入自己的 Cloudflare Named Tunnel 主机名。", "留空會使用臨時 Quick Tunnel URL。重新啟動後會變更，需重新連接 ChatGPT。日常使用請輸入自己的 Cloudflare Named Tunnel 主機名稱。", "En blanco usa una URL temporal de Quick Tunnel. Cambia al reiniciar; vuelve a conectar ChatGPT. Para uso diario escribe tu hostname de Cloudflare Named Tunnel.", "Vide, utilise une URL Quick Tunnel temporaire. Elle change au redémarrage; reconnectez ChatGPT. Pour l'usage quotidien, indiquez votre hôte Cloudflare Named Tunnel.", "Leer nutzt eine temporäre Quick-Tunnel-URL. Sie ändert sich beim Neustart; ChatGPT neu verbinden. Für Dauerbetrieb eigene Cloudflare-Named-Tunnel-Hostname eintragen.", "Em branco usa uma URL temporária Quick Tunnel. Ela muda ao reiniciar; reconecte o ChatGPT. Para uso diário, informe seu hostname Cloudflare Named Tunnel.", "Vuoto usa un URL Quick Tunnel temporaneo. Cambia al riavvio; riconnetti ChatGPT. Per l'uso quotidiano inserisci il tuo hostname Cloudflare Named Tunnel.", "Leeg gebruikt een tijdelijke Quick Tunnel-URL. Die wijzigt na herstart; verbind ChatGPT opnieuw. Voor dagelijks gebruik vul je je Cloudflare Named Tunnel-hostnaam in.", "Puste używa tymczasowego URL Quick Tunnel. Zmienia się po restarcie; połącz ChatGPT ponownie. Do codziennego użycia wpisz własny hostname Cloudflare Named Tunnel.", "Пусто — временный URL Quick Tunnel. Он меняется при перезапуске; подключите ChatGPT заново. Для постоянной работы укажите свой hostname Cloudflare Named Tunnel.", "Boşsa geçici Quick Tunnel URL kullanır. Yeniden başlatınca değişir; ChatGPT'yi yeniden bağlayın. Günlük kullanım için kendi Cloudflare Named Tunnel hostname'inizi girin.", "Để trống sẽ dùng URL Quick Tunnel tạm thời. URL đổi khi khởi động lại; hãy kết nối lại ChatGPT. Dùng hằng ngày thì nhập hostname Cloudflare Named Tunnel của bạn.", "Kosong memakai URL Quick Tunnel sementara. URL berubah saat restart; hubungkan ulang ChatGPT. Untuk harian, isi hostname Cloudflare Named Tunnel milik Anda.", "เว้นว่างเพื่อใช้ URL Quick Tunnel ชั่วคราว ซึ่งจะเปลี่ยนเมื่อรีสตาร์ต ต้องเชื่อมต่อ ChatGPT ใหม่ ใช้งานประจำให้ใส่ hostname Cloudflare Named Tunnel ของคุณ", "فارغ يعني استخدام رابط Quick Tunnel مؤقت. يتغير عند إعادة التشغيل؛ أعد ربط ChatGPT. للاستخدام اليومي أدخل اسم مضيف Cloudflare Named Tunnel الخاص بك.", "खाली रखने पर अस्थायी Quick Tunnel URL प्रयोग होगा। रीस्टार्ट पर बदलता है; ChatGPT फिर जोड़ें। रोज़ उपयोग के लिए अपना Cloudflare Named Tunnel hostname डालें।", "Порожньо — тимчасовий URL Quick Tunnel. Після перезапуску змінюється; підключіть ChatGPT знову. Для щоденного використання вкажіть свій hostname Cloudflare Named Tunnel."}},
         {"localPort", new[] {"Local port", "로컬 포트", "ローカルポート", "本地端口", "本機連接埠", "Puerto local", "Port local", "Lokaler Port", "Porta local", "Porta locale", "Lokale poort", "Port lokalny", "Локальный порт", "Yerel bağlantı noktası", "Cổng cục bộ", "Port lokal", "พอร์ตภายใน", "المنفذ المحلي", "स्थानीय पोर्ट", "Локальний порт"}},
@@ -107,6 +108,7 @@ internal sealed class LauncherForm : Form
     private string githubRepoUrl;
     private string workerProjectUrl;
     private bool publicTunnelEnabled;
+    private bool networkChatGptEnabled;
     private bool launchAtStartup;
     private bool startMcpOnOpen;
     private bool autoCheckUpdates;
@@ -507,6 +509,7 @@ internal sealed class LauncherForm : Form
                 }
                 else if (key == "PublicHostname") configuredPublicHost = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
                 else if (key == "EnablePublicTunnel") publicTunnelEnabled = ParseBool(value);
+                else if (key == "AllowChatGptNetwork") networkChatGptEnabled = ParseBool(value);
                 else if (key == "LaunchAtStartup") launchAtStartup = ParseBool(value);
                 else if (key == "StartMcpOnOpen") startMcpOnOpen = ParseBool(value);
                 else if (key == "AutoCheckUpdates") autoCheckUpdates = ParseBool(value);
@@ -519,6 +522,9 @@ internal sealed class LauncherForm : Form
         {
             // Corrupt settings should not block startup.
         }
+
+        var networkSetting = Environment.GetEnvironmentVariable("CHATGPT2CODEX_NETWORK_CHATGPT");
+        if (!string.IsNullOrWhiteSpace(networkSetting)) networkChatGptEnabled = ParseBool(networkSetting);
 
         if (Environment.GetEnvironmentVariable("CHATGPT2CODEX_EXPOSE_WEB") == "1" ||
             !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PUBLIC_HOSTNAME")) ||
@@ -538,6 +544,7 @@ internal sealed class LauncherForm : Form
             "Port=" + EncodeSetting(port.ToString()),
             "PublicHostname=" + EncodeSetting(configuredPublicHost ?? string.Empty),
             "EnablePublicTunnel=" + EncodeSetting(publicTunnelEnabled ? "true" : "false"),
+            "AllowChatGptNetwork=" + EncodeSetting(networkChatGptEnabled ? "true" : "false"),
             "LaunchAtStartup=" + EncodeSetting(launchAtStartup ? "true" : "false"),
             "StartMcpOnOpen=" + EncodeSetting(startMcpOnOpen ? "true" : "false"),
             "AutoCheckUpdates=" + EncodeSetting(autoCheckUpdates ? "true" : "false"),
@@ -794,7 +801,7 @@ internal sealed class LauncherForm : Form
         {
             form.Text = L("settingsTitle");
             form.Width = 640;
-            form.Height = 750;
+            form.Height = 778;
             form.StartPosition = FormStartPosition.CenterParent;
             form.FormBorderStyle = FormBorderStyle.FixedDialog;
             form.MaximizeBox = false;
@@ -862,36 +869,42 @@ internal sealed class LauncherForm : Form
             tunnelCheck.SetBounds(180, 222, 390, 24);
             form.Controls.Add(tunnelCheck);
 
-            form.Controls.Add(NewLabel(L("publicHostname"), 24, 262, 150));
+            var networkCheck = new CheckBox();
+            networkCheck.Text = L("networkChatGptSetting");
+            networkCheck.Checked = networkChatGptEnabled;
+            networkCheck.SetBounds(180, 250, 390, 24);
+            form.Controls.Add(networkCheck);
+
+            form.Controls.Add(NewLabel(L("publicHostname"), 24, 290, 150));
             var hostBox = new TextBox();
             hostBox.Text = configuredPublicHost ?? string.Empty;
-            hostBox.SetBounds(180, 258, 342, 24);
+            hostBox.SetBounds(180, 286, 342, 24);
             form.Controls.Add(hostBox);
 
-            var hostHint = NewLabel(L("publicHostnameHint"), 180, 288, 342);
-            hostHint.SetBounds(180, 286, 342, 42);
+            var hostHint = NewLabel(L("publicHostnameHint"), 180, 316, 342);
+            hostHint.SetBounds(180, 314, 342, 42);
             hostHint.ForeColor = System.Drawing.SystemColors.GrayText;
             form.Controls.Add(hostHint);
 
-            form.Controls.Add(NewLabel(L("localPort"), 24, 342, 150));
+            form.Controls.Add(NewLabel(L("localPort"), 24, 370, 150));
             var portBox = new NumericUpDown();
             portBox.Minimum = 1;
             portBox.Maximum = 65535;
             portBox.Value = Math.Min(65535, Math.Max(1, port));
-            portBox.SetBounds(180, 338, 120, 24);
+            portBox.SetBounds(180, 366, 120, 24);
             form.Controls.Add(portBox);
 
-            form.Controls.Add(NewLabel(L("githubRepositoryURL"), 24, 382, 150));
+            form.Controls.Add(NewLabel(L("githubRepositoryURL"), 24, 410, 150));
             var repoBox = new TextBox();
             repoBox.Text = githubRepoUrl ?? string.Empty;
-            repoBox.SetBounds(180, 378, 342, 24);
+            repoBox.SetBounds(180, 406, 342, 24);
             form.Controls.Add(repoBox);
 
             var korean = string.Equals(ResolveLanguageCode(preferredLanguage), "ko", StringComparison.OrdinalIgnoreCase);
-            form.Controls.Add(NewLabel(korean ? "Worker ChatGPT 프로젝트 URL" : "Worker ChatGPT Project URL", 24, 416, 150));
+            form.Controls.Add(NewLabel(korean ? "Worker ChatGPT 프로젝트 URL" : "Worker ChatGPT Project URL", 24, 444, 150));
             var workerProjectBox = new TextBox();
             workerProjectBox.Text = workerProjectUrl ?? string.Empty;
-            workerProjectBox.SetBounds(180, 412, 342, 24);
+            workerProjectBox.SetBounds(180, 440, 342, 24);
             form.Controls.Add(workerProjectBox);
 
             var workerProjectHint = NewLabel(
@@ -899,60 +912,60 @@ internal sealed class LauncherForm : Form
                     ? "비워두면 자동/유동 배치됩니다. URL을 넣으면 새 Worker가 항상 해당 ChatGPT Project에 생성됩니다."
                     : "Blank uses automatic/dynamic placement. Set a URL to force every new Worker into that ChatGPT Project.",
                 180,
-                442,
+                470,
                 342);
-            workerProjectHint.SetBounds(180, 440, 342, 42);
+            workerProjectHint.SetBounds(180, 468, 342, 42);
             workerProjectHint.ForeColor = System.Drawing.SystemColors.GrayText;
             form.Controls.Add(workerProjectHint);
 
-            var copyConnector = NewButton(L("copyConnector"), 24, 496, 156);
+            var copyConnector = NewButton(L("copyConnector"), 24, 524, 156);
             copyConnector.Click += delegate { CopyMcpUrl(); };
             form.Controls.Add(copyConnector);
 
-            var copyOwner = NewButton(L("copyOwnerToken"), 194, 496, 156);
+            var copyOwner = NewButton(L("copyOwnerToken"), 194, 524, 156);
             copyOwner.Enabled = !string.IsNullOrEmpty(ownerToken);
             copyOwner.Click += delegate { CopyOwnerToken(); };
             form.Controls.Add(copyOwner);
 
-            var generateOwner = NewButton(L("autoGenerateToken"), 364, 496, 158);
+            var generateOwner = NewButton(L("autoGenerateToken"), 364, 524, 158);
             generateOwner.Click += delegate { AutoGenerateOwnerToken(); };
             form.Controls.Add(generateOwner);
 
-            var localHealth = NewButton(L("openLocalHealth"), 24, 534, 156);
+            var localHealth = NewButton(L("openLocalHealth"), 24, 562, 156);
             localHealth.Click += delegate { OpenLocalHealth(); };
             form.Controls.Add(localHealth);
 
-            var publicHealth = NewButton(L("openPublicHealth"), 194, 534, 156);
+            var publicHealth = NewButton(L("openPublicHealth"), 194, 562, 156);
             publicHealth.Click += delegate { OpenPublicHealth(); };
             form.Controls.Add(publicHealth);
 
-            var logs = NewButton(L("showLogs"), 364, 534, 158);
+            var logs = NewButton(L("showLogs"), 364, 562, 158);
             logs.Click += delegate { ShowLogs(); };
             form.Controls.Add(logs);
 
-            var github = NewButton(L("openGithub"), 24, 572, 156);
+            var github = NewButton(L("openGithub"), 24, 600, 156);
             github.Click += delegate { OpenGithub(); };
             form.Controls.Add(github);
 
-            var checkUpdates = NewButton(L("checkUpdates"), 194, 572, 156);
+            var checkUpdates = NewButton(L("checkUpdates"), 194, 600, 156);
             checkUpdates.Click += delegate { CheckUpdates(true); };
             form.Controls.Add(checkUpdates);
 
-            var about = NewButton(L("about"), 364, 572, 158);
+            var about = NewButton(L("about"), 364, 600, 158);
             about.Click += delegate
             {
                 MessageBox.Show(form, "ChatGPT To Codex by ezBuilder\r\nCopyright 2026 ezBuilder. All rights reserved.", "ChatGPT To Codex", MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
             form.Controls.Add(about);
 
-            var copyright = NewLabel("Copyright 2026 ezBuilder. All rights reserved.", 24, 630, 300);
+            var copyright = NewLabel("Copyright 2026 ezBuilder. All rights reserved.", 24, 658, 300);
             form.Controls.Add(copyright);
 
-            var cancel = NewButton(L("cancel"), 356, 624, 78);
+            var cancel = NewButton(L("cancel"), 356, 652, 78);
             cancel.DialogResult = DialogResult.Cancel;
             form.Controls.Add(cancel);
 
-            var save = NewButton(L("save"), 444, 624, 78);
+            var save = NewButton(L("save"), 444, 652, 78);
             save.DialogResult = DialogResult.OK;
             form.AcceptButton = save;
             form.CancelButton = cancel;
@@ -987,6 +1000,7 @@ internal sealed class LauncherForm : Form
             startMcpOnOpen = startCheck.Checked;
             autoCheckUpdates = updatesCheck.Checked;
             publicTunnelEnabled = tunnelCheck.Checked;
+            networkChatGptEnabled = networkCheck.Checked;
             configuredPublicHost = string.IsNullOrWhiteSpace(hostBox.Text) ? null : hostBox.Text.Trim();
             port = (int)portBox.Value;
             githubRepoUrl = string.IsNullOrWhiteSpace(repoBox.Text) ? "https://github.com/ezBuilder/chatgpt2codex" : repoBox.Text.Trim();
@@ -1363,6 +1377,7 @@ internal sealed class LauncherForm : Form
             RedirectStandardError = true
         };
         process.StartInfo.EnvironmentVariables["CHATGPT2CODEX_WORKER_PROJECT_URL"] = workerProjectUrl ?? string.Empty;
+        process.StartInfo.EnvironmentVariables["CHATGPT2CODEX_NETWORK_CHATGPT"] = networkChatGptEnabled ? "1" : "0";
         if (autoGenerateOwnerTokenOnNextStart)
         {
             process.StartInfo.EnvironmentVariables["CHATGPT2CODEX_ROTATE_OWNER_TOKEN"] = "1";
