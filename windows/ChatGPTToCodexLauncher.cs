@@ -801,7 +801,7 @@ internal sealed class LauncherForm : Form
         {
             form.Text = L("settingsTitle");
             form.Width = 640;
-            form.Height = 778;
+            form.Height = 750;
             form.StartPosition = FormStartPosition.CenterParent;
             form.FormBorderStyle = FormBorderStyle.FixedDialog;
             form.MaximizeBox = false;

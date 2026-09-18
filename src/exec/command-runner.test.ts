@@ -7,13 +7,17 @@ import { listCommands, runCommand } from "./command-runner.js";
 
 describe("command-runner", () => {
   let root: string;
+  let previousNetworkSetting: string | undefined;
 
   beforeEach(async () => {
+    previousNetworkSetting = process.env.CHATGPT2CODEX_NETWORK_CHATGPT;
+    delete process.env.CHATGPT2CODEX_NETWORK_CHATGPT;
     root = await mkdtemp(join(tmpdir(), "chatgpt2codex-cmdrunner-"));
   });
 
   afterEach(async () => {
-    delete process.env.CHATGPT2CODEX_NETWORK_CHATGPT;
+    if (previousNetworkSetting === undefined) delete process.env.CHATGPT2CODEX_NETWORK_CHATGPT;
+    else process.env.CHATGPT2CODEX_NETWORK_CHATGPT = previousNetworkSetting;
     await rm(root, { recursive: true, force: true });
   });
 
