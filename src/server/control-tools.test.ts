@@ -188,6 +188,16 @@ describe("desktop-control tool gating", () => {
     launch.mockRestore();
   });
 
+  it("lists all control tools to ChatGPT only when the owner exposure flag is on", async () => {
+    process.env.CHATGPT2CODEX_CONTROL = "1";
+    process.env.CHATGPT2CODEX_CONTROL_CHATGPT = "1";
+    const { ctx } = makeCtx(stateDir, projectRoot);
+    const names = await toolsListNames(ctx);
+    for (const name of CONTROL_NAMES) {
+      expect(names, name).toContain(name);
+    }
+  });
+
   it("denies computer_request_action without any lease (PROJECT_NOT_SELECTED)", async () => {
     process.env.CHATGPT2CODEX_CONTROL = "1";
     const { ctx } = makeCtx(stateDir, projectRoot);
