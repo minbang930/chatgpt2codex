@@ -55,7 +55,8 @@ if ([IO.Path]::GetFileName($SourcePath) -ieq 'computer-use-benchmark-wpf.cs') {
   $compilerArgs += @(
     ('/reference:' + (Join-Path $wpfReferenceRoot 'WindowsBase.dll')),
     ('/reference:' + (Join-Path $wpfReferenceRoot 'PresentationCore.dll')),
-    ('/reference:' + (Join-Path $wpfReferenceRoot 'PresentationFramework.dll'))
+    ('/reference:' + (Join-Path $wpfReferenceRoot 'PresentationFramework.dll')),
+    ('/reference:' + (Join-Path $wpfReferenceRoot 'System.Xaml.dll'))
   )
 } else {
   $compilerArgs += @(
