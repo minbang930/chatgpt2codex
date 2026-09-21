@@ -11,14 +11,18 @@ import { stopWindowsUiaHelper } from "../control/win-uia.js";
 import {
   getCuaDriverDiagnostics,
   resetCuaDriverDiagnostics,
+  setCuaCursorOverlayEnabled,
   stopCuaDriver,
   type CuaDriverDiagnostics,
 } from "../control/cua-driver.js";
 import type { WindowsBackendMode } from "../control/windows-backend-mode.js";
 
+type CuaOverlayMode = "on" | "off" | "both";
+
 interface Arguments {
   iterations: number;
   backends: WindowsBackendMode[];
+  cuaOverlay: CuaOverlayMode;
   output: string;
 }
 
@@ -47,7 +51,7 @@ interface RunResult {
 }
 
 interface BackendResult {
-  backend: WindowsBackendMode;
+  backend: string;
   status: "ok" | "unavailable";
   error?: string;
   runs: RunResult[];
@@ -75,6 +79,7 @@ function parseArgs(argv: string[]): Arguments {
   const args: Arguments = {
     iterations: 10,
     backends: ["legacy", "cua"],
+    cuaOverlay: "on",
     output: path.resolve(
       ".chatgpt2codex",
       "benchmarks",
@@ -88,6 +93,12 @@ function parseArgs(argv: string[]): Arguments {
       const parsed = (argv[++index] ?? "").split(",").map((item) => item.trim()).filter(Boolean);
       if (parsed.some((item) => item !== "legacy" && item !== "cua")) throw new Error("--backends accepts legacy,cua");
       args.backends = parsed as WindowsBackendMode[];
+    } else if (value === "--cua-overlay") {
+      const mode = (argv[++index] ?? "").trim();
+      if (mode !== "on" && mode !== "off" && mode !== "both") {
+        throw new Error("--cua-overlay accepts on,off,both");
+      }
+      args.cuaOverlay = mode;
     } else if (value === "--output") args.output = path.resolve(argv[++index] ?? "");
     else throw new Error(`Unknown argument: ${value}`);
   }
@@ -400,7 +411,7 @@ function observationDiagnostic(
 }
 
 async function observe(
-  backend: WindowsBackendMode,
+  backend: string,
   iteration: number,
   phase: "before-type" | "before-click",
   projectRoot: string,
@@ -424,6 +435,7 @@ async function observe(
 
 async function runOne(
   backend: WindowsBackendMode,
+  label: string,
   iteration: number,
   fixturePid: number,
   fixture: ChildProcess,
@@ -436,10 +448,10 @@ async function runOne(
   try {
     const target = await waitForTargetWindow(fixturePid, fixture);
 
-    const first = await observe(backend, iteration, "before-type", projectRoot, target.appName);
+    const first = await observe(label, iteration, "before-type", projectRoot, target.appName);
     const textbox = findTextbox(first.observation);
 
-    const token = `${backend}-${iteration}-${Date.now()}`;
+    const token = `${label}-${iteration}-${Date.now()}`;
     const beforeType = await focusDecoy(decoyAppName);
     const typeStarted = performance.now();
     const typeRoute = await writeBenchmarkToken(target.appName, textbox, token);
@@ -454,7 +466,7 @@ async function runOne(
     // Cua element tokens are snapshot-scoped and the Driver guidance is one
     // action per observation. Reobserve before the second semantic action.
     // Apply the same loop to legacy so latency comparisons stay symmetric.
-    const second = await observe(backend, iteration, "before-click", projectRoot, target.appName);
+    const second = await observe(label, iteration, "before-click", projectRoot, target.appName);
     const button = findButton(second.observation);
 
     const beforeClick = await focusDecoy(decoyAppName);
@@ -548,35 +560,70 @@ async function main(args: Arguments): Promise<void> {
 
   try {
     for (const backend of args.backends) {
-      process.env.CHATGPT2CODEX_WINDOWS_BACKEND = backend;
-      if (backend === "cua") resetCuaDriverDiagnostics();
+      const variants =
+        backend === "cua"
+          ? args.cuaOverlay === "both"
+            ? [
+                { label: "cua-overlay-on", overlay: true },
+                { label: "cua-overlay-off", overlay: false },
+              ]
+            : [{ label: `cua-overlay-${args.cuaOverlay}`, overlay: args.cuaOverlay === "on" }]
+          : [{ label: "legacy", overlay: undefined }];
 
-      const runs: RunResult[] = [];
-      const warmup = await runOne(backend, 0, fixture.pid, fixture, projectRoot, statePath, decoy.appName);
-      if (warmup.error || !warmup.success) {
-        const warmupError =
-          warmup.error ??
-          `Warm-up task failed (typeApplied=${warmup.typeApplied}, submitApplied=${warmup.submitApplied}, typeRoute=${warmup.typeRoute ?? "none"}, clickRoute=${warmup.clickRoute ?? "none"})`;
-        results.push({
+      for (const variant of variants) {
+        process.env.CHATGPT2CODEX_WINDOWS_BACKEND = backend;
+        if (backend === "cua") {
+          await setCuaCursorOverlayEnabled(variant.overlay ?? true);
+          resetCuaDriverDiagnostics();
+        }
+
+        const runs: RunResult[] = [];
+        const warmup = await runOne(
           backend,
-          status: "unavailable",
-          error: warmupError,
-          runs: [warmup],
-          ...(backend === "cua" ? { diagnostics: getCuaDriverDiagnostics() } : {}),
-        });
-        continue;
-      }
+          variant.label,
+          0,
+          fixture.pid,
+          fixture,
+          projectRoot,
+          statePath,
+          decoy.appName,
+        );
+        if (warmup.error || !warmup.success) {
+          const warmupError =
+            warmup.error ??
+            `Warm-up task failed (typeApplied=${warmup.typeApplied}, submitApplied=${warmup.submitApplied}, typeRoute=${warmup.typeRoute ?? "none"}, clickRoute=${warmup.clickRoute ?? "none"})`;
+          results.push({
+            backend: variant.label,
+            status: "unavailable",
+            error: warmupError,
+            runs: [warmup],
+            ...(backend === "cua" ? { diagnostics: getCuaDriverDiagnostics() } : {}),
+          });
+          continue;
+        }
 
-      for (let iteration = 1; iteration <= args.iterations; iteration += 1) {
-        runs.push(await runOne(backend, iteration, fixture.pid!, fixture, projectRoot, statePath, decoy.appName));
+        for (let iteration = 1; iteration <= args.iterations; iteration += 1) {
+          runs.push(
+            await runOne(
+              backend,
+              variant.label,
+              iteration,
+              fixture.pid!,
+              fixture,
+              projectRoot,
+              statePath,
+              decoy.appName,
+            ),
+          );
+        }
+        results.push({
+          backend: variant.label,
+          status: "ok",
+          runs,
+          ...(backend === "cua" ? { diagnostics: getCuaDriverDiagnostics() } : {}),
+          summary: summarize(runs),
+        });
       }
-      results.push({
-        backend,
-        status: "ok",
-        runs,
-        ...(backend === "cua" ? { diagnostics: getCuaDriverDiagnostics() } : {}),
-        summary: summarize(runs),
-      });
     }
 
     const report = {
@@ -586,6 +633,7 @@ async function main(args: Arguments): Promise<void> {
       arch: process.arch,
       node: process.version,
       iterations: args.iterations,
+      cuaOverlay: args.cuaOverlay,
       cuaDriverBin: process.env.CUA_DRIVER_BIN ?? "cua-driver",
       results,
     };
