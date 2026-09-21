@@ -30,7 +30,9 @@
     "linux:e2e": "bash scripts/e2e-linux-installer.sh",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "benchmark:computer-use": "tsx src/benchmarks/computer-use.ts"
+    "benchmark:computer-use": "tsx src/benchmarks/computer-use.ts",
+    "cua:build-fast-path": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-cua-driver-fast-path.ps1",
+    "benchmark:cua-fast-path": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/benchmark-cua-driver-fast-path.ps1"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
