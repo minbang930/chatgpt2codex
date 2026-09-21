@@ -288,6 +288,20 @@ function findButton(observation: Awaited<ReturnType<typeof desktop.snapshotSeman
   );
 }
 
+function observationDiagnostic(
+  observation: Awaited<ReturnType<typeof desktop.snapshotSemanticElements>>,
+): string {
+  return JSON.stringify(
+    observation.elements.slice(0, 20).map((element) => ({
+      role: element.role,
+      name: element.name,
+      automationId: element.automationId,
+      className: element.className,
+      actions: element.actions,
+    })),
+  );
+}
+
 async function observe(
   backend: WindowsBackendMode,
   iteration: number,
@@ -327,7 +341,11 @@ async function runOne(
 
     const first = await observe(backend, iteration, "before-type", projectRoot, target.appName);
     const textbox = findTextbox(first.observation);
-    if (!textbox) throw new Error("Benchmark textbox was not found in the semantic observation");
+    if (!textbox) {
+      throw new Error(
+        `Benchmark textbox was not found in the semantic observation. Elements: ${observationDiagnostic(first.observation)}`,
+      );
+    }
 
     const token = `${backend}-${iteration}-${Date.now()}`;
     const beforeType = await focusDecoy(decoyAppName);
@@ -346,7 +364,11 @@ async function runOne(
     // Apply the same loop to legacy so latency comparisons stay symmetric.
     const second = await observe(backend, iteration, "before-click", projectRoot, target.appName);
     const button = findButton(second.observation);
-    if (!button) throw new Error("Benchmark Submit button was not found after re-observation");
+    if (!button) {
+      throw new Error(
+        `Benchmark Submit button was not found after re-observation. Elements: ${observationDiagnostic(second.observation)}`,
+      );
+    }
 
     const beforeClick = await focusDecoy(decoyAppName);
     const clickStarted = performance.now();
