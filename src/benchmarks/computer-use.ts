@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { captureControlAppScreenshot } from "../control/capture.js";
 import * as desktop from "../control/input-backend.js";
 import * as legacyWin from "../control/win-native.js";
+import { stopWindowsUiaHelper } from "../control/win-uia.js";
 import {
   getCuaDriverDiagnostics,
   resetCuaDriverDiagnostics,
@@ -506,7 +507,11 @@ async function main(args: Arguments): Promise<void> {
   } finally {
     fixture.kill();
     decoy.child.kill();
-    await stopCuaDriver();
+    await Promise.all([
+      stopCuaDriver(),
+      legacyWin.stopWindowsInputHelper(),
+      stopWindowsUiaHelper(),
+    ]);
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 }
