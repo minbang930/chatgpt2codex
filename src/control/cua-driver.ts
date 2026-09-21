@@ -844,6 +844,92 @@ export async function setSemanticValue(appName: string, target: { label?: string
   recordActionResult("set_value", "semantic", result);
 }
 
+export interface CuaObservationModeProbeSample {
+  combinedMs: number;
+  treeOnlyMs: number;
+  screenshotOnlyMs: number;
+  parallelMs: number;
+  treeElements: number;
+}
+
+export async function probeCuaObservationModes(
+  appName: string,
+  outputDir: string,
+  iterations: number,
+): Promise<CuaObservationModeProbeSample[]> {
+  assertWindows();
+  const count = Math.max(1, Math.min(20, Math.trunc(iterations)));
+  const samples: CuaObservationModeProbeSample[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const target = (await resolveReadTarget(appName)).target;
+    const base = path.join(outputDir, `cua-observe-probe-${index + 1}`);
+
+    const combinedStarted = performance.now();
+    await callTool("get_window_state", {
+      pid: target.pid,
+      window_id: target.windowId,
+      include_accessibility_tree: true,
+      include_screenshot: true,
+      screenshot_out_file: `${base}-combined.png`,
+      max_elements: 120,
+      max_depth: 8,
+    });
+    const combinedMs = performance.now() - combinedStarted;
+
+    const treeStarted = performance.now();
+    const tree = await callTool("get_window_state", {
+      pid: target.pid,
+      window_id: target.windowId,
+      include_accessibility_tree: true,
+      include_screenshot: false,
+      max_elements: 120,
+      max_depth: 8,
+    });
+    const treeOnlyMs = performance.now() - treeStarted;
+
+    const screenshotStarted = performance.now();
+    await callTool("get_window_state", {
+      pid: target.pid,
+      window_id: target.windowId,
+      include_accessibility_tree: false,
+      include_screenshot: true,
+      screenshot_out_file: `${base}-screenshot.png`,
+    });
+    const screenshotOnlyMs = performance.now() - screenshotStarted;
+
+    const parallelStarted = performance.now();
+    const [parallelTree] = await Promise.all([
+      callTool("get_window_state", {
+        pid: target.pid,
+        window_id: target.windowId,
+        include_accessibility_tree: true,
+        include_screenshot: false,
+        max_elements: 120,
+        max_depth: 8,
+      }),
+      callTool("get_window_state", {
+        pid: target.pid,
+        window_id: target.windowId,
+        include_accessibility_tree: false,
+        include_screenshot: true,
+        screenshot_out_file: `${base}-parallel.png`,
+      }),
+    ]);
+    const parallelMs = performance.now() - parallelStarted;
+
+    const rows = Array.isArray(tree.elements) ? tree.elements.length : 0;
+    const parallelRows = Array.isArray(parallelTree.elements) ? parallelTree.elements.length : 0;
+    samples.push({
+      combinedMs: Math.round(combinedMs * 100) / 100,
+      treeOnlyMs: Math.round(treeOnlyMs * 100) / 100,
+      screenshotOnlyMs: Math.round(screenshotOnlyMs * 100) / 100,
+      parallelMs: Math.round(parallelMs * 100) / 100,
+      treeElements: Math.max(rows, parallelRows),
+    });
+  }
+  return samples;
+}
+
 export async function setCuaCursorOverlayEnabled(enabled: boolean): Promise<void> {
   await callTool("set_agent_cursor_enabled", { enabled });
 }
