@@ -492,3 +492,49 @@ npm run cua:build-fast-path -- -SkipTests -CleanTarget
 After that, both comparison runners can use the persisted binary without a
 rebuild.
 
+#### Order-balanced WinForms/WPF result
+
+A same-machine 5-iteration matrix was run in both driver orders for both
+deterministic fixtures:
+
+| Fixture | Driver | Median total | Observe | Reobserve | get_window_state avg | Success | Semantic Type/Click |
+|---|---|---:|---:|---:|---:|---:|---:|
+| WinForms | official | 665.48 ms | 223.70 ms | 221.01 ms | 177.05 ms | 100% | 100% / 100% |
+| WinForms | patched | 497.76 ms | 145.95 ms | 131.74 ms | 91.22 ms | 100% | 100% / 100% |
+| WPF | official | 763.07 ms | 282.62 ms | 269.80 ms | 219.72 ms | 100% | 100% / 100% |
+| WPF | patched | 522.14 ms | 150.36 ms | 150.64 ms | 102.63 ms | 100% | 100% / 100% |
+
+Order-balanced reductions:
+
+```text
+WinForms get_window_state  177.05 -> 91.22 ms   (-85.83 ms, -48.5%)
+WinForms median total      665.48 -> 497.76 ms  (-167.72 ms, -25.2%)
+
+WPF get_window_state       219.72 -> 102.63 ms  (-117.09 ms, -53.3%)
+WPF median total           763.07 -> 522.14 ms  (-240.93 ms, -31.6%)
+```
+
+Per-order reductions were also consistent rather than flipping with run order:
+
+```text
+WinForms forward  get_window_state -43.7%, total -22.2%
+WinForms reverse  get_window_state -52.7%, total -28.0%
+WPF forward       get_window_state -50.9%, total -31.2%
+WPF reverse       get_window_state -55.8%, total -31.9%
+```
+
+All eight functional benchmark rows retained 100% task success, 100% semantic
+Type/Click routing, and 100% foreground preservation. Cua confidence remained
+0 confirmed / 12 unverifiable / 0 suspected-noop per run, so the effect
+verification limitation is unchanged.
+
+This substantially reduces the chance that the observed fast-path win is an
+official-first/patched-second warm-cache artifact. It also shows that the
+benefit is not specific to WinForms: WPF, whose accessibility observation is
+heavier, benefits even more from avoiding the per-observation full window
+enumeration.
+
+The next compatibility gate is the read-only exact-window real-app probe
+(Notepad + isolated Edge) before considering the patched Driver suitable for
+broader/default use.
+
