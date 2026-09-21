@@ -10,6 +10,7 @@ import * as legacyWin from "../control/win-native.js";
 import { stopWindowsUiaHelper } from "../control/win-uia.js";
 import {
   getCuaDriverDiagnostics,
+  probeCuaObservationModes,
   resetCuaDriverDiagnostics,
   setCuaCursorOverlayEnabled,
   stopCuaDriver,
@@ -23,6 +24,7 @@ interface Arguments {
   iterations: number;
   backends: WindowsBackendMode[];
   cuaOverlay: CuaOverlayMode;
+  cuaObserveProbe: boolean;
   output: string;
 }
 
@@ -56,6 +58,15 @@ interface BackendResult {
   error?: string;
   runs: RunResult[];
   diagnostics?: CuaDriverDiagnostics;
+  observationProbe?: {
+    samples: number;
+    medianCombinedMs: number;
+    medianTreeOnlyMs: number;
+    medianScreenshotOnlyMs: number;
+    medianParallelMs: number;
+    p95ParallelMs: number;
+    elementCount: number;
+  };
   summary?: {
     successRate: number;
     typeApplyRate: number;
@@ -80,6 +91,7 @@ function parseArgs(argv: string[]): Arguments {
     iterations: 10,
     backends: ["legacy", "cua"],
     cuaOverlay: "off",
+    cuaObserveProbe: false,
     output: path.resolve(
       ".chatgpt2codex",
       "benchmarks",
@@ -99,7 +111,8 @@ function parseArgs(argv: string[]): Arguments {
         throw new Error("--cua-overlay accepts on,off,both");
       }
       args.cuaOverlay = mode;
-    } else if (value === "--output") args.output = path.resolve(argv[++index] ?? "");
+    } else if (value === "--cua-observe-probe") args.cuaObserveProbe = true;
+    else if (value === "--output") args.output = path.resolve(argv[++index] ?? "");
     else throw new Error(`Unknown argument: ${value}`);
   }
   if (!Number.isInteger(args.iterations) || args.iterations < 1 || args.iterations > 100) {
@@ -518,6 +531,20 @@ async function runOne(
   }
 }
 
+function summarizeObservationProbe(
+  samples: Awaited<ReturnType<typeof probeCuaObservationModes>>,
+): NonNullable<BackendResult["observationProbe"]> {
+  return {
+    samples: samples.length,
+    medianCombinedMs: percentile(samples.map((sample) => sample.combinedMs), 0.5),
+    medianTreeOnlyMs: percentile(samples.map((sample) => sample.treeOnlyMs), 0.5),
+    medianScreenshotOnlyMs: percentile(samples.map((sample) => sample.screenshotOnlyMs), 0.5),
+    medianParallelMs: percentile(samples.map((sample) => sample.parallelMs), 0.5),
+    p95ParallelMs: percentile(samples.map((sample) => sample.parallelMs), 0.95),
+    elementCount: Math.max(0, ...samples.map((sample) => sample.treeElements)),
+  };
+}
+
 function cuaTimingSummary(diagnostics: CuaDriverDiagnostics): string {
   const tool = (name: string): string => {
     const timing = diagnostics.toolTimings[name];
@@ -565,6 +592,13 @@ function markdown(results: BackendResult[]): string {
     for (const run of failed) lines.push("", `**${result.backend} run ${run.iteration}:** ${run.error}`);
     if (result.diagnostics) {
       lines.push("", `**${result.backend} Cua timing:** ${cuaTimingSummary(result.diagnostics)}`);
+    }
+    if (result.observationProbe) {
+      const p = result.observationProbe;
+      lines.push(
+        "",
+        `**${result.backend} observation probe:** combined=${p.medianCombinedMs}ms median, tree-only=${p.medianTreeOnlyMs}ms, screenshot-only=${p.medianScreenshotOnlyMs}ms, parallel=${p.medianParallelMs}ms (p95 ${p.p95ParallelMs}ms), elements=${p.elementCount}, samples=${p.samples}`,
+      );
     }
   }
   return `${lines.join("\n")}\n`;
@@ -645,11 +679,19 @@ async function main(args: Arguments): Promise<void> {
             ),
           );
         }
+        const diagnostics = backend === "cua" ? getCuaDriverDiagnostics() : undefined;
+        const observationProbe =
+          backend === "cua" && args.cuaObserveProbe
+            ? summarizeObservationProbe(
+                await probeCuaObservationModes(target.appName, tempRoot, Math.min(args.iterations, 10)),
+              )
+            : undefined;
         results.push({
           backend: variant.label,
           status: "ok",
           runs,
-          ...(backend === "cua" ? { diagnostics: getCuaDriverDiagnostics() } : {}),
+          ...(diagnostics ? { diagnostics } : {}),
+          ...(observationProbe ? { observationProbe } : {}),
           summary: summarize(runs),
         });
       }
@@ -663,6 +705,7 @@ async function main(args: Arguments): Promise<void> {
       node: process.version,
       iterations: args.iterations,
       cuaOverlay: args.cuaOverlay,
+      cuaObserveProbe: args.cuaObserveProbe,
       cuaDriverBin: process.env.CUA_DRIVER_BIN ?? "cua-driver",
       results,
     };
