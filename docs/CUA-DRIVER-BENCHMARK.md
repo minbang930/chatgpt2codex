@@ -425,3 +425,70 @@ evidence that the fast path is worthwhile, but do not replace the installed
 Driver or change the default backend until the patched binary also passes
 broader WinForms, WPF/WinUI, Notepad, and Electron/Chromium coverage.
 
+### Order-balanced and broader compatibility validation
+
+The fast-path runner now defaults to both driver orders and both deterministic
+fixture types:
+
+```powershell
+npm run benchmark:cua-fast-path -- -SkipBuild
+```
+
+Default matrix:
+
+```text
+WinForms: official -> patched
+WinForms: patched  -> official
+WPF:      official -> patched
+WPF:      patched  -> official
+```
+
+Each row still performs the full functional contract: external state
+verification, semantic set-value/click routing, and foreground preservation.
+The runner prints the raw rows, per-order deltas, and an order-balanced mean for
+each fixture. This makes a warm-cache/second-run advantage visible instead of
+implicitly attributing it to the patched Driver.
+
+Narrow runs are also supported:
+
+```powershell
+npm run benchmark:cua-fast-path -- -SkipBuild -Order reverse -Fixture winforms
+npm run benchmark:cua-fast-path -- -SkipBuild -Order both -Fixture wpf
+```
+
+A separate read-only real-app probe exercises the exact `(pid, HWND)`
+observation path without typing or clicking:
+
+```powershell
+npm run benchmark:cua-real-app-fast-path
+```
+
+It launches:
+- a uniquely named temporary Notepad document;
+- Microsoft Edge with an isolated temporary user-data-dir and a unique local
+  HTML title.
+
+For each exact titled window, the probe repeatedly requests one combined
+screenshot + accessibility snapshot and requires a non-empty screenshot,
+snapshot id, and accessibility element set. It runs official/patched in both
+orders and reports per-order latency deltas. The Edge process is isolated from
+the user's normal profile; cleanup targets only the benchmark-launched process
+tree.
+
+The build helper now persists the release binary outside Cargo's large target
+tree:
+
+```text
+.chatgpt2codex/bin/cua-driver-fast-path.exe
+```
+
+To discard Cargo intermediates after a successful build while keeping that
+binary:
+
+```powershell
+npm run cua:build-fast-path -- -SkipTests -CleanTarget
+```
+
+After that, both comparison runners can use the persisted binary without a
+rebuild.
+
