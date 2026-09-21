@@ -53,7 +53,14 @@ async function captureActionEvidence(
     const active = await resolveActiveProject(ctx);
     if (!active) return undefined;
     const label = `control-${record.actionId}-${phase}`;
-    const captured = await captureControlAppScreenshot(active.root, { appName: record.appName, label, waitMs: 0 });
+    const captured = await captureControlAppScreenshot(active.root, {
+      appName: record.appName,
+      label,
+      waitMs: 0,
+      // Cua semantic handles are snapshot-scoped. Evidence capture must not
+      // create a new accessibility snapshot before the approved action runs.
+      semantic: false,
+    });
     const masked = await maskSensitiveRegions({ pngPath: captured.path, appName: record.appName });
     return { path: masked.pngPath, masked: masked.masked };
   } catch {
