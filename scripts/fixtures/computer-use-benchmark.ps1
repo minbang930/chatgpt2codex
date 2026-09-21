@@ -44,7 +44,8 @@ if ([IO.Path]::GetFileName($SourcePath) -ieq 'computer-use-benchmark-wpf.cs') {
     Where-Object {
       (Test-Path -LiteralPath (Join-Path $_ 'WindowsBase.dll')) -and
       (Test-Path -LiteralPath (Join-Path $_ 'PresentationCore.dll')) -and
-      (Test-Path -LiteralPath (Join-Path $_ 'PresentationFramework.dll'))
+      (Test-Path -LiteralPath (Join-Path $_ 'PresentationFramework.dll')) -and
+      (Test-Path -LiteralPath (Join-Path $_ 'System.Xaml.dll'))
     } |
     Select-Object -First 1
 
