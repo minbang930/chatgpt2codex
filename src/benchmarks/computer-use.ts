@@ -596,16 +596,23 @@ async function main(args: Arguments): Promise<void> {
     process.stdout.write(markdown(results));
     process.stdout.write(`JSON: ${args.output}\nMarkdown: ${mdPath}\n`);
   } finally {
+    const ciLog = (message: string) => {
+      if (process.env.GITHUB_ACTIONS === "true") process.stderr.write(`[benchmark-cleanup] ${message}\n`);
+    };
+    ciLog("kill children");
     fixture.kill();
     fixture.unref();
     decoy.child.kill();
     decoy.child.unref();
+    ciLog("stop helpers");
     await Promise.all([
       stopCuaDriver(),
       legacyWin.stopWindowsInputHelper(),
       stopWindowsUiaHelper(),
     ]);
+    ciLog("helpers stopped");
     scheduleTempCleanup(tempRoot);
+    ciLog("temp cleanup scheduled");
   }
 }
 
