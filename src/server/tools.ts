@@ -51,6 +51,7 @@ import { clearKill } from "../control/queue.js";
 import {
   handleComputerActionStatus,
   handleComputerKillSwitch,
+  handleComputerLaunchApp,
   handleComputerRequestAction,
   handleComputerScreenshot,
 } from "../control/tools.js";
@@ -852,6 +853,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
             desktopControlModel: [
               "Off by default; expose control tools to ChatGPT only when the owner opts in through CHATGPT2CODEX_CONTROL_CHATGPT.",
               "Arm explicitly with project_select preset=control; keep kill switch available in the same owner-controlled surface.",
+              "When an allowlisted target app is closed, use computer_launch_app; do not route Windows app launch through e2e_open_target or shell.",
               "Capture evidence with app/window screenshots, not the user's active ChatGPT browser tab as the app under test.",
               "Block sensitive apps and re-check frontmost target immediately before synthetic input.",
             ],
@@ -3027,7 +3029,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
 
   // -------------------------------------------------------------------
   // Human-confirmed desktop control (registered only when the install-time
-  // CHATGPT2CODEX_CONTROL feature flag is on). These 4 tools are additionally
+  // CHATGPT2CODEX_CONTROL feature flag is on). These tools are additionally
   // hidden from CHATGPT_TO_CODEX's tools/list (installChatGptToolListHandler
   // below) and blocked on the generic call-tool bridge
   // (src/server/actions.ts callRegisteredTool) via CONTROL_TOOL_NAMES unless
@@ -3057,6 +3059,21 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
         windowPoint: z.object({ xRel: z.number().min(0).max(1), yRel: z.number().min(0).max(1) }).optional(),
       })
       .refine((v) => Boolean(v.ax) || Boolean(v.windowPoint), { message: "target requires ax or windowPoint" });
+
+    registerTool(
+      "computer_launch_app",
+      {
+        title: "Launch a desktop app (control)",
+        description:
+          "Launch an explicitly allowlisted desktop app through the Computer Use backend before screenshot/semantic actions. Requires an active control lease (project_select preset=control), obeys the kill switch and sensitive-app denylist, and requires the app name to be present in CHATGPT2CODEX_CONTROL_ALLOWLIST. On Windows this currently requires the Cua backend and uses Cua launch_app directly, so no shell/e2e_open_target workaround is needed.",
+        annotations: CONTROL_ANNOTATIONS,
+        _meta: chatGptToolMeta("Launching desktop app...", "Desktop app launched"),
+        inputSchema: {
+          appName: z.string().min(1),
+        },
+      },
+      async (input) => handleComputerLaunchApp(ctx, input),
+    );
 
     registerTool(
       "computer_screenshot",
