@@ -208,3 +208,36 @@ This distinguishes Driver round-trip/UIA/capture cost from local normalization
 and verifies whether the second semantic call is actually reusing the combined
 observation.
 
+### Removing repeated window discovery
+
+The first observation-timing run showed:
+
+```text
+list_windows      109.39 ms avg (30 calls)
+get_window_state  161.82 ms avg (12 calls)
+target-resolve    107.82 ms avg (24)
+normalize           0.10 ms avg (12)
+snapshot-cache-hits 12
+```
+
+With 6 total runs including warm-up, the counts explain the path exactly:
+12 captures plus 12 semantic pre-action window validations produced 24 target
+resolutions, and the benchmark rediscovered the fixture once per run for the
+remaining 6 `list_windows` calls.
+
+The adapter now removes those repeated round trips in two ways:
+
+1. semantic actions validate the exact opaque selector against the current
+   observation cache (app, pid, window, snapshot, and selector membership)
+   instead of calling `list_windows` again; Cua's snapshot-scoped token remains
+   the final stale-target guard;
+2. read-only capture/snapshot calls reuse a 2-second target cache populated by
+   window discovery/observation. If that cached target is stale, only the
+   read-only `get_window_state` call is retried after a fresh window lookup.
+   Destructive actions are never automatically replayed.
+
+The benchmark also resolves the deterministic fixture once per backend variant
+instead of rediscovering it inside every measured iteration, because product
+computer-use requests already carry an app identity. The Cua timing footer now
+reports target-cache hits/misses alongside the existing tool timings.
+
