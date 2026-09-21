@@ -538,3 +538,49 @@ The next compatibility gate is the read-only exact-window real-app probe
 (Notepad + isolated Edge) before considering the patched Driver suitable for
 broader/default use.
 
+#### Real-app exact-window result: Notepad and Edge
+
+The same-machine read-only compatibility probe was run in both driver orders
+with 5 measured observations per app. Each observation requested the combined
+screenshot + accessibility tree for an exact titled window.
+
+| App | Driver | Order-balanced median | Order-balanced P95 | Minimum elements | Screenshots |
+|---|---|---:|---:|---:|---:|
+| Notepad | official | 297.04 ms | 369.16 ms | 36 | 100% |
+| Notepad | patched | 204.66 ms | 225.96 ms | 38 | 100% |
+| Edge | official | 128.19 ms | 146.16 ms | 18 | 100% |
+| Edge | patched | 74.87 ms | 81.38 ms | 18 | 100% |
+
+Order-balanced median reductions:
+
+```text
+Notepad 297.04 -> 204.66 ms  (-92.39 ms, -31.1%)
+Edge    128.19 ->  74.87 ms  (-53.32 ms, -41.6%)
+```
+
+The improvement remained in both run orders:
+
+```text
+Notepad forward -31.6%, reverse -30.6%
+Edge    forward -50.5%, reverse -31.6%
+```
+
+Every real-app row returned `status=ok`, produced non-empty screenshots, and
+returned non-empty accessibility element sets. Edge remained stable at 18
+elements across all four rows; Notepad returned 36-42 elements depending on
+the run.
+
+Together with the functional WinForms/WPF matrix, this covers four materially
+different Windows UI surfaces:
+
+- WinForms;
+- WPF;
+- Windows 11 Notepad;
+- Chromium/Edge.
+
+No compatibility regression has been observed in these tested surfaces. The
+next risk-focused validation should target window identity rather than another
+framework: multi-window same-process selection, stale HWND handling, wrong-PID
+diagnostics, minimized/background windows, and the fallback path when the exact
+native probe cannot represent a surface.
+
