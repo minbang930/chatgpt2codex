@@ -41,6 +41,8 @@ interface RunResult {
   elementCount: number;
   typeForegroundPreserved: boolean | null;
   clickForegroundPreserved: boolean | null;
+  typeRoute?: "semantic" | "coordinate";
+  clickRoute?: "semantic" | "coordinate";
   error?: string;
 }
 
@@ -62,6 +64,8 @@ interface BackendResult {
     medianClickMs: number;
     typeForegroundPreservedRate: number | null;
     clickForegroundPreservedRate: number | null;
+    semanticTypeRate: number;
+    semanticClickRate: number;
   };
 }
 
@@ -272,21 +276,91 @@ function summarize(runs: RunResult[]): NonNullable<BackendResult["summary"]> {
     medianClickMs: percentile(runs.map((run) => run.clickMs), 0.5),
     typeForegroundPreservedRate: preservationRate(runs.map((run) => run.typeForegroundPreserved)),
     clickForegroundPreservedRate: preservationRate(runs.map((run) => run.clickForegroundPreserved)),
+    semanticTypeRate: rate(runs.map((run) => run.typeRoute === "semantic")),
+    semanticClickRate: rate(runs.map((run) => run.clickRoute === "semantic")),
   };
 }
 
 function findTextbox(observation: Awaited<ReturnType<typeof desktop.snapshotSemanticElements>>) {
   return observation.elements.find(
-    (element) => /benchmarkinput/i.test(element.name ?? "") && element.actions.includes("setValue"),
+    (element) =>
+      /benchmarkinput/i.test(element.name ?? "") ||
+      /benchmarkinput/i.test(element.automationId ?? ""),
   ) ?? observation.elements.find((element) => element.actions.includes("setValue"));
 }
 
 function findButton(observation: Awaited<ReturnType<typeof desktop.snapshotSemanticElements>>) {
   return observation.elements.find(
-    (element) => /submit|benchmarksubmit/i.test(element.name ?? "") && element.actions.includes("invoke"),
+    (element) =>
+      /submit|benchmarksubmit/i.test(element.name ?? "") ||
+      /benchmarksubmit/i.test(element.automationId ?? ""),
   ) ?? observation.elements.find(
-    (element) => /submit|benchmarksubmit/i.test(element.name ?? "") && (element.actions.includes("select") || element.actions.includes("focus")),
+    (element) =>
+      element.actions.includes("invoke") ||
+      element.actions.includes("select"),
   );
+}
+
+function center(bounds: { x: number; y: number; width: number; height: number }): { x: number; y: number } {
+  return {
+    x: Math.round(bounds.x + bounds.width / 2),
+    y: Math.round(bounds.y + bounds.height / 2),
+  };
+}
+
+async function fixturePoint(
+  appName: string,
+  kind: "textbox" | "button",
+): Promise<{ x: number; y: number }> {
+  // Fixed fallback only for this deterministic fixture. Prefer observed
+  // semantic-element bounds whenever the backend exposes them.
+  return desktop.resolveWindowPoint(
+    appName,
+    kind === "textbox" ? 0.486 : 0.164,
+    kind === "textbox" ? 0.41 : 0.63,
+  );
+}
+
+async function writeBenchmarkToken(
+  appName: string,
+  element: Awaited<ReturnType<typeof desktop.snapshotSemanticElements>>["elements"][number] | undefined,
+  token: string,
+): Promise<"semantic" | "coordinate"> {
+  if (element?.actions.includes("setValue")) {
+    try {
+      await desktop.setAxValue(appName, element.selector, token);
+      return "semantic";
+    } catch {
+      // Match the real executor contract: if semantic actuation fails and a
+      // coordinate target is available, use the coordinate path.
+    }
+  }
+  const point = element?.bounds ? center(element.bounds) : await fixturePoint(appName, "textbox");
+  await desktop.clickAtPoint(appName, point.x, point.y);
+  await desktop.typeText(appName, token);
+  return "coordinate";
+}
+
+async function submitBenchmark(
+  appName: string,
+  element: Awaited<ReturnType<typeof desktop.snapshotSemanticElements>>["elements"][number] | undefined,
+): Promise<"semantic" | "coordinate"> {
+  if (
+    element &&
+    (element.actions.includes("invoke") ||
+      element.actions.includes("select") ||
+      element.actions.includes("focus"))
+  ) {
+    try {
+      await desktop.pressAxElement(appName, element.selector);
+      return "semantic";
+    } catch {
+      // Same executor-style coordinate fallback as writeBenchmarkToken.
+    }
+  }
+  const point = element?.bounds ? center(element.bounds) : await fixturePoint(appName, "button");
+  await desktop.clickAtPoint(appName, point.x, point.y);
+  return "coordinate";
 }
 
 function observationDiagnostic(
@@ -342,16 +416,11 @@ async function runOne(
 
     const first = await observe(backend, iteration, "before-type", projectRoot, target.appName);
     const textbox = findTextbox(first.observation);
-    if (!textbox) {
-      throw new Error(
-        `Benchmark textbox was not found in the semantic observation. Elements: ${observationDiagnostic(first.observation)}`,
-      );
-    }
 
     const token = `${backend}-${iteration}-${Date.now()}`;
     const beforeType = await focusDecoy(decoyAppName);
     const typeStarted = performance.now();
-    await desktop.setAxValue(target.appName, textbox.selector, token);
+    const typeRoute = await writeBenchmarkToken(target.appName, textbox, token);
     const typeMs = performance.now() - typeStarted;
     const afterType = await legacyWin.resolveFrontmostApp().catch(() => undefined);
     const typeForegroundPreserved =
@@ -365,15 +434,10 @@ async function runOne(
     // Apply the same loop to legacy so latency comparisons stay symmetric.
     const second = await observe(backend, iteration, "before-click", projectRoot, target.appName);
     const button = findButton(second.observation);
-    if (!button) {
-      throw new Error(
-        `Benchmark Submit button was not found after re-observation. Elements: ${observationDiagnostic(second.observation)}`,
-      );
-    }
 
     const beforeClick = await focusDecoy(decoyAppName);
     const clickStarted = performance.now();
-    await desktop.pressAxElement(target.appName, button.selector);
+    const clickRoute = await submitBenchmark(target.appName, button);
     const clickMs = performance.now() - clickStarted;
     const afterClick = await legacyWin.resolveFrontmostApp().catch(() => undefined);
     const clickForegroundPreserved =
@@ -400,6 +464,8 @@ async function runOne(
       elementCount: first.observation.elements.length,
       typeForegroundPreserved,
       clickForegroundPreserved,
+      typeRoute,
+      clickRoute,
     };
   } catch (error) {
     return {
@@ -425,14 +491,14 @@ function markdown(results: BackendResult[]): string {
   const lines = [
     "# Computer Use A/B benchmark",
     "",
-    "| Backend | Status | Success | Type applied | Submit applied | Median total | P95 total | Observe | Type | Reobserve | Click | Type FG preserved | Click FG preserved | Cua confirmed/unverifiable/noop |",
-    "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    "| Backend | Status | Success | Type applied | Submit applied | Median total | P95 total | Observe | Type | Reobserve | Click | Type semantic | Click semantic | Type FG preserved | Click FG preserved | Cua confirmed/unverifiable/noop |",
+    "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
   ];
   for (const result of results) {
     const s = result.summary;
     const d = result.diagnostics;
     lines.push(
-      `| ${result.backend} | ${result.status} | ${s ? `${s.successRate}%` : "-"} | ${s ? `${s.typeApplyRate}%` : "-"} | ${s ? `${s.submitApplyRate}%` : "-"} | ${s ? `${s.medianTotalMs} ms` : "-"} | ${s ? `${s.p95TotalMs} ms` : "-"} | ${s ? `${s.medianObserveMs} ms` : "-"} | ${s ? `${s.medianTypeMs} ms` : "-"} | ${s ? `${s.medianReobserveMs} ms` : "-"} | ${s ? `${s.medianClickMs} ms` : "-"} | ${s?.typeForegroundPreservedRate ?? "-"}${s?.typeForegroundPreservedRate !== null && s ? "%" : ""} | ${s?.clickForegroundPreservedRate ?? "-"}${s?.clickForegroundPreservedRate !== null && s ? "%" : ""} | ${d ? `${d.confirmedActions}/${d.unverifiableActions}/${d.suspectedNoops}` : "-"} |`,
+      `| ${result.backend} | ${result.status} | ${s ? `${s.successRate}%` : "-"} | ${s ? `${s.typeApplyRate}%` : "-"} | ${s ? `${s.submitApplyRate}%` : "-"} | ${s ? `${s.medianTotalMs} ms` : "-"} | ${s ? `${s.p95TotalMs} ms` : "-"} | ${s ? `${s.medianObserveMs} ms` : "-"} | ${s ? `${s.medianTypeMs} ms` : "-"} | ${s ? `${s.medianReobserveMs} ms` : "-"} | ${s ? `${s.medianClickMs} ms` : "-"} | ${s ? `${s.semanticTypeRate}%` : "-"} | ${s ? `${s.semanticClickRate}%` : "-"} | ${s?.typeForegroundPreservedRate ?? "-"}${s?.typeForegroundPreservedRate !== null && s ? "%" : ""} | ${s?.clickForegroundPreservedRate ?? "-"}${s?.clickForegroundPreservedRate !== null && s ? "%" : ""} | ${d ? `${d.confirmedActions}/${d.unverifiableActions}/${d.suspectedNoops}` : "-"} |`,
     );
   }
   for (const result of results) {
@@ -465,11 +531,14 @@ async function main(args: Arguments): Promise<void> {
 
       const runs: RunResult[] = [];
       const warmup = await runOne(backend, 0, fixture.pid, fixture, projectRoot, statePath, decoy.appName);
-      if (warmup.error) {
+      if (warmup.error || !warmup.success) {
+        const warmupError =
+          warmup.error ??
+          `Warm-up task failed (typeApplied=${warmup.typeApplied}, submitApplied=${warmup.submitApplied}, typeRoute=${warmup.typeRoute ?? "none"}, clickRoute=${warmup.clickRoute ?? "none"})`;
         results.push({
           backend,
           status: "unavailable",
-          error: warmup.error,
+          error: warmupError,
           runs: [warmup],
           ...(backend === "cua" ? { diagnostics: getCuaDriverDiagnostics() } : {}),
         });
