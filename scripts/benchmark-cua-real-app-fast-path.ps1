@@ -65,6 +65,14 @@ $Passes = switch ($Order) {
   }
 }
 
+function Read-Utf8Json([string]$Path) {
+  $text = [System.IO.File]::ReadAllText(
+    $Path,
+    [System.Text.Encoding]::UTF8
+  )
+  return ($text | ConvertFrom-Json)
+}
+
 function Invoke-Compat(
   [string]$PassName,
   [string]$Label,
@@ -95,7 +103,7 @@ try {
     foreach ($driver in $pass.Drivers) {
       $output = Join-Path $OutputRoot "$Stamp-$($pass.Name)-$($driver.Label).json"
       Invoke-Compat $pass.Name $driver.Label $driver.Binary $output
-      $report = Get-Content $output -Raw | ConvertFrom-Json
+      $report = Read-Utf8Json $output
       foreach ($result in $report.results) {
         $Rows += [PSCustomObject]@{
           Pass = $pass.Name
