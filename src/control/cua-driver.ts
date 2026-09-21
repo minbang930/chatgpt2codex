@@ -844,6 +844,84 @@ export async function setSemanticValue(appName: string, target: { label?: string
   recordActionResult("set_value", "semantic", result);
 }
 
+export interface CuaExactWindowObservationProbe {
+  target: {
+    pid: number;
+    windowId: number;
+    appName: string;
+    title: string;
+  };
+  samples: Array<{
+    elapsedMs: number;
+    elementCount: number;
+    screenshotPath: string;
+  }>;
+}
+
+export async function probeCuaExactWindowObservations(
+  titleIncludes: string,
+  outputDir: string,
+  iterations: number,
+  timeoutMs = 15_000,
+): Promise<CuaExactWindowObservationProbe> {
+  assertWindows();
+  const needle = titleIncludes.trim().toLowerCase();
+  if (!needle) throw new Error("Exact-window observation probe requires a non-empty title fragment");
+
+  const deadline = Date.now() + Math.max(1_000, timeoutMs);
+  let target: ResolvedWindow | undefined;
+  while (Date.now() < deadline) {
+    const windows = await rawWindows();
+    target = windows.find(
+      (window) =>
+        window.onScreen &&
+        !window.minimized &&
+        window.title.toLowerCase().includes(needle),
+    );
+    if (target) break;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  if (!target) throw new Error(`Cua Driver could not find a visible window containing title: ${titleIncludes}`);
+
+  const count = Math.max(1, Math.min(20, Math.trunc(iterations)));
+  const samples: CuaExactWindowObservationProbe["samples"] = [];
+  for (let index = 0; index < count; index += 1) {
+    const screenshotPath = path.join(
+      outputDir,
+      `cua-exact-window-${target.pid}-${target.windowId}-${index + 1}.png`,
+    );
+    const started = performance.now();
+    const data = await callTool("get_window_state", {
+      pid: target.pid,
+      window_id: target.windowId,
+      include_accessibility_tree: true,
+      include_screenshot: true,
+      screenshot_out_file: screenshotPath,
+      max_elements: 120,
+      max_depth: 8,
+    });
+    const elapsedMs = performance.now() - started;
+    const rows = Array.isArray(data.elements) ? data.elements.length : 0;
+    if (typeof data.snapshot_id !== "string" || !data.snapshot_id) {
+      throw new Error(`Cua Driver returned no snapshot_id for exact window ${target.windowId}`);
+    }
+    samples.push({
+      elapsedMs: Math.round(elapsedMs * 100) / 100,
+      elementCount: rows,
+      screenshotPath,
+    });
+  }
+
+  return {
+    target: {
+      pid: target.pid,
+      windowId: target.windowId,
+      appName: target.appName,
+      title: target.title,
+    },
+    samples,
+  };
+}
 export interface CuaObservationModeProbeSample {
   combinedMs: number;
   treeOnlyMs: number;
