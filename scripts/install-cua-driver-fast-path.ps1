@@ -1,5 +1,6 @@
 param(
-  [string]$SourcePath
+  [string]$SourcePath,
+  [string]$RuntimeRoot
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,7 +9,10 @@ Set-StrictMode -Version Latest
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $PersistedProjectBinary = Join-Path $ProjectRoot ".chatgpt2codex\bin\cua-driver-fast-path.exe"
 $TargetBuildBinary = Join-Path $ProjectRoot ".chatgpt2codex\cua-driver-fast-path\cua\libs\cua-driver\rust\target\release\cua-driver.exe"
-$RuntimeRoot = Join-Path $HOME ".local\share\chatgpt2codex\cua-driver\fast-path"
+if ([string]::IsNullOrWhiteSpace($RuntimeRoot)) {
+  $RuntimeRoot = Join-Path $HOME ".local\share\chatgpt2codex\cua-driver\fast-path"
+}
+$RuntimeRoot = [System.IO.Path]::GetFullPath($RuntimeRoot)
 $RuntimeBinary = Join-Path $RuntimeRoot "cua-driver.exe"
 
 if ([string]::IsNullOrWhiteSpace($SourcePath)) {
