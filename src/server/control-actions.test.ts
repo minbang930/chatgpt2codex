@@ -110,12 +110,12 @@ describe("control tool exclusion from the generic action bridge", () => {
     expect(body.structuredContent?.code).toBe("PERMISSION_DENIED");
   });
 
-  it("rejects every one of the 4 control tool names via /actions/call-tool", async () => {
+  it("rejects every control tool name via /actions/call-tool", async () => {
     const ctx = makeCtx(stateDir, projectRoot);
     const app = await startApp(ctx);
     stop = app.stop;
 
-    for (const toolName of ["computer_screenshot", "computer_request_action", "computer_action_status", "computer_kill_switch"]) {
+    for (const toolName of ["computer_launch_app", "computer_screenshot", "computer_request_action", "computer_action_status", "computer_kill_switch"]) {
       const res = await postAction(app.baseUrl, "/actions/call-tool", { toolName, input: {} });
       const body = (await res.json()) as { ok: boolean; structuredContent?: { code?: string } };
       expect(body.ok, toolName).toBe(false);
@@ -130,7 +130,7 @@ describe("control tool exclusion from the generic action bridge", () => {
 
     const res = await fetch(`${app.baseUrl}/actions/openapi.json`);
     const body = (await res.json()) as { paths: Record<string, unknown> };
-    for (const toolName of ["computer_screenshot", "computer_request_action", "computer_action_status", "computer_kill_switch"]) {
+    for (const toolName of ["computer_launch_app", "computer_screenshot", "computer_request_action", "computer_action_status", "computer_kill_switch"]) {
       const hit = Object.keys(body.paths).find((p) => p.includes(toolName.replace(/_/g, "-")));
       expect(hit, toolName).toBeUndefined();
     }
