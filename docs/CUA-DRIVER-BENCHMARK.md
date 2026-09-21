@@ -584,3 +584,36 @@ framework: multi-window same-process selection, stale HWND handling, wrong-PID
 diagnostics, minimized/background windows, and the fallback path when the exact
 native probe cannot represent a surface.
 
+### Window-identity regression gate
+
+After the functional and real-app latency wins, the remaining high-risk area is
+window identity rather than UI-framework coverage. Run:
+
+```powershell
+npm run benchmark:cua-window-identity-fast-path
+```
+
+The benchmark launches one WinForms process with two distinct top-level
+windows and compares the installed and patched Drivers against the same
+identity contract. It checks:
+
+- same-process multi-window resolution maps each title to the fixture's exact
+  HWND;
+- combined screenshot + accessibility observation returns the matching window
+  title for both windows;
+- a non-foreground sibling window remains observable;
+- a minimized sibling window is probed and reported separately;
+- supplying the live HWND with the wrong PID is rejected with the ownership
+  diagnostic;
+- after closing one sibling, the stale HWND is rejected rather than resolving
+  to the remaining same-process window.
+
+The minimized case is intentionally reported separately from the core pass so
+the benchmark can distinguish a pre-existing Driver limitation from a
+fast-path regression. The core official/patched parity line covers exact
+identity, titles, background observation, wrong-PID rejection, and stale-HWND
+rejection.
+
+The benchmark-only adapter helpers call `get_window_state` with an explicit
+`(pid, window_id)`; production targeting behavior is unchanged.
+
