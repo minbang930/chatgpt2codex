@@ -37,7 +37,7 @@ jobs:
 
       - name: Agent and platform-safe tests
         if: matrix.os != 'windows-latest'
-        run: npx vitest run src/agents src/skills src/plugins src/state/store.test.ts src/server/agent-tools.test.ts src/server/agent-execution-intent.test.ts src/server/agent-piggyback.test.ts src/server/web-agent-tools.test.ts src/server/web-agent-stop-tool.test.ts src/server/web-agent-recovery.test.ts src/server/web-agent-parallel.test.ts src/server/worker-execution-settings-tools.test.ts src/server/skill-tools.test.ts src/server/skill-security-tools.test.ts src/server/plugin-tools.test.ts src/hooks src/control/win-native.test.ts src/control/win-uia.test.ts src/control/activity-indicator.test.ts
+        run: npx vitest run src/agents src/skills src/plugins src/state/store.test.ts src/server/agent-tools.test.ts src/server/agent-execution-intent.test.ts src/server/agent-piggyback.test.ts src/server/web-agent-tools.test.ts src/server/web-agent-stop-tool.test.ts src/server/web-agent-recovery.test.ts src/server/web-agent-parallel.test.ts src/server/worker-execution-settings-tools.test.ts src/server/skill-tools.test.ts src/server/skill-security-tools.test.ts src/server/plugin-tools.test.ts src/hooks src/control/windows-backend-mode.test.ts src/control/win-native.test.ts src/control/win-uia.test.ts src/control/activity-indicator.test.ts
 
       - name: Agent tests (Windows)
         if: matrix.os == 'windows-latest'
@@ -45,7 +45,7 @@ jobs:
 
       - name: Windows native input helper test
         if: matrix.os == 'windows-latest'
-        run: npx vitest run src/control/win-native.test.ts
+        run: npx vitest run src/control/windows-backend-mode.test.ts src/control/win-native.test.ts
 
       - name: Windows UIA helper test
         if: matrix.os == 'windows-latest'
