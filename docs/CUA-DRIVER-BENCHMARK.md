@@ -326,3 +326,69 @@ session/window validation cache or equivalent fast path inside
 The existing `CUA_DRIVER_BIN` override can be used to benchmark such a Driver
 build without changing the adapter contract.
 
+### Patched Cua Driver exact-window fast path
+
+The remaining observation floor is inside Cua Driver's Windows
+**get_window_state**: even when the caller already supplies an exact
+**(pid, window_id)**, the pinned Driver revision performs a full
+**list_windows(Some(pid))** Win32+UIA enumeration before every observation.
+
+The same upstream revision already contains a narrower helper,
+**find_window_by_pid_and_handle(pid, hwnd)**, which validates exactly one native
+HWND without entering the global UIA tree. This repository carries a minimal,
+reproducible downstream patch that uses that helper on the normal path and
+falls back to the original full enumeration only when the exact native probe
+cannot represent the surface:
+
+~~~text
+patches/cua-driver/get-window-state-exact-window-fast-path.patch
+~~~
+
+The patch is pinned to upstream commit:
+
+~~~text
+9bbfa7dd3e27ca7f1861ede70aaca390174493f9
+~~~
+
+Build a release binary on Windows:
+
+~~~powershell
+npm run cua:build-fast-path
+~~~
+
+The build script clones the pinned upstream revision under the ignored
+.chatgpt2codex/cua-driver-fast-path/ work area, verifies the patch with
+git apply --check, runs Rust formatting/focused exact-window tests, and builds
+cua-driver.exe in release mode.
+
+For an official-vs-patched same-machine comparison:
+
+~~~powershell
+npm run benchmark:cua-fast-path
+~~~
+
+or, with explicit PowerShell parameters:
+
+~~~powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass ^
+  -File scripts/benchmark-cua-driver-fast-path.ps1 ^
+  -Iterations 5 -ObservationProbe
+~~~
+
+The A/B runner executes the installed cua-driver and the patched binary in
+separate benchmark processes via CUA_DRIVER_BIN, preserving the adapter
+contract and avoiding singleton/process contamination. It prints both rows plus
+the get_window_state and median-total deltas.
+
+The intended acceptance conditions are:
+
+- functional success stays 100%;
+- semantic Type/Click stay 100%;
+- foreground preservation stays 100%;
+- get_window_state falls materially below the ~165-176 ms official floor;
+- no new stale-target or window-identity fallback failures appear.
+
+This remains an experiment. Do not replace the installed Driver or change the
+default backend solely from a synthetic-fixture win; validate the patched
+binary on WinForms, WPF/WinUI, Notepad, and Electron/Chromium surfaces first.
+
