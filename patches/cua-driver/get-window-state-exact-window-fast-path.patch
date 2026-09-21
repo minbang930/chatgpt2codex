@@ -1,0 +1,103 @@
+diff --git a/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs b/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs
+--- a/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs
++++ b/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs
+@@ -1281,39 +1281,60 @@
+-        // Validate window belongs to pid — Swift's hard error.
+-        let windows_for_pid =
+-            tokio::task::spawn_blocking(move || crate::win32::list_windows(Some(pid)))
+-                .await
+-                .unwrap_or_default();
+-        if !windows_for_pid.iter().any(|w| w.hwnd == hwnd) {
+-            // Check if the window exists under a different pid.
+-            let all = tokio::task::spawn_blocking(|| crate::win32::list_windows(None))
+-                .await
+-                .unwrap_or_default();
+-            if let Some(w) = all.iter().find(|w| w.hwnd == hwnd) {
+-                return ToolResult::error(format!(
+-                    "window_id {hwnd} belongs to pid {}, not pid {pid}. Call \
+-                     `list_windows({{\"pid\": {pid}}})` to get this pid's own windows.",
+-                    w.pid
+-                ));
+-            }
+-            return ToolResult::error(format!(
+-                "No window with window_id {hwnd} exists. Call `list_windows({{\"pid\": \
+-                 {pid}}})` for candidates."
+-            ));
+-        }
+-        // Window identity metadata (additive): title + on-screen rectangle from
+-        // the enumeration we already did, plus the owning process's executable
+-        // name. Names the surface on the capture-only path, where no UIA tree
+-        // identifies it.
+-        let win_geom = windows_for_pid
+-            .iter()
+-            .find(|w| w.hwnd == hwnd)
+-            .map(|w| (w.title.clone(), w.x, w.y, w.width, w.height));
+-        let app_name = tokio::task::spawn_blocking(move || {
+-            crate::win32::list_processes()
+-                .into_iter()
+-                .find(|p| p.pid == pid)
+-                .map(|p| p.name)
+-        })
+-        .await
+-        .ok()
+-        .flatten();
++        // Exact (pid, HWND) callers already carry a native identity anchor.
++        // Probe that one HWND first instead of rebuilding the global Win32+UIA
++        // window union on every observation. Keep the previous enumeration as
++        // a compatibility fallback for any surface the exact native probe
++        // cannot represent.
++        let exact_window = tokio::task::spawn_blocking(move || {
++            crate::win32::find_window_by_pid_and_handle(pid, hwnd)
++        })
++        .await
++        .ok()
++        .flatten();
++        let target_window = if let Some(window) = exact_window {
++            window
++        } else {
++            let windows_for_pid =
++                tokio::task::spawn_blocking(move || crate::win32::list_windows(Some(pid)))
++                    .await
++                    .unwrap_or_default();
++            if let Some(window) = windows_for_pid.into_iter().find(|w| w.hwnd == hwnd) {
++                window
++            } else {
++                // Preserve the old diagnostic distinction without paying for a
++                // global UIA/window enumeration on the normal success path.
++                let owner_pid =
++                    tokio::task::spawn_blocking(move || crate::win32::window_owner_pid(hwnd))
++                        .await
++                        .ok()
++                        .flatten();
++                if let Some(owner_pid) = owner_pid.filter(|owner| *owner != pid) {
++                    return ToolResult::error(format!(
++                        "window_id {hwnd} belongs to pid {owner_pid}, not pid {pid}. Call \
++                         `list_windows({{\"pid\": {pid}}})` to get this pid's own windows."
++                    ));
++                }
++                return ToolResult::error(format!(
++                    "No window with window_id {hwnd} exists. Call `list_windows({{\"pid\": \
++                     {pid}}})` for candidates."
++                ));
++            }
++        };
++        // Window identity metadata (additive): title + on-screen rectangle from
++        // the exact target probe/fallback, plus the owning process's executable
++        // name. Names the surface on the capture-only path, where no UIA tree
++        // identifies it.
++        let win_geom = Some((
++            target_window.title.clone(),
++            target_window.x,
++            target_window.y,
++            target_window.width,
++            target_window.height,
++        ));
++        let app_name = tokio::task::spawn_blocking(move || {
++            crate::win32::list_processes()
++                .into_iter()
++                .find(|p| p.pid == pid)
++                .map(|p| p.name)
++        })
++        .await
++        .ok()
++        .flatten();
