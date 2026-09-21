@@ -32,7 +32,9 @@
     "typecheck": "tsc --noEmit",
     "benchmark:computer-use": "tsx src/benchmarks/computer-use.ts",
     "cua:build-fast-path": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-cua-driver-fast-path.ps1",
-    "benchmark:cua-fast-path": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/benchmark-cua-driver-fast-path.ps1"
+    "benchmark:cua-fast-path": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/benchmark-cua-driver-fast-path.ps1",
+    "benchmark:cua-real-app": "tsx src/benchmarks/cua-real-app-compat.ts",
+    "benchmark:cua-real-app-fast-path": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/benchmark-cua-real-app-fast-path.ps1"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
