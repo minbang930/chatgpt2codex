@@ -370,9 +370,7 @@ npm run benchmark:cua-fast-path
 or, with explicit PowerShell parameters:
 
 ~~~powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass ^
-  -File scripts/benchmark-cua-driver-fast-path.ps1 ^
-  -Iterations 5 -ObservationProbe
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/benchmark-cua-driver-fast-path.ps1 -Iterations 5 -ObservationProbe
 ~~~
 
 The A/B runner executes the installed cua-driver and the patched binary in
