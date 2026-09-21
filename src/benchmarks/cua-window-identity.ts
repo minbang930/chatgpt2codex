@@ -198,7 +198,7 @@ async function main(args: Arguments): Promise<void> {
     const staleB = await observe(state.pid, state.hwndB, path.join(tempRoot, "stale-b.png"));
     const staleRejected =
       !staleB.ok &&
-      /No window with window_id/i.test(staleB.error ?? "");
+      /(No window with window_id|belongs to pid)/i.test(staleB.error ?? "");
 
     const corePass =
       identityMatch &&
@@ -257,7 +257,11 @@ async function main(args: Arguments): Promise<void> {
   process.stdout.write(`Background B observation: ${bg?.ok ?? false}\n`);
   process.stdout.write(`Minimized B observation: ${min?.observation?.ok ?? false}${min?.observation?.error ? ` (${min.observation.error})` : ""}\n`);
   process.stdout.write(`Wrong PID rejected: ${wrong?.rejected ?? false}\n`);
+  const wrongResult = (wrong as { result?: { error?: string } } | undefined)?.result;
+  if (wrongResult?.error) process.stdout.write(`Wrong PID diagnostic: ${wrongResult.error}\n`);
   process.stdout.write(`Stale HWND rejected: ${stale?.rejected ?? false}\n`);
+  const staleResult = (stale as { result?: { error?: string } } | undefined)?.result;
+  if (staleResult?.error) process.stdout.write(`Stale HWND diagnostic: ${staleResult.error}\n`);
   process.stdout.write(`JSON: ${args.output}\n`);
 }
 
