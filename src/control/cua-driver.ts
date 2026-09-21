@@ -1,4 +1,5 @@
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { DomainError, ErrorCode } from "../types.js";
@@ -66,6 +67,14 @@ export interface CuaDriverActionDiagnostic {
   escalation?: string;
 }
 
+export interface CuaDriverToolTiming {
+  calls: number;
+  totalMs: number;
+  minMs: number;
+  maxMs: number;
+  lastMs: number;
+}
+
 export interface CuaDriverDiagnostics {
   calls: number;
   backgroundAttempts: number;
@@ -74,6 +83,12 @@ export interface CuaDriverDiagnostics {
   confirmedActions: number;
   unverifiableActions: number;
   suspectedNoops: number;
+  observationCacheHits: number;
+  observationNormalizations: number;
+  observationNormalizeTotalMs: number;
+  targetResolutions: number;
+  targetResolveTotalMs: number;
+  toolTimings: Record<string, CuaDriverToolTiming>;
   recentActions: CuaDriverActionDiagnostic[];
 }
 
@@ -103,8 +118,18 @@ const diagnostics: CuaDriverDiagnostics = {
   confirmedActions: 0,
   unverifiableActions: 0,
   suspectedNoops: 0,
+  observationCacheHits: 0,
+  observationNormalizations: 0,
+  observationNormalizeTotalMs: 0,
+  targetResolutions: 0,
+  targetResolveTotalMs: 0,
+  toolTimings: {},
   recentActions: [],
 };
+
+function defaultCursorOverlayEnabled(): boolean {
+  return /^(1|true|yes|on)$/i.test(process.env.CHATGPT2CODEX_CUA_CURSOR_OVERLAY?.trim() ?? "");
+}
 
 function assertWindows(): void {
   if (process.platform !== "win32") {
@@ -136,6 +161,18 @@ async function connect(): Promise<CuaConnection> {
       const client = new Client({ name: "chatgpt2codex-cua-adapter", version: "0.1.0" });
       try {
         await client.connect(transport);
+        // The synthetic Cua cursor is a visualization feature, not part of
+        // semantic/background actuation. Keep it off by default so its awaited
+        // glide animation cannot sit on the production action critical path.
+        // Demos can opt back in with CHATGPT2CODEX_CUA_CURSOR_OVERLAY=1.
+        const cursorResult = await client.callTool({
+          name: "set_agent_cursor_enabled",
+          arguments: { session: SESSION, enabled: defaultCursorOverlayEnabled() },
+        });
+        const cursorStructured = cursorResult.structuredContent as Record<string, unknown> | undefined;
+        if (cursorResult.isError || !cursorStructured) {
+          throw resultError("set_agent_cursor_enabled", cursorResult, cursorStructured);
+        }
       } catch (error) {
         await transport.close().catch(() => undefined);
         throw new DomainError(
@@ -160,10 +197,31 @@ function resultError(name: string, result: unknown, structured: Record<string, u
   return new Error(`${name} failed: ${payload}`);
 }
 
+function recordToolTiming(name: string, elapsedMs: number): void {
+  const rounded = Math.round(elapsedMs * 100) / 100;
+  const current = diagnostics.toolTimings[name];
+  if (!current) {
+    diagnostics.toolTimings[name] = {
+      calls: 1,
+      totalMs: rounded,
+      minMs: rounded,
+      maxMs: rounded,
+      lastMs: rounded,
+    };
+    return;
+  }
+  current.calls += 1;
+  current.totalMs = Math.round((current.totalMs + rounded) * 100) / 100;
+  current.minMs = Math.min(current.minMs, rounded);
+  current.maxMs = Math.max(current.maxMs, rounded);
+  current.lastMs = rounded;
+}
+
 async function callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   diagnostics.calls += 1;
-  const connection = await connect();
+  const started = performance.now();
   try {
+    const connection = await connect();
     const result = await connection.client.callTool({
       name,
       arguments: { ...args, session: SESSION },
@@ -178,6 +236,8 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Re
   } catch (error) {
     diagnostics.failures += 1;
     throw error;
+  } finally {
+    recordToolTiming(name, performance.now() - started);
   }
 }
 
@@ -306,11 +366,18 @@ function sortTargetWindows(rows: ResolvedWindow[]): ResolvedWindow[] {
 }
 
 async function resolveTargetWindow(appName: string): Promise<ResolvedWindow> {
-  const key = appKey(appName);
-  const matches = (await rawWindows()).filter((window) => appKey(window.appName) === key);
-  const target = sortTargetWindows(matches)[0];
-  if (!target) throw new Error(`Cua Driver could not resolve a window for app: ${appName}`);
-  return target;
+  const started = performance.now();
+  try {
+    const key = appKey(appName);
+    const matches = (await rawWindows()).filter((window) => appKey(window.appName) === key);
+    const target = sortTargetWindows(matches)[0];
+    if (!target) throw new Error(`Cua Driver could not resolve a window for app: ${appName}`);
+    return target;
+  } finally {
+    diagnostics.targetResolutions += 1;
+    diagnostics.targetResolveTotalMs =
+      Math.round((diagnostics.targetResolveTotalMs + (performance.now() - started)) * 100) / 100;
+  }
 }
 
 function encodeElementRef(ref: CuaElementRef): string {
@@ -371,6 +438,7 @@ function normalizeObservation(
   target: ResolvedWindow,
   data: Record<string, unknown>,
 ): WindowsUiaObservation {
+  const normalizeStarted = performance.now();
   const snapshotId = typeof data.snapshot_id === "string" && data.snapshot_id ? data.snapshot_id : undefined;
   if (!snapshotId) throw new Error("Cua Driver get_window_state returned no snapshot_id");
   const rows = Array.isArray(data.elements) ? (data.elements as Record<string, unknown>[]) : [];
@@ -421,7 +489,7 @@ function normalizeObservation(
   const now = Date.now();
   const total = finiteNumber(data.total_element_count);
   const returned = finiteNumber(data.returned_element_count);
-  return {
+  const observation: WindowsUiaObservation = {
     observationId: `cuaobs_${snapshotId}`,
     appName,
     windowTitle: typeof data.window_title === "string" ? data.window_title : target.title,
@@ -432,6 +500,10 @@ function normalizeObservation(
       (total !== undefined && returned !== undefined && returned < total),
     elements,
   };
+  diagnostics.observationNormalizations += 1;
+  diagnostics.observationNormalizeTotalMs =
+    Math.round((diagnostics.observationNormalizeTotalMs + (performance.now() - normalizeStarted)) * 100) / 100;
+  return observation;
 }
 
 function cacheObservation(
@@ -521,6 +593,7 @@ export async function snapshotSemanticElements(
 ): Promise<WindowsUiaObservation> {
   const cached = observationCache.get(appKey(appName));
   if (cached && Date.now() - cached.storedAt <= OBSERVATION_CACHE_MS) {
+    diagnostics.observationCacheHits += 1;
     return cached.observation;
   }
 
@@ -703,7 +776,13 @@ export async function setCuaCursorOverlayEnabled(enabled: boolean): Promise<void
 }
 
 export function getCuaDriverDiagnostics(): CuaDriverDiagnostics {
-  return { ...diagnostics, recentActions: diagnostics.recentActions.map((row) => ({ ...row })) };
+  return {
+    ...diagnostics,
+    toolTimings: Object.fromEntries(
+      Object.entries(diagnostics.toolTimings).map(([name, timing]) => [name, { ...timing }]),
+    ),
+    recentActions: diagnostics.recentActions.map((row) => ({ ...row })),
+  };
 }
 
 export function resetCuaDriverDiagnostics(): void {
@@ -714,6 +793,12 @@ export function resetCuaDriverDiagnostics(): void {
   diagnostics.confirmedActions = 0;
   diagnostics.unverifiableActions = 0;
   diagnostics.suspectedNoops = 0;
+  diagnostics.observationCacheHits = 0;
+  diagnostics.observationNormalizations = 0;
+  diagnostics.observationNormalizeTotalMs = 0;
+  diagnostics.targetResolutions = 0;
+  diagnostics.targetResolveTotalMs = 0;
+  diagnostics.toolTimings = {};
   diagnostics.recentActions = [];
 }
 
