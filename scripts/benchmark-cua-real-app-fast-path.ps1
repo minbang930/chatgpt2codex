@@ -73,6 +73,20 @@ function Read-Utf8Json([string]$Path) {
   return ($text | ConvertFrom-Json)
 }
 
+function Get-OptionalProperty(
+  [object]$Object,
+  [string]$Name
+) {
+  if ($null -eq $Object) {
+    return $null
+  }
+  $property = $Object.PSObject.Properties[$Name]
+  if ($null -eq $property) {
+    return $null
+  }
+  return $property.Value
+}
+
 function Invoke-Compat(
   [string]$PassName,
   [string]$Label,
@@ -105,16 +119,23 @@ try {
       Invoke-Compat $pass.Name $driver.Label $driver.Binary $output
       $report = Read-Utf8Json $output
       foreach ($result in $report.results) {
+        $medianMs = Get-OptionalProperty $result "medianMs"
+        $p95Ms = Get-OptionalProperty $result "p95Ms"
+        $minElements = Get-OptionalProperty $result "minElements"
+        $screenshotsOk = Get-OptionalProperty $result "screenshotsOk"
+        $errorText = Get-OptionalProperty $result "error"
+        $reasonText = Get-OptionalProperty $result "reason"
+
         $Rows += [PSCustomObject]@{
           Pass = $pass.Name
           Driver = $driver.Label
-          App = [string]$result.app
-          Status = [string]$result.status
-          MedianMs = if ($null -ne $result.medianMs) { [double]$result.medianMs } else { $null }
-          P95Ms = if ($null -ne $result.p95Ms) { [double]$result.p95Ms } else { $null }
-          MinElements = if ($null -ne $result.minElements) { [int]$result.minElements } else { $null }
-          ScreenshotsOk = $result.screenshotsOk
-          Error = $result.error
+          App = [string](Get-OptionalProperty $result "app")
+          Status = [string](Get-OptionalProperty $result "status")
+          MedianMs = if ($null -ne $medianMs) { [double]$medianMs } else { $null }
+          P95Ms = if ($null -ne $p95Ms) { [double]$p95Ms } else { $null }
+          MinElements = if ($null -ne $minElements) { [int]$minElements } else { $null }
+          ScreenshotsOk = $screenshotsOk
+          Error = if ($null -ne $errorText) { [string]$errorText } elseif ($null -ne $reasonText) { [string]$reasonText } else { $null }
           Json = $output
         }
       }
