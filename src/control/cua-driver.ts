@@ -585,6 +585,36 @@ function cacheObservation(
   return observation;
 }
 
+export interface CuaLaunchAppResult {
+  pid?: number;
+  appName: string;
+  running: boolean;
+  active: boolean;
+  windowCount: number;
+}
+
+export async function launchApp(appName: string): Promise<CuaLaunchAppResult> {
+  assertWindows();
+  const requested = appName.trim();
+  if (!requested) throw new Error("Cua Driver app launch requires a non-empty app name");
+
+  const data = await callTool("launch_app", { name: requested });
+  const rows = Array.isArray(data.windows) ? (data.windows as RawWindow[]) : [];
+  const windows = rows.map(normalizeRawWindow).filter((row): row is ResolvedWindow => row !== undefined);
+  if (windows.length > 0) rememberWindowTargets(windows);
+
+  observationCache.delete(appKey(requested));
+  if (windows.length === 0) targetCache.delete(appKey(requested));
+
+  return {
+    ...(positiveInt(data.pid) ? { pid: positiveInt(data.pid) } : {}),
+    appName: typeof data.name === "string" && data.name.trim() ? data.name : requested,
+    running: data.running !== false,
+    active: data.active === true,
+    windowCount: windows.length,
+  };
+}
+
 export async function resolveFrontmostApp(): Promise<string | undefined> {
   const windows = (await rawWindows()).filter((window) => window.onScreen && window.zIndex !== undefined);
   if (!windows.length) return undefined;
