@@ -575,7 +575,9 @@ async function main(args: Arguments): Promise<void> {
     process.stdout.write(`JSON: ${args.output}\nMarkdown: ${mdPath}\n`);
   } finally {
     fixture.kill();
+    fixture.unref();
     decoy.child.kill();
+    decoy.child.unref();
     await Promise.all([
       stopCuaDriver(),
       legacyWin.stopWindowsInputHelper(),
