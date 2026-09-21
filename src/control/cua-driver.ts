@@ -57,11 +57,24 @@ interface CachedObservation {
   storedAt: number;
 }
 
+export interface CuaDriverActionDiagnostic {
+  tool: string;
+  deliveryMode?: "background" | "foreground" | "semantic";
+  effect?: string;
+  route?: string;
+  verified?: boolean;
+  escalation?: string;
+}
+
 export interface CuaDriverDiagnostics {
   calls: number;
   backgroundAttempts: number;
   foregroundEscalations: number;
   failures: number;
+  confirmedActions: number;
+  unverifiableActions: number;
+  suspectedNoops: number;
+  recentActions: CuaDriverActionDiagnostic[];
 }
 
 export interface CuaAppScreenshot {
@@ -87,6 +100,10 @@ const diagnostics: CuaDriverDiagnostics = {
   backgroundAttempts: 0,
   foregroundEscalations: 0,
   failures: 0,
+  confirmedActions: 0,
+  unverifiableActions: 0,
+  suspectedNoops: 0,
+  recentActions: [],
 };
 
 function assertWindows(): void {
@@ -169,17 +186,50 @@ function isBackgroundUnavailable(error: unknown): boolean {
   return /background[_ -]?unavailable/i.test(text);
 }
 
+function recordActionResult(
+  tool: string,
+  deliveryMode: CuaDriverActionDiagnostic["deliveryMode"],
+  result: Record<string, unknown>,
+): void {
+  const effect = typeof result.effect === "string" ? result.effect : undefined;
+  if (effect === "confirmed") diagnostics.confirmedActions += 1;
+  else if (effect === "unverifiable") diagnostics.unverifiableActions += 1;
+  else if (effect === "suspected_noop") diagnostics.suspectedNoops += 1;
+
+  const escalationRow =
+    result.escalation && typeof result.escalation === "object"
+      ? (result.escalation as Record<string, unknown>)
+      : undefined;
+  const escalation =
+    (typeof escalationRow?.recommended === "string" && escalationRow.recommended) ||
+    (typeof escalationRow?.target === "string" && escalationRow.target) ||
+    undefined;
+  diagnostics.recentActions.push({
+    tool,
+    ...(deliveryMode ? { deliveryMode } : {}),
+    ...(effect ? { effect } : {}),
+    ...(typeof result.route === "string" ? { route: result.route } : {}),
+    ...(typeof result.verified === "boolean" ? { verified: result.verified } : {}),
+    ...(escalation ? { escalation } : {}),
+  });
+  if (diagnostics.recentActions.length > 20) diagnostics.recentActions.shift();
+}
+
 async function callActionBackgroundFirst(
   name: string,
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   diagnostics.backgroundAttempts += 1;
   try {
-    return await callTool(name, { ...args, delivery_mode: "background" });
+    const result = await callTool(name, { ...args, delivery_mode: "background" });
+    recordActionResult(name, "background", result);
+    return result;
   } catch (error) {
     if (!isBackgroundUnavailable(error)) throw error;
     diagnostics.foregroundEscalations += 1;
-    return callTool(name, { ...args, delivery_mode: "foreground" });
+    const result = await callTool(name, { ...args, delivery_mode: "foreground" });
+    recordActionResult(name, "foreground", result);
+    return result;
   }
 }
 
@@ -334,7 +384,7 @@ function normalizeObservation(
       undefined;
     const elementToken = typeof raw.element_token === "string" && raw.element_token ? raw.element_token : undefined;
     const elementIndex = nonNegativeInt(raw.element_index);
-    if (!elementToken && !elementIndex) continue;
+    if (!elementToken && elementIndex === undefined) continue;
 
     const ref: CuaElementRef = {
       version: 1,
@@ -342,7 +392,7 @@ function normalizeObservation(
       windowId: target.windowId,
       snapshotId,
       ...(elementToken ? { elementToken } : {}),
-      ...(elementIndex ? { elementIndex } : {}),
+      ...(elementIndex !== undefined ? { elementIndex } : {}),
       role,
       ...(title ? { title } : {}),
     };
@@ -638,14 +688,18 @@ export async function pressSemanticElement(appName: string, target: { label?: st
 export async function setSemanticValue(appName: string, target: { label?: string }, text: string): Promise<void> {
   const ref = decodeElementRef(target);
   await validateRefWindow(appName, ref);
-  await callActionBackgroundFirst("type_text", {
+  // Match the legacy backend's ValuePattern.SetValue semantics exactly.
+  // type_text is cursor-oriented text entry and may append to an existing
+  // value; set_value replaces the whole UIA ValuePattern value.
+  const result = await callTool("set_value", {
     ...refActionArgs(ref),
-    text,
+    value: text,
   });
+  recordActionResult("set_value", "semantic", result);
 }
 
 export function getCuaDriverDiagnostics(): CuaDriverDiagnostics {
-  return { ...diagnostics };
+  return { ...diagnostics, recentActions: diagnostics.recentActions.map((row) => ({ ...row })) };
 }
 
 export function resetCuaDriverDiagnostics(): void {
@@ -653,6 +707,10 @@ export function resetCuaDriverDiagnostics(): void {
   diagnostics.backgroundAttempts = 0;
   diagnostics.foregroundEscalations = 0;
   diagnostics.failures = 0;
+  diagnostics.confirmedActions = 0;
+  diagnostics.unverifiableActions = 0;
+  diagnostics.suspectedNoops = 0;
+  diagnostics.recentActions = [];
 }
 
 export async function stopCuaDriver(): Promise<void> {

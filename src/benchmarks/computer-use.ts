@@ -21,12 +21,20 @@ interface Arguments {
   output: string;
 }
 
+interface FixtureState {
+  current: string;
+  submitted: string | null;
+}
+
 interface RunResult {
   iteration: number;
   success: boolean;
+  typeApplied: boolean;
+  submitApplied: boolean;
   totalMs: number;
   observeMs: number;
   typeMs: number;
+  reobserveMs: number;
   clickMs: number;
   verifyMs: number;
   elementCount: number;
@@ -43,10 +51,13 @@ interface BackendResult {
   diagnostics?: CuaDriverDiagnostics;
   summary?: {
     successRate: number;
+    typeApplyRate: number;
+    submitApplyRate: number;
     medianTotalMs: number;
     p95TotalMs: number;
     medianObserveMs: number;
     medianTypeMs: number;
+    medianReobserveMs: number;
     medianClickMs: number;
     typeForegroundPreservedRate: number | null;
     clickForegroundPreservedRate: number | null;
@@ -79,7 +90,6 @@ function parseArgs(argv: string[]): Arguments {
     throw new Error("--iterations must be an integer from 1 to 100");
   }
   if (!args.backends.length) throw new Error("At least one backend is required");
-  if (!args.output) throw new Error("--output requires a path");
   return args;
 }
 
@@ -92,6 +102,29 @@ async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function runProcess(command: string, args: string[], timeoutMs = 30_000): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, { windowsHide: true, stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`Process timed out: ${command}`));
+    }, timeoutMs);
+    child.stderr?.on("data", (chunk) => {
+      stderr = `${stderr}${String(chunk)}`.slice(-8000);
+    });
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else reject(new Error(`Process exited ${code ?? "unknown"}: ${stderr.trim() || "no stderr"}`));
+    });
+  });
+}
+
 async function waitForFile(file: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -101,56 +134,66 @@ async function waitForFile(file: string, timeoutMs: number): Promise<void> {
   throw new Error(`Timed out waiting for fixture state: ${file}`);
 }
 
-async function readState(file: string): Promise<{ submitted: string | null }> {
+async function readState(file: string): Promise<FixtureState> {
   const text = await fs.readFile(file, "utf8");
-  return JSON.parse(text.replace(/^\uFEFF/, "")) as { submitted: string | null };
+  return JSON.parse(text.replace(/^\uFEFF/, "")) as FixtureState;
 }
 
-async function waitForSubmission(file: string, expected: string): Promise<boolean> {
-  const deadline = Date.now() + 2_500;
+async function waitForState(
+  file: string,
+  predicate: (state: FixtureState) => boolean,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const state = await readState(file).catch(() => ({ submitted: null }));
-    if (state.submitted === expected) return true;
-    await wait(50);
+    const state = await readState(file).catch(() => ({ current: "", submitted: null }));
+    if (predicate(state)) return true;
+    await wait(40);
   }
   return false;
 }
 
-async function waitForTargetWindow(): Promise<{ appName: string; processId: number }> {
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    const windows = await desktop.listVisibleWindows();
-    const match = windows.find((window) => window.title.includes(TARGET_TITLE));
-    if (match) {
-      const sameApp = windows.filter((window) => window.appName.toLowerCase() === match.appName.toLowerCase());
-      if (sameApp.length > 1) {
-        throw new Error(
-          `Benchmark fixture app identity "${match.appName}" is ambiguous (${sameApp.length} windows). Close other windows from that executable and retry.`,
-        );
-      }
-      return { appName: match.appName, processId: match.processId };
-    }
-    await wait(200);
-  }
-  throw new Error("Benchmark fixture window did not appear");
+async function buildFixture(tempRoot: string): Promise<string> {
+  const output = path.join(tempRoot, `chatgpt2codex-cu-fixture-${process.pid}.exe`);
+  const script = path.resolve("scripts", "fixtures", "computer-use-benchmark.ps1");
+  const source = path.resolve("scripts", "fixtures", "computer-use-benchmark.cs");
+  await runProcess(
+    powershellPath(),
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      script,
+      "-SourcePath",
+      source,
+      "-OutputPath",
+      output,
+    ],
+    60_000,
+  );
+  return output;
 }
 
-async function launchFixture(statePath: string): Promise<ChildProcess> {
-  const script = path.resolve("scripts", "fixtures", "computer-use-benchmark.ps1");
-  const child = spawn(
-    powershellPath(),
-    ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-StatePath", statePath, "-Title", TARGET_TITLE],
-    { windowsHide: false, stdio: ["ignore", "ignore", "pipe"] },
-  );
-  let stderr = "";
-  child.stderr?.on("data", (chunk) => {
-    stderr = `${stderr}${String(chunk)}`.slice(-4000);
-  });
-  child.once("exit", (code) => {
-    if (code && code !== 0) process.stderr.write(`benchmark fixture exited ${code}: ${stderr}\n`);
-  });
+async function launchFixture(exePath: string, statePath: string): Promise<ChildProcess> {
+  const child = spawn(exePath, [statePath, TARGET_TITLE], { windowsHide: true, stdio: "ignore" });
   await waitForFile(statePath, 15_000);
   return child;
+}
+
+async function waitForTargetWindow(fixturePid: number): Promise<{ appName: string; processId: number }> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const windows = await desktop.listVisibleWindows();
+    const match = windows.find(
+      (window) => window.processId === fixturePid && window.title.includes(TARGET_TITLE),
+    );
+    if (match) return { appName: match.appName, processId: match.processId };
+    await wait(150);
+  }
+  throw new Error(`Benchmark fixture window did not appear for pid ${fixturePid}`);
 }
 
 async function launchDecoy(): Promise<{ child: ChildProcess; appName?: string }> {
@@ -168,6 +211,8 @@ async function launchDecoy(): Promise<{ child: ChildProcess; appName?: string }>
 
 async function focusDecoy(appName: string | undefined): Promise<string | undefined> {
   if (!appName) return undefined;
+  // resolveWindowPoint calls the legacy windowRect helper, which deliberately
+  // activates the exact app before returning the rect. No click is emitted.
   await legacyWin.resolveWindowPoint(appName, 0.5, 0.5).catch(() => undefined);
   await wait(80);
   return legacyWin.resolveFrontmostApp().catch(() => undefined);
@@ -185,29 +230,73 @@ function percentile(values: number[], fraction: number): number {
   return Math.round(sorted[index]! * 100) / 100;
 }
 
+function rate(values: boolean[]): number {
+  if (!values.length) return 0;
+  return Math.round((values.filter(Boolean).length / values.length) * 10_000) / 100;
+}
+
 function preservationRate(values: Array<boolean | null>): number | null {
   const known = values.filter((value): value is boolean => value !== null);
-  if (!known.length) return null;
-  return Math.round((known.filter(Boolean).length / known.length) * 10_000) / 100;
+  return known.length ? rate(known) : null;
 }
 
 function summarize(runs: RunResult[]): NonNullable<BackendResult["summary"]> {
-  const successful = runs.filter((run) => run.success);
   return {
-    successRate: Math.round((successful.length / Math.max(1, runs.length)) * 10_000) / 100,
+    successRate: rate(runs.map((run) => run.success)),
+    typeApplyRate: rate(runs.map((run) => run.typeApplied)),
+    submitApplyRate: rate(runs.map((run) => run.submitApplied)),
     medianTotalMs: percentile(runs.map((run) => run.totalMs), 0.5),
     p95TotalMs: percentile(runs.map((run) => run.totalMs), 0.95),
     medianObserveMs: percentile(runs.map((run) => run.observeMs), 0.5),
     medianTypeMs: percentile(runs.map((run) => run.typeMs), 0.5),
+    medianReobserveMs: percentile(runs.map((run) => run.reobserveMs), 0.5),
     medianClickMs: percentile(runs.map((run) => run.clickMs), 0.5),
     typeForegroundPreservedRate: preservationRate(runs.map((run) => run.typeForegroundPreserved)),
     clickForegroundPreservedRate: preservationRate(runs.map((run) => run.clickForegroundPreserved)),
   };
 }
 
+function findTextbox(observation: Awaited<ReturnType<typeof desktop.snapshotSemanticElements>>) {
+  return observation.elements.find(
+    (element) => /benchmarkinput/i.test(element.name ?? "") && element.actions.includes("setValue"),
+  ) ?? observation.elements.find((element) => element.actions.includes("setValue"));
+}
+
+function findButton(observation: Awaited<ReturnType<typeof desktop.snapshotSemanticElements>>) {
+  return observation.elements.find(
+    (element) => /submit|benchmarksubmit/i.test(element.name ?? "") && element.actions.includes("invoke"),
+  ) ?? observation.elements.find(
+    (element) => /submit|benchmarksubmit/i.test(element.name ?? "") && (element.actions.includes("select") || element.actions.includes("focus")),
+  );
+}
+
+async function observe(
+  backend: WindowsBackendMode,
+  iteration: number,
+  phase: "before-type" | "before-click",
+  projectRoot: string,
+  appName: string,
+) {
+  const started = performance.now();
+  await captureControlAppScreenshot(projectRoot, {
+    appName,
+    label: `benchmark-${backend}-${iteration}-${phase}`,
+    waitMs: 0,
+  });
+  const observation = await desktop.snapshotSemanticElements(appName, {
+    maxElements: 120,
+    maxDepth: 8,
+  });
+  return {
+    observation,
+    elapsedMs: performance.now() - started,
+  };
+}
+
 async function runOne(
   backend: WindowsBackendMode,
   iteration: number,
+  fixturePid: number,
   projectRoot: string,
   statePath: string,
   decoyAppName: string | undefined,
@@ -215,35 +304,13 @@ async function runOne(
   process.env.CHATGPT2CODEX_WINDOWS_BACKEND = backend;
   const totalStarted = performance.now();
   try {
-    const target = await waitForTargetWindow();
-    const observationStarted = performance.now();
-    await captureControlAppScreenshot(projectRoot, {
-      appName: target.appName,
-      label: `benchmark-${backend}-${iteration}`,
-      waitMs: 0,
-    });
-    const observation = await desktop.snapshotSemanticElements(target.appName, {
-      maxElements: 120,
-      maxDepth: 8,
-    });
-    const observeMs = performance.now() - observationStarted;
+    const target = await waitForTargetWindow(fixturePid);
 
-    const textbox =
-      observation.elements.find(
-        (element) => /benchmarkinput/i.test(element.name ?? "") && element.actions.includes("setValue"),
-      ) ?? observation.elements.find((element) => element.actions.includes("setValue"));
-    const button =
-      observation.elements.find(
-        (element) => /submit|benchmarksubmit/i.test(element.name ?? "") && element.actions.includes("invoke"),
-      ) ??
-      observation.elements.find(
-        (element) => /submit|benchmarksubmit/i.test(element.name ?? "") && (element.actions.includes("select") || element.actions.includes("focus")),
-      );
+    const first = await observe(backend, iteration, "before-type", projectRoot, target.appName);
+    const textbox = findTextbox(first.observation);
     if (!textbox) throw new Error("Benchmark textbox was not found in the semantic observation");
-    if (!button) throw new Error("Benchmark Submit button was not found in the semantic observation");
 
     const token = `${backend}-${iteration}-${Date.now()}`;
-
     const beforeType = await focusDecoy(decoyAppName);
     const typeStarted = performance.now();
     await desktop.setAxValue(target.appName, textbox.selector, token);
@@ -253,6 +320,14 @@ async function runOne(
       decoyAppName && beforeType && sameApp(beforeType, decoyAppName)
         ? sameApp(afterType, decoyAppName)
         : null;
+    const typeApplied = await waitForState(statePath, (state) => state.current === token, 1_500);
+
+    // Cua element tokens are snapshot-scoped and the Driver guidance is one
+    // action per observation. Reobserve before the second semantic action.
+    // Apply the same loop to legacy so latency comparisons stay symmetric.
+    const second = await observe(backend, iteration, "before-click", projectRoot, target.appName);
+    const button = findButton(second.observation);
+    if (!button) throw new Error("Benchmark Submit button was not found after re-observation");
 
     const beforeClick = await focusDecoy(decoyAppName);
     const clickStarted = performance.now();
@@ -265,18 +340,22 @@ async function runOne(
         : null;
 
     const verifyStarted = performance.now();
-    const success = await waitForSubmission(statePath, token);
+    const submitApplied = await waitForState(statePath, (state) => state.submitted === token, 2_500);
     const verifyMs = performance.now() - verifyStarted;
+    const success = typeApplied && submitApplied;
 
     return {
       iteration,
       success,
+      typeApplied,
+      submitApplied,
       totalMs: Math.round((performance.now() - totalStarted) * 100) / 100,
-      observeMs: Math.round(observeMs * 100) / 100,
+      observeMs: Math.round(first.elapsedMs * 100) / 100,
       typeMs: Math.round(typeMs * 100) / 100,
+      reobserveMs: Math.round(second.elapsedMs * 100) / 100,
       clickMs: Math.round(clickMs * 100) / 100,
       verifyMs: Math.round(verifyMs * 100) / 100,
-      elementCount: observation.elements.length,
+      elementCount: first.observation.elements.length,
       typeForegroundPreserved,
       clickForegroundPreserved,
     };
@@ -284,9 +363,12 @@ async function runOne(
     return {
       iteration,
       success: false,
+      typeApplied: false,
+      submitApplied: false,
       totalMs: Math.round((performance.now() - totalStarted) * 100) / 100,
       observeMs: 0,
       typeMs: 0,
+      reobserveMs: 0,
       clickMs: 0,
       verifyMs: 0,
       elementCount: 0,
@@ -301,14 +383,22 @@ function markdown(results: BackendResult[]): string {
   const lines = [
     "# Computer Use A/B benchmark",
     "",
-    "| Backend | Status | Success | Median total | P95 total | Median observe | Median type | Median click | Type foreground preserved | Click foreground preserved | Cua FG escalations |",
-    "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    "| Backend | Status | Success | Type applied | Submit applied | Median total | P95 total | Observe | Type | Reobserve | Click | Type FG preserved | Click FG preserved | Cua confirmed/unverifiable/noop |",
+    "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
   ];
   for (const result of results) {
     const s = result.summary;
+    const d = result.diagnostics;
     lines.push(
-      `| ${result.backend} | ${result.status} | ${s ? `${s.successRate}%` : "-"} | ${s ? `${s.medianTotalMs} ms` : "-"} | ${s ? `${s.p95TotalMs} ms` : "-"} | ${s ? `${s.medianObserveMs} ms` : "-"} | ${s ? `${s.medianTypeMs} ms` : "-"} | ${s ? `${s.medianClickMs} ms` : "-"} | ${s?.typeForegroundPreservedRate ?? "-"}${s?.typeForegroundPreservedRate !== null && s ? "%" : ""} | ${s?.clickForegroundPreservedRate ?? "-"}${s?.clickForegroundPreservedRate !== null && s ? "%" : ""} | ${result.diagnostics?.foregroundEscalations ?? "-"} |`,
+      `| ${result.backend} | ${result.status} | ${s ? `${s.successRate}%` : "-"} | ${s ? `${s.typeApplyRate}%` : "-"} | ${s ? `${s.submitApplyRate}%` : "-"} | ${s ? `${s.medianTotalMs} ms` : "-"} | ${s ? `${s.p95TotalMs} ms` : "-"} | ${s ? `${s.medianObserveMs} ms` : "-"} | ${s ? `${s.medianTypeMs} ms` : "-"} | ${s ? `${s.medianReobserveMs} ms` : "-"} | ${s ? `${s.medianClickMs} ms` : "-"} | ${s?.typeForegroundPreservedRate ?? "-"}${s?.typeForegroundPreservedRate !== null && s ? "%" : ""} | ${s?.clickForegroundPreservedRate ?? "-"}${s?.clickForegroundPreservedRate !== null && s ? "%" : ""} | ${d ? `${d.confirmedActions}/${d.unverifiableActions}/${d.suspectedNoops}` : "-"} |`,
     );
+  }
+  for (const result of results) {
+    if (result.error) {
+      lines.push("", `**${result.backend} unavailable:** ${result.error}`);
+    }
+    const failed = result.runs.filter((run) => run.error).slice(0, 3);
+    for (const run of failed) lines.push("", `**${result.backend} run ${run.iteration}:** ${run.error}`);
   }
   return `${lines.join("\n")}\n`;
 }
@@ -320,7 +410,9 @@ async function main(args: Arguments): Promise<void> {
   const projectRoot = path.join(tempRoot, "project");
   const statePath = path.join(tempRoot, "fixture-state.json");
   await fs.mkdir(projectRoot, { recursive: true });
-  const fixture = await launchFixture(statePath);
+  const fixtureExe = await buildFixture(tempRoot);
+  const fixture = await launchFixture(fixtureExe, statePath);
+  if (!fixture.pid) throw new Error("Benchmark fixture process did not expose a pid");
   const decoy = await launchDecoy();
   const results: BackendResult[] = [];
 
@@ -330,10 +422,8 @@ async function main(args: Arguments): Promise<void> {
       if (backend === "cua") resetCuaDriverDiagnostics();
 
       const runs: RunResult[] = [];
-      // A warm-up is deliberately excluded from the report so helper/driver
-      // process startup does not dominate steady-state A/B measurements.
-      const warmup = await runOne(backend, 0, projectRoot, statePath, decoy.appName);
-      if (!warmup.success && warmup.error) {
+      const warmup = await runOne(backend, 0, fixture.pid, projectRoot, statePath, decoy.appName);
+      if (warmup.error) {
         results.push({
           backend,
           status: "unavailable",
@@ -345,7 +435,7 @@ async function main(args: Arguments): Promise<void> {
       }
 
       for (let iteration = 1; iteration <= args.iterations; iteration += 1) {
-        runs.push(await runOne(backend, iteration, projectRoot, statePath, decoy.appName));
+        runs.push(await runOne(backend, iteration, fixture.pid!, projectRoot, statePath, decoy.appName));
       }
       results.push({
         backend,
@@ -357,7 +447,7 @@ async function main(args: Arguments): Promise<void> {
     }
 
     const report = {
-      schema: "chatgpt2codex.computer-use-benchmark/v1",
+      schema: "chatgpt2codex.computer-use-benchmark/v2",
       createdAt: new Date().toISOString(),
       platform: process.platform,
       arch: process.arch,

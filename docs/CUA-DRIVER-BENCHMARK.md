@@ -39,7 +39,9 @@ existing `target.ax.label` field.
 
 Actions use this policy:
 
-1. semantic element action when an element token is available;
+1. semantic element action when an element token is available; text-field
+   replacement maps to Cua `set_value` (UIA `ValuePattern.SetValue`), matching
+   the legacy backend rather than cursor-oriented `type_text`;
 2. Cua `delivery_mode:"background"` first;
 3. retry the same action with `delivery_mode:"foreground"` only when Cua
    explicitly reports `background_unavailable`;
@@ -58,14 +60,17 @@ Run this from an **interactive Windows desktop**, not a headless CI runner:
 npm run benchmark:computer-use -- --iterations 20
 ```
 
-The runner opens a small WinForms fixture and uses exactly the same task for
-both backends:
+The runner compiles and opens a tiny uniquely-named WinForms fixture executable
+so the legacy app-name resolver cannot collide with the PowerShell console that
+built/launched the old fixture. It uses exactly the same task for both backends:
 
 - capture the target app window;
 - obtain a semantic element observation;
 - write a unique token into a textbox;
+- independently verify the textbox value from the fixture state file;
+- re-observe the window (one action per semantic snapshot);
 - invoke a Submit button;
-- verify the submitted token from an independent state file.
+- independently verify the submitted token.
 
 It also opens Notepad as a foreground decoy. Before both the type and click
 actions it restores the decoy to the foreground, then records whether the
@@ -76,7 +81,8 @@ summary. The report includes:
 
 - task success rate;
 - median and p95 end-to-end latency;
-- observation/type/click latency;
+- initial observation/type/re-observation/click latency;
+- type-application rate and submit-application rate;
 - type and click foreground-preservation rate;
 - Cua tool-call count;
 - background attempts;
