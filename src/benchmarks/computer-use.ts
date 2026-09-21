@@ -596,30 +596,36 @@ async function main(args: Arguments): Promise<void> {
     process.stdout.write(markdown(results));
     process.stdout.write(`JSON: ${args.output}\nMarkdown: ${mdPath}\n`);
   } finally {
-    const ciLog = (message: string) => {
-      if (process.env.GITHUB_ACTIONS === "true") process.stderr.write(`[benchmark-cleanup] ${message}\n`);
-    };
-    ciLog("kill children");
     fixture.kill();
     fixture.unref();
     decoy.child.kill();
     decoy.child.unref();
-    ciLog("stop helpers");
-    await Promise.all([
-      stopCuaDriver(),
-      legacyWin.stopWindowsInputHelper(),
-      stopWindowsUiaHelper(),
+
+    // Helper shutdown is best-effort. All three helpers are already unref'd,
+    // so a broken/slow child must never keep a completed benchmark open.
+    await Promise.race([
+      Promise.allSettled([
+        stopCuaDriver(),
+        legacyWin.stopWindowsInputHelper(),
+        stopWindowsUiaHelper(),
+      ]),
+      wait(5_000),
     ]);
-    ciLog("helpers stopped");
     scheduleTempCleanup(tempRoot);
-    ciLog("temp cleanup scheduled");
   }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = parseArgs(process.argv.slice(2));
-  main(args).catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : error);
-    process.exitCode = 1;
-  });
+  main(args).then(
+    () => {
+      // The benchmark is a standalone CLI. Drain stdout, then terminate so
+      // stale Windows GUI/readline handles cannot outlive a completed report.
+      process.stdout.write("", () => process.exit(0));
+    },
+    (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`${message}\n`, () => process.exit(1));
+    },
+  );
 }
