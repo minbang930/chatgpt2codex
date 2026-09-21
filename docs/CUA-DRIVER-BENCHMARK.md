@@ -241,3 +241,44 @@ instead of rediscovering it inside every measured iteration, because product
 computer-use requests already carry an app identity. The Cua timing footer now
 reports target-cache hits/misses alongside the existing tool timings.
 
+### Splitting `get_window_state` cost
+
+After removing repeated window discovery, the remaining same-machine Cua timing
+was:
+
+```text
+list_windows=n/a
+get_window_state=164.91ms avg
+set_value=5.94ms avg
+click=6.17ms avg
+target-resolve=0ms
+target-cache=12 hits/0 misses
+normalize=0.10ms avg
+snapshot-cache-hits=12
+```
+
+This confirms that semantic actuation itself is only ~6 ms and the remaining
+latency is dominated by `get_window_state`.
+
+Cua's Windows implementation performs the UIA tree walk and screenshot capture
+sequentially inside one blocking `get_window_state` task. Use the optional
+probe to measure the components and a split-parallel alternative without
+changing the production observation path:
+
+```powershell
+npm run benchmark:computer-use -- --backends cua --iterations 5 --cua-observe-probe
+```
+
+The report adds one line with medians for:
+
+- `combined`: current production-style tree + screenshot call;
+- `tree-only`: `include_screenshot:false`;
+- `screenshot-only`: `include_accessibility_tree:false`;
+- `parallel`: tree-only and screenshot-only issued concurrently against the
+  same already-resolved target window.
+
+The probe runs only after the measured functional benchmark, so its extra calls
+do not contaminate the normal Cua timing diagnostics. Production should only be
+changed to a split/parallel observation path if this local probe shows a clear
+wall-clock win while retaining the same semantic element coverage.
+
