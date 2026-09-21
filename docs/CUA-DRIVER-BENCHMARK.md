@@ -617,3 +617,75 @@ rejection.
 The benchmark-only adapter helpers call `get_window_state` with an explicit
 `(pid, window_id)`; production targeting behavior is unchanged.
 
+#### Window-identity result
+
+The official and patched Drivers were compared against the same-process
+two-window identity fixture.
+
+```text
+Driver    Status  Identity  Titles  Background  Minimized  Wrong PID  Stale HWND
+official  ok      true      true    true        false      true       true
+patched   ok      true      true    true        false      true       true
+```
+
+Both Drivers:
+
+- resolved the fixture's exact HWNDs;
+- returned the matching titles;
+- observed a non-foreground sibling window;
+- rejected a live HWND paired with the wrong PID and preserved the ownership
+  diagnostic;
+- rejected a closed/stale HWND rather than resolving it to the remaining
+  same-process window.
+
+Both Drivers failed the minimized-window observation in the same way, so this
+is treated as an existing Driver limitation rather than a fast-path regression.
+
+The wrong-PID/stale-HWND run also exposed an adapter diagnostic bug:
+chatgpt2codex previously discarded Cua's MCP `content[].text` error message and
+kept only the structured refusal envelope. The adapter now preserves both, with
+unit coverage.
+
+### Opt-in runtime selection
+
+The validated fast-path Driver can now be installed into chatgpt2codex's
+persistent user state without replacing the system Cua installation:
+
+```powershell
+npm run cua:install-fast-path
+```
+
+Default install location on Windows:
+
+```text
+~\.local\share\chatgpt2codex\cua-driver\fast-path\cua-driver.exe
+```
+
+Runtime selection is explicit and fail-closed:
+
+```powershell
+$env:CHATGPT2CODEX_WINDOWS_BACKEND = "cua"
+$env:CHATGPT2CODEX_CUA_DRIVER_VARIANT = "fast-path"
+```
+
+Selection precedence:
+
+1. `CUA_DRIVER_BIN` explicit path;
+2. `CHATGPT2CODEX_CUA_DRIVER_VARIANT=fast-path` persisted binary;
+3. system `cua-driver` when the variant is unset or `system`.
+
+If `fast-path` is selected but the persisted binary is missing,
+chatgpt2codex reports an error instead of silently falling back to the system
+Driver.
+
+Rollback requires no reinstall:
+
+```powershell
+$env:CHATGPT2CODEX_CUA_DRIVER_VARIANT = "system"
+```
+
+The existing system Driver remains the default. This makes the optimized Driver
+usable in normal chatgpt2codex runs while preserving an immediate rollback path
+until the exact-window optimization is available in an official upstream Cua
+release.
+
