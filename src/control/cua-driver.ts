@@ -88,6 +88,8 @@ export interface CuaDriverDiagnostics {
   observationNormalizeTotalMs: number;
   targetResolutions: number;
   targetResolveTotalMs: number;
+  targetCacheHits: number;
+  targetCacheMisses: number;
   toolTimings: Record<string, CuaDriverToolTiming>;
   recentActions: CuaDriverActionDiagnostic[];
 }
@@ -105,11 +107,13 @@ export interface CuaAppScreenshot {
 
 const DEFAULT_DPI = 96;
 const OBSERVATION_CACHE_MS = 10_000;
+const TARGET_CACHE_MS = 2_000;
 const SESSION = `chatgpt2codex-${process.pid}`;
 const CUAREF_PREFIX = "cuaref:";
 
 let connectionPromise: Promise<CuaConnection> | undefined;
 const observationCache = new Map<string, CachedObservation>();
+const targetCache = new Map<string, { target: ResolvedWindow; storedAt: number }>();
 const diagnostics: CuaDriverDiagnostics = {
   calls: 0,
   backgroundAttempts: 0,
@@ -123,6 +127,8 @@ const diagnostics: CuaDriverDiagnostics = {
   observationNormalizeTotalMs: 0,
   targetResolutions: 0,
   targetResolveTotalMs: 0,
+  targetCacheHits: 0,
+  targetCacheMisses: 0,
   toolTimings: {},
   recentActions: [],
 };
@@ -347,12 +353,6 @@ function normalizeRawWindow(row: RawWindow): ResolvedWindow | undefined {
   };
 }
 
-async function rawWindows(): Promise<ResolvedWindow[]> {
-  const result = await callTool("list_windows", { on_screen_only: false });
-  const rows = Array.isArray(result.windows) ? (result.windows as RawWindow[]) : [];
-  return rows.map(normalizeRawWindow).filter((row): row is ResolvedWindow => row !== undefined);
-}
-
 function sortTargetWindows(rows: ResolvedWindow[]): ResolvedWindow[] {
   return [...rows].sort((left, right) => {
     if (left.onScreen !== right.onScreen) return left.onScreen ? -1 : 1;
@@ -365,6 +365,41 @@ function sortTargetWindows(rows: ResolvedWindow[]): ResolvedWindow[] {
   });
 }
 
+function rememberWindowTargets(rows: ResolvedWindow[]): void {
+  const grouped = new Map<string, ResolvedWindow[]>();
+  for (const row of rows) {
+    const key = appKey(row.appName);
+    const group = grouped.get(key);
+    if (group) group.push(row);
+    else grouped.set(key, [row]);
+  }
+  const now = Date.now();
+  for (const [key, group] of grouped) {
+    const target = sortTargetWindows(group)[0];
+    if (target) targetCache.set(key, { target, storedAt: now });
+  }
+}
+
+async function rawWindows(): Promise<ResolvedWindow[]> {
+  const result = await callTool("list_windows", { on_screen_only: false });
+  const rows = Array.isArray(result.windows) ? (result.windows as RawWindow[]) : [];
+  const windows = rows.map(normalizeRawWindow).filter((row): row is ResolvedWindow => row !== undefined);
+  rememberWindowTargets(windows);
+  return windows;
+}
+
+function cachedTarget(appName: string): ResolvedWindow | undefined {
+  const key = appKey(appName);
+  const cached = targetCache.get(key);
+  if (cached && Date.now() - cached.storedAt <= TARGET_CACHE_MS) {
+    diagnostics.targetCacheHits += 1;
+    return cached.target;
+  }
+  if (cached) targetCache.delete(key);
+  diagnostics.targetCacheMisses += 1;
+  return undefined;
+}
+
 async function resolveTargetWindow(appName: string): Promise<ResolvedWindow> {
   const started = performance.now();
   try {
@@ -372,11 +407,35 @@ async function resolveTargetWindow(appName: string): Promise<ResolvedWindow> {
     const matches = (await rawWindows()).filter((window) => appKey(window.appName) === key);
     const target = sortTargetWindows(matches)[0];
     if (!target) throw new Error(`Cua Driver could not resolve a window for app: ${appName}`);
+    targetCache.set(key, { target, storedAt: Date.now() });
     return target;
   } finally {
     diagnostics.targetResolutions += 1;
     diagnostics.targetResolveTotalMs =
       Math.round((diagnostics.targetResolveTotalMs + (performance.now() - started)) * 100) / 100;
+  }
+}
+
+async function resolveReadTarget(appName: string): Promise<{ target: ResolvedWindow; fromCache: boolean }> {
+  const cached = cachedTarget(appName);
+  if (cached) return { target: cached, fromCache: true };
+  return { target: await resolveTargetWindow(appName), fromCache: false };
+}
+
+async function callWindowStateReadOnly(
+  appName: string,
+  args: (target: ResolvedWindow) => Record<string, unknown>,
+): Promise<{ target: ResolvedWindow; data: Record<string, unknown> }> {
+  let resolved = await resolveReadTarget(appName);
+  try {
+    return { target: resolved.target, data: await callTool("get_window_state", args(resolved.target)) };
+  } catch (error) {
+    if (!resolved.fromCache) throw error;
+    // Read-only retry only: a stale short-lived target cache must not make
+    // capture fail, but destructive actions are never replayed this way.
+    targetCache.delete(appKey(appName));
+    resolved = { target: await resolveTargetWindow(appName), fromCache: false };
+    return { target: resolved.target, data: await callTool("get_window_state", args(resolved.target)) };
   }
 }
 
@@ -513,6 +572,7 @@ function cacheObservation(
 ): WindowsUiaObservation {
   const observation = normalizeObservation(appName, target, data);
   const screenshotScale = finiteNumber(data.screenshot_scale) ?? 1;
+  targetCache.set(appKey(appName), { target, storedAt: Date.now() });
   observationCache.set(appKey(appName), {
     appKey: appKey(appName),
     target,
@@ -559,16 +619,15 @@ export async function captureAppWindow(
   if (!path.isAbsolute(filePath) || path.extname(filePath).toLowerCase() !== ".png") {
     throw new Error("Cua Driver app capture requires an absolute .png output path");
   }
-  const target = await resolveTargetWindow(appName);
   const includeAccessibilityTree = options.includeAccessibilityTree !== false;
-  const data = await callTool("get_window_state", {
-    pid: target.pid,
-    window_id: target.windowId,
+  const { target, data } = await callWindowStateReadOnly(appName, (resolved) => ({
+    pid: resolved.pid,
+    window_id: resolved.windowId,
     screenshot_out_file: filePath,
     include_accessibility_tree: includeAccessibilityTree,
     include_screenshot: true,
     ...(includeAccessibilityTree ? { max_elements: 120, max_depth: 8 } : {}),
-  });
+  }));
   // A screenshot-only evidence capture must not replace the semantic snapshot
   // that an already-approved element token is bound to.
   if (includeAccessibilityTree) cacheObservation(appName, target, data);
@@ -597,17 +656,16 @@ export async function snapshotSemanticElements(
     return cached.observation;
   }
 
-  const target = await resolveTargetWindow(appName);
   const maxElements = Math.min(120, Math.max(1, options.maxElements ?? 120));
   const maxDepth = Math.min(10, Math.max(1, options.maxDepth ?? 8));
-  const data = await callTool("get_window_state", {
-    pid: target.pid,
-    window_id: target.windowId,
+  const { target, data } = await callWindowStateReadOnly(appName, (resolved) => ({
+    pid: resolved.pid,
+    window_id: resolved.windowId,
     include_accessibility_tree: true,
     include_screenshot: false,
     max_elements: maxElements,
     max_depth: maxDepth,
-  });
+  }));
   return cacheObservation(appName, target, data);
 }
 
@@ -715,11 +773,26 @@ function refActionArgs(ref: CuaElementRef): Record<string, unknown> {
   };
 }
 
-async function validateRefWindow(appName: string, ref: CuaElementRef): Promise<void> {
-  const current = await resolveTargetWindow(appName);
-  if (current.pid !== ref.pid || current.windowId !== ref.windowId) {
-    throw new Error("Cua semantic target is stale or belongs to a different window");
+function validateRefWindow(
+  appName: string,
+  target: { label?: string },
+  ref: CuaElementRef,
+): CachedObservation {
+  const cached = observationCache.get(appKey(appName));
+  if (!cached || Date.now() > cached.observation.expiresAt) {
+    throw new Error("Cua semantic target has no live observation cache");
   }
+  if (
+    cached.target.pid !== ref.pid ||
+    cached.target.windowId !== ref.windowId ||
+    cached.observation.observationId !== `cuaobs_${ref.snapshotId}`
+  ) {
+    throw new Error("Cua semantic target is stale or belongs to a different window/snapshot");
+  }
+  if (!target.label || !cached.observation.elements.some((row) => row.selector.label === target.label)) {
+    throw new Error("Cua semantic target is not present in the current observation cache");
+  }
+  return cached;
 }
 
 export async function resolveSemanticElement(
@@ -733,7 +806,7 @@ export async function resolveSemanticElement(
     return { found: false, reason: error instanceof Error ? error.message : String(error) };
   }
   try {
-    await validateRefWindow(appName, ref);
+    validateRefWindow(appName, target, ref);
   } catch (error) {
     return { found: false, reason: error instanceof Error ? error.message : String(error) };
   }
@@ -754,13 +827,13 @@ export async function resolveSemanticElement(
 
 export async function pressSemanticElement(appName: string, target: { label?: string }): Promise<void> {
   const ref = decodeElementRef(target);
-  await validateRefWindow(appName, ref);
+  validateRefWindow(appName, target, ref);
   await callActionBackgroundFirst("click", refActionArgs(ref));
 }
 
 export async function setSemanticValue(appName: string, target: { label?: string }, text: string): Promise<void> {
   const ref = decodeElementRef(target);
-  await validateRefWindow(appName, ref);
+  validateRefWindow(appName, target, ref);
   // Match the legacy backend's ValuePattern.SetValue semantics exactly.
   // type_text is cursor-oriented text entry and may append to an existing
   // value; set_value replaces the whole UIA ValuePattern value.
@@ -798,6 +871,8 @@ export function resetCuaDriverDiagnostics(): void {
   diagnostics.observationNormalizeTotalMs = 0;
   diagnostics.targetResolutions = 0;
   diagnostics.targetResolveTotalMs = 0;
+  diagnostics.targetCacheHits = 0;
+  diagnostics.targetCacheMisses = 0;
   diagnostics.toolTimings = {};
   diagnostics.recentActions = [];
 }
@@ -806,6 +881,7 @@ export async function stopCuaDriver(): Promise<void> {
   const pending = connectionPromise;
   connectionPromise = undefined;
   observationCache.clear();
+  targetCache.clear();
   if (!pending) return;
   try {
     const connection = await pending;
