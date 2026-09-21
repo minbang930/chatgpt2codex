@@ -1,0 +1,24 @@
+name: Legacy benchmark probe
+
+on:
+  push:
+    branches:
+      - feat/cua-driver-ab-benchmark
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Run one legacy benchmark iteration
+        shell: pwsh
+        run: npm run benchmark:computer-use -- --backends legacy --iterations 1
