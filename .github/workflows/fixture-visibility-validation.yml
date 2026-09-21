@@ -1,0 +1,28 @@
+name: Fixture visibility validation
+
+on:
+  push:
+    branches:
+      - feat/cua-driver-ab-benchmark
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Compile benchmark fixture
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'chatgpt2codex-cu-fixture-ci.exe'
+          ./scripts/fixtures/computer-use-benchmark.ps1 -SourcePath ./scripts/fixtures/computer-use-benchmark.cs -OutputPath $out
+          if (-not (Test-Path $out)) { throw 'fixture exe missing' }
