@@ -383,10 +383,45 @@ The intended acceptance conditions are:
 - functional success stays 100%;
 - semantic Type/Click stay 100%;
 - foreground preservation stays 100%;
-- get_window_state falls materially below the ~165-176 ms official floor;
+- get_window_state falls materially below the official observation floor;
 - no new stale-target or window-identity fallback failures appear.
 
-This remains an experiment. Do not replace the installed Driver or change the
-default backend solely from a synthetic-fixture win; validate the patched
-binary on WinForms, WPF/WinUI, Notepad, and Electron/Chromium surfaces first.
+#### Same-machine official vs patched result
+
+5 measured iterations per binary, with the benchmark's normal warm-up excluded:
+
+| Metric | Official | Patched |
+|---|---:|---:|
+| Functional success | 100% | 100% |
+| Semantic Type / Click | 100% / 100% | 100% / 100% |
+| Type / Click foreground preserved | 100% / 100% | 100% / 100% |
+| Median total | 582.40 ms | 454.07 ms |
+| P95 total | 599.87 ms | 552.55 ms |
+| Observe | 185.98 ms | 129.70 ms |
+| Reobserve | 189.52 ms | 136.72 ms |
+| Type | 9.27 ms | 9.86 ms |
+| Click | 8.82 ms | 9.04 ms |
+| get_window_state average | 151.63 ms | 82.19 ms |
+
+The exact-window validation fast path reduced average get_window_state latency
+by 69.44 ms (45.8%) and reduced median end-to-end task latency by 128.33 ms
+(22.0%) on this fixture. The semantic action timings remained effectively
+unchanged, which isolates the gain to the observation path rather than
+actuation.
+
+The Driver still reported 0 confirmed / 12 unverifiable / 0 suspected-noop in
+both variants while the external fixture verified all effects, so the
+confidence-contract issue is unchanged and remains separate from this latency
+work.
+
+The remaining ~82 ms get_window_state cost now includes the exact HWND probe,
+process metadata lookup, UIA traversal, screenshot capture, and Driver/MCP
+overhead. The old ~109 ms list_windows measurement should therefore be treated
+only as a rough proxy for the former common floor, not as an exact amount that
+the patch was expected to remove.
+
+This remains an experiment. The synthetic WinForms fixture now provides strong
+evidence that the fast path is worthwhile, but do not replace the installed
+Driver or change the default backend until the patched binary also passes
+broader WinForms, WPF/WinUI, Notepad, and Electron/Chromium coverage.
 
