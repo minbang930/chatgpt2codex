@@ -15,6 +15,21 @@ if ([string]::IsNullOrWhiteSpace($RuntimeRoot)) {
 $RuntimeRoot = [System.IO.Path]::GetFullPath($RuntimeRoot)
 $RuntimeBinary = Join-Path $RuntimeRoot "cua-driver.exe"
 
+function Get-Sha256Hex([string]$Path) {
+  $stream = [System.IO.File]::OpenRead($Path)
+  try {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      $bytes = $sha.ComputeHash($stream)
+      return ([System.BitConverter]::ToString($bytes)).Replace("-", "")
+    } finally {
+      $sha.Dispose()
+    }
+  } finally {
+    $stream.Dispose()
+  }
+}
+
 if ([string]::IsNullOrWhiteSpace($SourcePath)) {
   if (Test-Path -LiteralPath $PersistedProjectBinary -PathType Leaf) {
     $SourcePath = $PersistedProjectBinary
@@ -49,8 +64,8 @@ try {
   Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
 }
 
-$sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $SourcePath).Hash
-$runtimeHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $RuntimeBinary).Hash
+$sourceHash = Get-Sha256Hex $SourcePath
+$runtimeHash = Get-Sha256Hex $RuntimeBinary
 if ($sourceHash -ne $runtimeHash) {
   throw "Installed fast-path Cua Driver hash mismatch"
 }
