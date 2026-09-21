@@ -28,10 +28,34 @@ $compilerArgs = @(
 )
 
 if ([IO.Path]::GetFileName($SourcePath) -ieq 'computer-use-benchmark-wpf.cs') {
+  $referenceRoots = @()
+  $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
+  if ($programFilesX86) {
+    $netFrameworkRefs = Join-Path $programFilesX86 'Reference Assemblies\Microsoft\Framework\.NETFramework'
+    if (Test-Path -LiteralPath $netFrameworkRefs) {
+      $referenceRoots += Get-ChildItem -LiteralPath $netFrameworkRefs -Directory |
+        Sort-Object Name -Descending |
+        ForEach-Object { $_.FullName }
+    }
+  }
+  $referenceRoots += (Join-Path (Split-Path -Parent $csc) 'WPF')
+
+  $wpfReferenceRoot = $referenceRoots |
+    Where-Object {
+      (Test-Path -LiteralPath (Join-Path $_ 'WindowsBase.dll')) -and
+      (Test-Path -LiteralPath (Join-Path $_ 'PresentationCore.dll')) -and
+      (Test-Path -LiteralPath (Join-Path $_ 'PresentationFramework.dll'))
+    } |
+    Select-Object -First 1
+
+  if (-not $wpfReferenceRoot) {
+    throw 'Could not find .NET Framework WPF reference assemblies'
+  }
+
   $compilerArgs += @(
-    '/reference:WindowsBase.dll',
-    '/reference:PresentationCore.dll',
-    '/reference:PresentationFramework.dll'
+    ('/reference:' + (Join-Path $wpfReferenceRoot 'WindowsBase.dll')),
+    ('/reference:' + (Join-Path $wpfReferenceRoot 'PresentationCore.dll')),
+    ('/reference:' + (Join-Path $wpfReferenceRoot 'PresentationFramework.dll'))
   )
 } else {
   $compilerArgs += @(
