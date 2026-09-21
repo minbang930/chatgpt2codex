@@ -2,7 +2,7 @@ diff --git a/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs b/l
 --- a/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs
 +++ b/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs
 @@ -1278,45 +1278,66 @@
-                  the target app\'s windows, or read `launch_app`\'s `windows` array.",
+                  the target app's windows, or read `launch_app`'s `windows` array.",
                  ),
              };
 -        // Validate window belongs to pid — Swift's hard error.
@@ -105,5 +105,5 @@ diff --git a/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs b/l
 +        .ok()
 +        .flatten();
          use cua_driver_core::tool_args::ArgsExt;
-         // Optional per-call cap on the returned screenshot\'s long edge, folded
+         // Optional per-call cap on the returned screenshot's long edge, folded
          // with the configured ceiling (the tighter wins).
