@@ -62,7 +62,10 @@ npm run benchmark:computer-use -- --iterations 20
 
 The runner compiles and opens a tiny uniquely-named WinForms fixture executable
 so the legacy app-name resolver cannot collide with the PowerShell console that
-built/launched the old fixture. It uses exactly the same task for both backends:
+built/launched the old fixture. It uses exactly the same task for both backends.
+The runner mirrors the production executor: semantic actuation is preferred,
+but a coordinate target is used when the selected backend cannot expose or
+execute a semantic action:
 
 - capture the target app window;
 - obtain a semantic element observation;
@@ -83,6 +86,7 @@ summary. The report includes:
 - median and p95 end-to-end latency;
 - initial observation/type/re-observation/click latency;
 - type-application rate and submit-application rate;
+- semantic-vs-coordinate route rate for type and click;
 - type and click foreground-preservation rate;
 - Cua tool-call count;
 - background attempts;
@@ -91,6 +95,17 @@ summary. The report includes:
 
 The first iteration of each backend is a warm-up and is excluded from summary
 statistics.
+
+### WinForms coverage note
+
+A live Windows probe showed why route reporting matters. The legacy
+`System.Windows.Automation` helper observed the fixture's classic
+`WindowsForms10.EDIT` and `WindowsForms10.BUTTON` controls only as `Pane`
+elements with no advertised actions. Cua Driver successfully operated the same
+fixture semantically. The benchmark therefore does not call the legacy backend
+"unavailable" solely because semantic metadata is sparse; it exercises the
+same coordinate fallback used by the production executor and reports the route
+separately.
 
 ### Run only one backend
 
