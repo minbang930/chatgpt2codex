@@ -4,6 +4,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { DomainError, ErrorCode } from "../types.js";
 import { cuaToolResultError } from "./cua-driver-error.js";
+import { resolveCuaDriverCommand } from "./cua-driver-command.js";
 import { buildSafeChildEnv } from "../exec/command-runner.js";
 import type { ResolvedTargetPreview } from "./queue.js";
 import type { VisibleAppWindow } from "./win-native.js";
@@ -159,8 +160,9 @@ async function connect(): Promise<CuaConnection> {
   assertWindows();
   if (!connectionPromise) {
     connectionPromise = (async () => {
+      const resolvedDriver = resolveCuaDriverCommand();
       const transport = new StdioClientTransport({
-        command: process.env.CUA_DRIVER_BIN?.trim() || "cua-driver",
+        command: resolvedDriver.command,
         args: ["mcp"],
         env: safeChildEnv(),
         stderr: "pipe",
