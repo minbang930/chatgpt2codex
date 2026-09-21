@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { resolveCuaDriverCommand } from "../control/cua-driver-command.js";
 import {
   probeCuaExplicitWindowObservation,
   resolveCuaExactWindowTarget,
@@ -212,7 +213,7 @@ async function main(args: Arguments): Promise<void> {
     report = {
       schema: "chatgpt2codex.cua-window-identity/v1",
       createdAt: new Date().toISOString(),
-      driver: process.env.CUA_DRIVER_BIN ?? "cua-driver",
+      driver: resolveCuaDriverCommand(),
       status: corePass ? "ok" : "failed",
       identityMatch,
       titlesMatch,
