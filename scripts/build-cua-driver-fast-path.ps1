@@ -49,6 +49,39 @@ Then rerun:
   throw "Required command is not on PATH: $Name"
 }
 
+function Require-SpectreLibraries {
+  $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+  if (-not $programFilesX86) {
+    return
+  }
+
+  $vswhere = Join-Path $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
+  if (-not (Test-Path $vswhere -PathType Leaf)) {
+    return
+  }
+
+  $spectreInstall = (
+    & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre -property installationPath |
+      Select-Object -First 1
+  )
+
+  if (-not $spectreInstall) {
+    throw @"
+Cua Driver's Windows dependency graph requires the MSVC Spectre-mitigated x64/x86 libraries.
+
+Add this Visual Studio component:
+  Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre
+
+GUI:
+  Visual Studio Installer -> Build Tools -> Modify -> Individual components
+  -> search "Spectre" -> select the latest x64/x86 Spectre-mitigated libs.
+
+After installation, open a new PowerShell and rerun:
+  npm run benchmark:cua-fast-path
+"@
+  }
+}
+
 function Import-VsDevEnvironment {
   if (Get-Command link.exe -ErrorAction SilentlyContinue) {
     return
@@ -110,6 +143,7 @@ After installation, open a new PowerShell and rerun:
 Require-Command git
 Require-Command cargo
 Import-VsDevEnvironment
+Require-SpectreLibraries
 
 if (-not (Test-Path $PatchPath -PathType Leaf)) {
   throw "Patch file not found: $PatchPath"
