@@ -4,6 +4,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$SourcePath = (Resolve-Path -LiteralPath $SourcePath).Path
+$OutputPath = [IO.Path]::GetFullPath($OutputPath)
 if (Test-Path -LiteralPath $OutputPath) {
   Remove-Item -LiteralPath $OutputPath -Force
 }
