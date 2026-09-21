@@ -19,6 +19,41 @@ if (-not $csc) {
   throw 'Could not find the .NET Framework C# compiler (csc.exe)'
 }
 
+function Find-WpfAssembly([string]$Name, [string[]]$ReferenceRoots, [switch]$ForceRuntimeFallback) {
+  if (-not $ForceRuntimeFallback) {
+    foreach ($root in $ReferenceRoots) {
+      $candidate = Join-Path $root ($Name + '.dll')
+      if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+        return (Resolve-Path -LiteralPath $candidate).Path
+      }
+    }
+  }
+
+  $runtimeRoots = @(
+    (Join-Path (Split-Path -Parent $csc) 'WPF'),
+    (Join-Path $env:WINDIR 'Microsoft.NET\assembly')
+  )
+
+  foreach ($root in $runtimeRoots) {
+    if (-not (Test-Path -LiteralPath $root)) {
+      continue
+    }
+
+    $direct = Join-Path $root ($Name + '.dll')
+    if (Test-Path -LiteralPath $direct -PathType Leaf) {
+      return (Resolve-Path -LiteralPath $direct).Path
+    }
+
+    $match = Get-ChildItem -LiteralPath $root -Filter ($Name + '.dll') -File -Recurse -ErrorAction SilentlyContinue |
+      Select-Object -First 1
+    if ($match) {
+      return $match.FullName
+    }
+  }
+
+  return $null
+}
+
 $compilerArgs = @(
   '/nologo',
   '/target:winexe',
@@ -38,27 +73,27 @@ if ([IO.Path]::GetFileName($SourcePath) -ieq 'computer-use-benchmark-wpf.cs') {
         ForEach-Object { $_.FullName }
     }
   }
-  $referenceRoots += (Join-Path (Split-Path -Parent $csc) 'WPF')
 
-  $wpfReferenceRoot = $referenceRoots |
-    Where-Object {
-      (Test-Path -LiteralPath (Join-Path $_ 'WindowsBase.dll')) -and
-      (Test-Path -LiteralPath (Join-Path $_ 'PresentationCore.dll')) -and
-      (Test-Path -LiteralPath (Join-Path $_ 'PresentationFramework.dll')) -and
-      (Test-Path -LiteralPath (Join-Path $_ 'System.Xaml.dll'))
-    } |
-    Select-Object -First 1
+  $forceRuntimeFallback = $env:CHATGPT2CODEX_FORCE_WPF_RUNTIME_REFS -match '^(1|true|yes|on)$'
+  $required = @(
+    'WindowsBase',
+    'PresentationCore',
+    'PresentationFramework',
+    'System.Xaml'
+  )
 
-  if (-not $wpfReferenceRoot) {
-    throw 'Could not find .NET Framework WPF reference assemblies'
+  $resolvedReferences = @()
+  foreach ($assemblyName in $required) {
+    $resolved = Find-WpfAssembly -Name $assemblyName -ReferenceRoots $referenceRoots -ForceRuntimeFallback:$forceRuntimeFallback
+    if (-not $resolved) {
+      throw "Could not find WPF assembly: $assemblyName.dll. Install the .NET Framework Developer Pack or ensure the Windows .NET Framework runtime/GAC is intact."
+    }
+    $resolvedReferences += $resolved
   }
 
-  $compilerArgs += @(
-    ('/reference:' + (Join-Path $wpfReferenceRoot 'WindowsBase.dll')),
-    ('/reference:' + (Join-Path $wpfReferenceRoot 'PresentationCore.dll')),
-    ('/reference:' + (Join-Path $wpfReferenceRoot 'PresentationFramework.dll')),
-    ('/reference:' + (Join-Path $wpfReferenceRoot 'System.Xaml.dll'))
-  )
+  Write-Host 'WPF references:'
+  $resolvedReferences | ForEach-Object { Write-Host ('  ' + $_) }
+  $compilerArgs += $resolvedReferences | ForEach-Object { '/reference:' + $_ }
 } else {
   $compilerArgs += @(
     '/reference:System.Windows.Forms.dll',
