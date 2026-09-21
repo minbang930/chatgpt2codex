@@ -1,7 +1,8 @@
 param(
   [string]$WorkRoot = "",
   [switch]$SkipTests,
-  [switch]$ForceRefresh
+  [switch]$ForceRefresh,
+  [switch]$CleanTarget
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,6 +18,7 @@ $SourceRoot = Join-Path $WorkRoot "cua"
 $PatchPath = Join-Path $ProjectRoot "patches\cua-driver\get-window-state-exact-window-fast-path.patch"
 $RustRoot = Join-Path $SourceRoot "libs\cua-driver\rust"
 $BinaryPath = Join-Path $RustRoot "target\release\cua-driver.exe"
+$PersistedBinaryPath = Join-Path $ProjectRoot ".chatgpt2codex\bin\cua-driver-fast-path.exe"
 
 function Require-Command([string]$Name) {
   if (Get-Command $Name -ErrorAction SilentlyContinue) {
@@ -202,7 +204,18 @@ if (-not (Test-Path $BinaryPath -PathType Leaf)) {
   throw "Patched binary was not produced: $BinaryPath"
 }
 
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $PersistedBinaryPath) | Out-Null
+Copy-Item -LiteralPath $BinaryPath -Destination $PersistedBinaryPath -Force
+
+if ($CleanTarget) {
+  $targetRoot = Join-Path $RustRoot "target"
+  if (Test-Path $targetRoot -PathType Container) {
+    Write-Host "Removing Cargo target directory after persisting the patched binary..."
+    Remove-Item -LiteralPath $targetRoot -Recurse -Force
+  }
+}
+
 Write-Host ""
 Write-Host "Patched Cua Driver ready:"
-Write-Host "  $BinaryPath"
-Write-Output $BinaryPath
+Write-Host "  $PersistedBinaryPath"
+Write-Output $PersistedBinaryPath
