@@ -46,7 +46,9 @@ Actions use this policy:
 4. otherwise fail without silently switching execution systems.
 
 The old `win-native` / `win-uia` implementation stays intact for instant
-rollback.
+rollback. Executor before/after evidence captures use Cua's screenshot-only
+path so they do not replace the semantic snapshot that an approved element
+token is bound to.
 
 ## Run the deterministic A/B benchmark
 
