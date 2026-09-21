@@ -29,7 +29,8 @@
     "linux:package": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-linux-installer.ps1",
     "linux:e2e": "bash scripts/e2e-linux-installer.sh",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "benchmark:computer-use": "tsx src/benchmarks/computer-use.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
