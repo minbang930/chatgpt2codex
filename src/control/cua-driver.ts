@@ -844,6 +844,76 @@ export async function setSemanticValue(appName: string, target: { label?: string
   recordActionResult("set_value", "semantic", result);
 }
 
+export interface CuaExactWindowTarget {
+  pid: number;
+  windowId: number;
+  appName: string;
+  title: string;
+  minimized: boolean;
+  onScreen: boolean;
+}
+
+export async function resolveCuaExactWindowTarget(
+  titleIncludes: string,
+  timeoutMs = 15_000,
+  options: { allowMinimized?: boolean } = {},
+): Promise<CuaExactWindowTarget> {
+  assertWindows();
+  const needle = titleIncludes.trim().toLowerCase();
+  if (!needle) throw new Error("Exact-window target resolution requires a non-empty title fragment");
+
+  const deadline = Date.now() + Math.max(1_000, timeoutMs);
+  while (Date.now() < deadline) {
+    const windows = await rawWindows();
+    const target = windows.find(
+      (window) =>
+        (options.allowMinimized || (window.onScreen && !window.minimized)) &&
+        window.title.toLowerCase().includes(needle),
+    );
+    if (target) {
+      return {
+        pid: target.pid,
+        windowId: target.windowId,
+        appName: target.appName,
+        title: target.title,
+        minimized: target.minimized,
+        onScreen: target.onScreen,
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  throw new Error(`Cua Driver could not find a window containing title: ${titleIncludes}`);
+}
+
+export async function probeCuaExplicitWindowObservation(
+  target: { pid: number; windowId: number },
+  outputPath: string,
+): Promise<{
+  elapsedMs: number;
+  snapshotId?: string;
+  windowTitle?: string;
+  appName?: string;
+  elementCount: number;
+}> {
+  assertWindows();
+  const started = performance.now();
+  const data = await callTool("get_window_state", {
+    pid: target.pid,
+    window_id: target.windowId,
+    include_accessibility_tree: true,
+    include_screenshot: true,
+    screenshot_out_file: outputPath,
+    max_elements: 120,
+    max_depth: 8,
+  });
+  return {
+    elapsedMs: Math.round((performance.now() - started) * 100) / 100,
+    ...(typeof data.snapshot_id === "string" ? { snapshotId: data.snapshot_id } : {}),
+    ...(typeof data.window_title === "string" ? { windowTitle: data.window_title } : {}),
+    ...(typeof data.app_name === "string" ? { appName: data.app_name } : {}),
+    elementCount: Array.isArray(data.elements) ? data.elements.length : 0,
+  };
+}
 export interface CuaExactWindowObservationProbe {
   target: {
     pid: number;
