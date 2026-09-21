@@ -37,7 +37,7 @@ Verify:
   rustc --version
 
 If the build later reports that link.exe/MSVC is missing, install Visual Studio 2022 Build Tools with the Desktop C++ workload:
-  winget install --id Microsoft.VisualStudio.2022.BuildTools --source winget --force --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+  winget install --id Microsoft.VisualStudio.BuildTools --source winget --force --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 
 Then rerun:
   npm run benchmark:cua-fast-path
@@ -142,7 +142,7 @@ Write-Output $BinaryPath
 MSVC linker (link.exe) is required for the Rust x86_64-pc-windows-msvc target.
 
 Install Visual Studio 2022 Build Tools with Desktop C++ support:
-  winget install --id Microsoft.VisualStudio.2022.BuildTools --source winget --force --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+  winget install --id Microsoft.VisualStudio.BuildTools --source winget --force --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 
 After installation, rerun this command from a new PowerShell:
   npm run benchmark:cua-fast-path
