@@ -195,6 +195,10 @@ function positiveInt(value: unknown): number | undefined {
   return Number.isInteger(value) && (value as number) > 0 ? (value as number) : undefined;
 }
 
+function nonNegativeInt(value: unknown): number | undefined {
+  return Number.isInteger(value) && (value as number) >= 0 ? (value as number) : undefined;
+}
+
 function rawBounds(value: unknown): ResolvedWindow["bounds"] | undefined {
   if (!value || typeof value !== "object") return undefined;
   const row = value as Record<string, unknown>;
@@ -279,7 +283,7 @@ function decodeElementRef(target: { label?: string }): CuaElementRef {
     ) {
       throw new Error("invalid Cua semantic reference");
     }
-    if (!parsed.elementToken && !positiveInt(parsed.elementIndex)) {
+    if (!parsed.elementToken && !nonNegativeInt(parsed.elementIndex)) {
       throw new Error("Cua semantic reference has no element handle");
     }
     return parsed;
@@ -329,7 +333,7 @@ function normalizeObservation(
       (typeof raw.name === "string" && raw.name.trim()) ||
       undefined;
     const elementToken = typeof raw.element_token === "string" && raw.element_token ? raw.element_token : undefined;
-    const elementIndex = positiveInt(raw.element_index);
+    const elementIndex = nonNegativeInt(raw.element_index);
     if (!elementToken && !elementIndex) continue;
 
     const ref: CuaElementRef = {
