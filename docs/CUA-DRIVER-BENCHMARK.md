@@ -282,3 +282,47 @@ do not contaminate the normal Cua timing diagnostics. Production should only be
 changed to a split/parallel observation path if this local probe shows a clear
 wall-clock win while retaining the same semantic element coverage.
 
+### Observation probe result: Cua internal validation is the remaining floor
+
+Same-machine 5-sample result:
+
+```text
+combined        175.82 ms median
+tree-only       156.98 ms
+screenshot-only 130.94 ms
+parallel         267.22 ms (p95 299.76 ms)
+elements              7
+```
+
+The split-parallel path is rejected: it is ~52% slower than the combined call.
+Cua's Windows `get_window_state` validates the supplied `(pid, window_id)`
+on every call by enumerating the pid's windows, then resolves process metadata,
+before doing the requested UIA walk and/or screenshot. Splitting the request
+duplicates that common work and also introduces UIA/capture contention.
+
+Combined with the earlier measured `list_windows` cost (~109 ms), the fixture
+roughly decomposes as:
+
+```text
+Cua window/process validation  ~109 ms
+UIA tree incremental cost       ~48 ms
+screenshot incremental cost     ~19 ms
+combined                        ~176 ms
+```
+
+This means the large adapter-side costs have been removed. On this fixture,
+`max_elements` / `max_depth` are not the dominant issue (only 7 elements),
+and screenshot downscaling can only attack the small screenshot increment.
+
+Do not:
+- split tree and screenshot into concurrent Cua calls;
+- reuse a pre-action element token across actions merely to avoid observation.
+  Cua's Windows guidance requires every action to be bracketed by a fresh
+  window snapshot before/after so stale targets and silent no-ops are visible.
+
+The next material reduction requires a Cua Driver change (for example, a safe
+session/window validation cache or equivalent fast path inside
+`get_window_state`) rather than another chatgpt2codex adapter optimization.
+The existing `CUA_DRIVER_BIN` override can be used to benchmark such a Driver
+build without changing the adapter contract.
+
