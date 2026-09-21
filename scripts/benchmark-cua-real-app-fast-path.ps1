@@ -172,5 +172,47 @@ foreach ($pass in $Passes) {
 }
 $DeltaRows | Format-Table -AutoSize
 
+if ($Passes.Count -gt 1) {
+  Write-Host ""
+  Write-Host "=== Order-balanced real-app means ==="
+  $BalancedRows = @()
+  foreach ($app in @($Rows.App | Sort-Object -Unique)) {
+    foreach ($driverLabel in @("official", "patched")) {
+      $group = @($Rows | Where-Object {
+        $_.App -eq $app -and
+        $_.Driver -eq $driverLabel -and
+        $_.Status -eq "ok" -and
+        $null -ne $_.MedianMs
+      })
+      if ($group.Count -gt 0) {
+        $BalancedRows += [PSCustomObject]@{
+          App = $app
+          Driver = $driverLabel
+          MedianMs = [Math]::Round(($group.MedianMs | Measure-Object -Average).Average, 2)
+          P95Ms = [Math]::Round(($group.P95Ms | Measure-Object -Average).Average, 2)
+          MinElements = ($group.MinElements | Measure-Object -Minimum).Minimum
+          ScreenshotsOk = -not ($group.ScreenshotsOk -contains $false)
+        }
+      }
+    }
+  }
+
+  $BalancedRows | Format-Table -AutoSize
+
+  Write-Host ""
+  Write-Host "=== Order-balanced real-app reductions ==="
+  foreach ($app in @($BalancedRows.App | Sort-Object -Unique)) {
+    $official = @($BalancedRows | Where-Object { $_.App -eq $app -and $_.Driver -eq "official" }) | Select-Object -First 1
+    $patched = @($BalancedRows | Where-Object { $_.App -eq $app -and $_.Driver -eq "patched" }) | Select-Object -First 1
+    if ($official -and $patched) {
+      $delta = [Math]::Round($patched.MedianMs - $official.MedianMs, 2)
+      $reduction = if ($official.MedianMs -gt 0) {
+        [Math]::Round((1 - ($patched.MedianMs / $official.MedianMs)) * 100, 1)
+      } else { 0 }
+      Write-Host "$app median: $delta ms ($reduction% reduction)"
+    }
+  }
+}
+
 Write-Host ""
 Write-Host "Reports: $OutputRoot"
