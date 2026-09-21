@@ -35,22 +35,16 @@ jobs:
             $errors | ForEach-Object { Write-Error $_.Message }
             exit 1
           }
-      - name: Exercise persistent installer with isolated HOME
+      - name: Exercise persistent installer with isolated runtime root
         shell: powershell
         run: |
           $fake = Join-Path $env:RUNNER_TEMP "cua-driver-fast-path.exe"
           [System.IO.File]::WriteAllBytes($fake, [byte[]](1,2,3,4,5,6,7,8))
-          $oldHome = $env:HOME
-          $env:HOME = Join-Path $env:RUNNER_TEMP "home"
-          New-Item -ItemType Directory -Force -Path $env:HOME | Out-Null
-          try {
-            $installed = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-cua-driver-fast-path.ps1 -SourcePath $fake | Select-Object -Last 1
-            $expected = Join-Path $env:HOME ".local\share\chatgpt2codex\cua-driver\fast-path\cua-driver.exe"
-            if ($installed -ne $expected) { throw "unexpected install path: $installed" }
-            if (-not (Test-Path -LiteralPath $expected -PathType Leaf)) { throw "installed file missing" }
-            $a = (Get-FileHash -Algorithm SHA256 -LiteralPath $fake).Hash
-            $b = (Get-FileHash -Algorithm SHA256 -LiteralPath $expected).Hash
-            if ($a -ne $b) { throw "installed file hash mismatch" }
-          } finally {
-            $env:HOME = $oldHome
-          }
+          $runtimeRoot = Join-Path $env:RUNNER_TEMP "runtime-root"
+          $installed = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-cua-driver-fast-path.ps1 -SourcePath $fake -RuntimeRoot $runtimeRoot | Select-Object -Last 1
+          $expected = Join-Path $runtimeRoot "cua-driver.exe"
+          if ($installed -ne $expected) { throw "unexpected install path: $installed" }
+          if (-not (Test-Path -LiteralPath $expected -PathType Leaf)) { throw "installed file missing" }
+          $a = (Get-FileHash -Algorithm SHA256 -LiteralPath $fake).Hash
+          $b = (Get-FileHash -Algorithm SHA256 -LiteralPath $expected).Hash
+          if ($a -ne $b) { throw "installed file hash mismatch" }
