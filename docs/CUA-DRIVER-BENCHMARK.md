@@ -27,8 +27,18 @@ Cua element tokens and snapshots are connection-scoped. If the binary is not on
 $env:CUA_DRIVER_BIN = "C:\path\to\cua-driver.exe"
 ```
 
-The child is launched with Cua telemetry disabled. chatgpt2codex does not bundle,
-download, or silently install Cua Driver.
+The child is launched with Cua telemetry disabled. The synthetic Cua agent
+cursor is also disabled by default because its awaited glide animation was
+measured on the action critical path. To enable the visual cursor for demos or
+screen recordings, set:
+
+```powershell
+$env:CHATGPT2CODEX_CUA_CURSOR_OVERLAY = "1"
+```
+
+This changes only the visualization; semantic targeting and background delivery
+remain unchanged. chatgpt2codex does not bundle, download, or silently install
+Cua Driver.
 
 ## Action policy
 
@@ -54,11 +64,14 @@ token is bound to.
 
 ## Run the deterministic A/B benchmark
 
-Run this from an **interactive Windows desktop**, not a headless CI runner:
+Run this from an **interactive Windows desktop**, not a headless CI runner.
+The normal benchmark now uses the production Cua default (cursor overlay off):
 
 ```powershell
 npm run benchmark:computer-use -- --iterations 20
 ```
+
+Use `--cua-overlay both` when explicitly comparing the visualization cost.
 
 The runner compiles and opens a tiny uniquely-named WinForms fixture executable
 so the legacy app-name resolver cannot collide with the PowerShell console that
@@ -91,7 +104,11 @@ summary. The report includes:
 - Cua tool-call count;
 - background attempts;
 - explicit foreground escalations;
-- failures.
+- failures;
+- per-tool Cua latency for `list_windows` and `get_window_state`;
+- target-window resolution average;
+- observation normalization average;
+- semantic-snapshot cache-hit count.
 
 The first iteration of each backend is a warm-up and is excluded from summary
 statistics.
@@ -170,4 +187,24 @@ Cua still reported all 12 warm-up/measured semantic actions as
 `unverifiable` (0 confirmed / 12 unverifiable / 0 suspected-noop), while the
 fixture independently verified all effects. Driver confidence handling remains
 a separate follow-up from the latency issue.
+
+### Observation timing decomposition
+
+The benchmark's Observe phase intentionally captures the screenshot and
+accessibility tree together. On Cua this means:
+
+```text
+resolveTargetWindow
+  -> list_windows
+get_window_state(include_screenshot=true, include_accessibility_tree=true)
+  -> normalize/cache observation
+snapshotSemanticElements
+  -> cache hit
+```
+
+The report now prints aggregate Cua timing for `list_windows`,
+`get_window_state`, target resolution, normalization, and snapshot cache hits.
+This distinguishes Driver round-trip/UIA/capture cost from local normalization
+and verifies whether the second semantic call is actually reusing the combined
+observation.
 
