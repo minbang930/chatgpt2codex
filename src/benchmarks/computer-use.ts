@@ -130,6 +130,28 @@ async function runProcess(command: string, args: string[], timeoutMs = 30_000): 
   });
 }
 
+function scheduleTempCleanup(tempRoot: string): void {
+  // The fixture EXE can remain file-locked briefly after TerminateProcess on
+  // Windows. Awaiting fs.rm() here can stall the benchmark long after its
+  // report has been written. Delete after this Node process releases all
+  // handles instead; the path is passed as an argument, not interpolated.
+  const cleanup = spawn(
+    powershellPath(),
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      "Start-Sleep -Milliseconds 750; Remove-Item -LiteralPath $args[0] -Recurse -Force -ErrorAction SilentlyContinue",
+      tempRoot,
+    ],
+    { windowsHide: true, detached: true, stdio: "ignore" },
+  );
+  cleanup.unref();
+}
+
 async function waitForFile(file: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -583,7 +605,7 @@ async function main(args: Arguments): Promise<void> {
       legacyWin.stopWindowsInputHelper(),
       stopWindowsUiaHelper(),
     ]);
-    await fs.rm(tempRoot, { recursive: true, force: true });
+    scheduleTempCleanup(tempRoot);
   }
 }
 
