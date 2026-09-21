@@ -49,11 +49,9 @@ export async function captureControlAppScreenshot(
     // Preserve the existing activity-overlay suppression around both backends.
     // Cua Driver gets an explicit output path and returns its UIA snapshot from
     // the same get_window_state call; snapshotSemanticElements can reuse it.
-    const captured = await withComputerUseIndicatorSuppressed(() =>
-      isCuaWindowsBackend()
-        ? cuaDriver.captureAppWindow(input.appName, file)
-        : winNative.captureAppWindow(input.appName, file),
-    );
+    const captured = isCuaWindowsBackend()
+      ? await withComputerUseIndicatorSuppressed(() => cuaDriver.captureAppWindow(input.appName, file))
+      : await withComputerUseIndicatorSuppressed(() => winNative.captureAppWindow(input.appName, file));
     const stat = await fs.stat(file).catch(() => null);
     if (!stat?.isFile() || stat.size <= 0) {
       await fs.unlink(file).catch(() => undefined);
