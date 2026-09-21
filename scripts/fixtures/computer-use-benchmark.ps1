@@ -24,11 +24,23 @@ $compilerArgs = @(
   '/target:winexe',
   '/optimize+',
   ('/out:' + $OutputPath),
-  '/reference:System.dll',
-  '/reference:System.Windows.Forms.dll',
-  '/reference:System.Drawing.dll',
-  $SourcePath
+  '/reference:System.dll'
 )
+
+if ([IO.Path]::GetFileName($SourcePath) -ieq 'computer-use-benchmark-wpf.cs') {
+  $compilerArgs += @(
+    '/reference:WindowsBase.dll',
+    '/reference:PresentationCore.dll',
+    '/reference:PresentationFramework.dll'
+  )
+} else {
+  $compilerArgs += @(
+    '/reference:System.Windows.Forms.dll',
+    '/reference:System.Drawing.dll'
+  )
+}
+
+$compilerArgs += $SourcePath
 & $csc @compilerArgs
 
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $OutputPath)) {
