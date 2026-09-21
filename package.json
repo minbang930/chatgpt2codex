@@ -36,7 +36,8 @@
     "benchmark:cua-real-app": "tsx src/benchmarks/cua-real-app-compat.ts",
     "benchmark:cua-real-app-fast-path": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/benchmark-cua-real-app-fast-path.ps1",
     "benchmark:cua-window-identity": "tsx src/benchmarks/cua-window-identity.ts",
-    "benchmark:cua-window-identity-fast-path": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/benchmark-cua-window-identity-fast-path.ps1"
+    "benchmark:cua-window-identity-fast-path": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/benchmark-cua-window-identity-fast-path.ps1",
+    "cua:install-fast-path": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-cua-driver-fast-path.ps1"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
