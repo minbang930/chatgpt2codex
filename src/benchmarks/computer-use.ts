@@ -178,22 +178,34 @@ async function buildFixture(tempRoot: string): Promise<string> {
 }
 
 async function launchFixture(exePath: string, statePath: string): Promise<ChildProcess> {
-  const child = spawn(exePath, [statePath, TARGET_TITLE], { windowsHide: true, stdio: "ignore" });
+  const child = spawn(exePath, [statePath, TARGET_TITLE], { windowsHide: false, stdio: "ignore" });
   await waitForFile(statePath, 15_000);
   return child;
 }
 
 async function waitForTargetWindow(fixturePid: number): Promise<{ appName: string; processId: number }> {
   const deadline = Date.now() + 30_000;
+  let lastPidWindows: Array<{ appName: string; title: string; visible: boolean; minimized: boolean }> = [];
   while (Date.now() < deadline) {
     const windows = await desktop.listVisibleWindows();
+    lastPidWindows = windows
+      .filter((window) => window.processId === fixturePid)
+      .map((window) => ({
+        appName: window.appName,
+        title: window.title,
+        visible: window.visible,
+        minimized: window.minimized,
+      }));
     const match = windows.find(
       (window) => window.processId === fixturePid && window.title.includes(TARGET_TITLE),
     );
     if (match) return { appName: match.appName, processId: match.processId };
     await wait(150);
   }
-  throw new Error(`Benchmark fixture window did not appear for pid ${fixturePid}`);
+  const diagnostic = lastPidWindows.length
+    ? ` Last windows for pid: ${JSON.stringify(lastPidWindows)}`
+    : " No visible windows for that pid were reported.";
+  throw new Error(`Benchmark fixture window did not appear for pid ${fixturePid}.${diagnostic}`);
 }
 
 async function launchDecoy(): Promise<{ child: ChildProcess; appName?: string }> {
