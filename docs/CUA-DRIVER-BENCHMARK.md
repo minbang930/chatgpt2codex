@@ -144,3 +144,30 @@ it does not change semantic targeting, background delivery, or the external
 fixture-state verification. A large drop in Type/Click time with the overlay
 off therefore isolates cursor-glide waiting from UIA actuation itself.
 
+### Confirmed local result: overlay is the latency bottleneck
+
+Same-machine Windows run (5 measured iterations):
+
+| Backend | Median total | Type | Click | Type semantic | Click semantic | Type FG preserved | Click FG preserved |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| legacy | 1147.28 ms | 246.17 ms | 196.50 ms | 0% | 0% | 0% | 0% |
+| cua-overlay-on | 3989.38 ms | 1528.04 ms | 1528.91 ms | 100% | 100% | 100% | 100% |
+| cua-overlay-off | 1153.50 ms | 111.94 ms | 112.00 ms | 100% | 100% | 100% | 100% |
+
+Turning off only Cua's session-owned synthetic cursor reduced median total latency by
+about 71% (3989.38 ms -> 1153.50 ms) while preserving 100% semantic routing,
+100% functional success, and 100% foreground preservation. Type and click each
+fell by about 13.6x. Cua with the overlay disabled is within about 0.5% of
+legacy total latency on this fixture, despite Cua observation remaining slower
+(~315 ms vs ~102 ms), because Cua semantic actuation itself is faster than
+legacy's coordinate fallback on this case.
+
+This confirms that the ~1.5 s semantic-action cost observed with Cua was not
+UIA SetValue/Invoke or foreground-preservation overhead. It was the awaited
+synthetic cursor glide on the action critical path.
+
+Cua still reported all 12 warm-up/measured semantic actions as
+`unverifiable` (0 confirmed / 12 unverifiable / 0 suspected-noop), while the
+fixture independently verified all effects. Driver confidence handling remains
+a separate follow-up from the latency issue.
+
