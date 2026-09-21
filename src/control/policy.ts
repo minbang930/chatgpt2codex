@@ -3,8 +3,8 @@ import { DomainError, ErrorCode } from "../types.js";
 /**
  * Option B (human-confirmed desktop control) policy primitives.
  *
- * Two independent gates must both be satisfied before any of the 4 control
- * tools can be reached at all:
+ * Two independent gates must both be satisfied before any desktop-control
+ * tool can be reached at all:
  *  1. Feature flag `CHATGPT2CODEX_CONTROL` (isControlEnabled) — enabled by
  *     default; set it to "0"/"false"/"off" (case-insensitive) to opt out.
  *  2. A `control` lease preset explicitly granted via project_select
