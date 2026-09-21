@@ -71,6 +71,10 @@ internal static class ComputerUseBenchmarkFixture
             submitted = current;
             status.Text = "Submitted: " + current;
             WriteState();
+            // Keep each benchmark iteration independent. Coordinate typing
+            // requires an empty field on the next run, while submitted retains
+            // the previous token for independent verification.
+            text.Clear();
         };
 
         form.Controls.AddRange(new Control[] { label, text, button, status });
