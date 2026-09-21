@@ -534,6 +534,8 @@ function cuaTimingSummary(diagnostics: CuaDriverDiagnostics): string {
   return [
     tool("list_windows"),
     tool("get_window_state"),
+    tool("set_value"),
+    tool("click"),
     `target-resolve=${resolveAvg}ms avg (${diagnostics.targetResolutions})`,
     `target-cache=${diagnostics.targetCacheHits} hits/${diagnostics.targetCacheMisses} misses`,
     `normalize=${normalizeAvg}ms avg (${diagnostics.observationNormalizations})`,
