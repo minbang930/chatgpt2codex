@@ -1,0 +1,23 @@
+name: Computer Use app launch validation
+
+on:
+  push:
+    branches: [feat/cua-driver-ab-benchmark]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Run control surface tests
+        run: npx vitest run src/server/control-tools.test.ts src/server/control-actions.test.ts src/server/control-chatgpt-confirm.test.ts
