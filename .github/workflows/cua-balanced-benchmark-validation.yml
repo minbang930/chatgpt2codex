@@ -24,6 +24,7 @@ jobs:
         run: |
           $files = @(
             "scripts/benchmark-cua-driver-fast-path.ps1",
+            "scripts/benchmark-cua-real-app-fast-path.ps1",
             "scripts/build-cua-driver-fast-path.ps1",
             "scripts/fixtures/computer-use-benchmark.ps1"
           )
