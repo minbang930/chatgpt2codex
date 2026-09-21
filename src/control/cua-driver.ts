@@ -3,6 +3,7 @@ import { performance } from "node:perf_hooks";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { DomainError, ErrorCode } from "../types.js";
+import { cuaToolResultError } from "./cua-driver-error.js";
 import { buildSafeChildEnv } from "../exec/command-runner.js";
 import type { ResolvedTargetPreview } from "./queue.js";
 import type { VisibleAppWindow } from "./win-native.js";
@@ -198,25 +199,8 @@ async function connect(): Promise<CuaConnection> {
   }
 }
 
-function toolResultContentText(result: unknown): string | undefined {
-  if (!result || typeof result !== "object") return undefined;
-  const content = (result as { content?: unknown }).content;
-  if (!Array.isArray(content)) return undefined;
-  const text = content
-    .map((item) => {
-      if (!item || typeof item !== "object") return undefined;
-      const value = (item as { text?: unknown }).text;
-      return typeof value === "string" && value.trim() ? value.trim() : undefined;
-    })
-    .filter((value): value is string => Boolean(value))
-    .join(" | ");
-  return text || undefined;
-}
-
 function resultError(name: string, result: unknown, structured: Record<string, unknown> | undefined): Error {
-  const message = toolResultContentText(result);
-  const payload = JSON.stringify(structured ?? result);
-  return new Error(`${name} failed: ${message ? `${message} ` : ""}${payload}`);
+  return cuaToolResultError(name, result, structured);
 }
 
 function recordToolTiming(name: string, elapsedMs: number): void {
