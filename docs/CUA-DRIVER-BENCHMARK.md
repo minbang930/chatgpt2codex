@@ -9,52 +9,52 @@ kill switch, masking, and the audit ledger are unchanged.
 
 The existing implementation remains the default:
 
-\`\`\`powershell
+```powershell
 $env:CHATGPT2CODEX_WINDOWS_BACKEND = "legacy"
-\`\`\`
+```
 
 To route Windows observation and input through a locally installed Cua Driver:
 
-\`\`\`powershell
+```powershell
 $env:CHATGPT2CODEX_WINDOWS_BACKEND = "cua"
-\`\`\`
+```
 
-The adapter starts one persistent \`cua-driver mcp\` stdio connection because
+The adapter starts one persistent `cua-driver mcp` stdio connection because
 Cua element tokens and snapshots are connection-scoped. If the binary is not on
-\`PATH\`, set:
+`PATH`, set:
 
-\`\`\`powershell
+```powershell
 $env:CUA_DRIVER_BIN = "C:\path\to\cua-driver.exe"
-\`\`\`
+```
 
 The child is launched with Cua telemetry disabled. chatgpt2codex does not bundle,
 download, or silently install Cua Driver.
 
 ## Action policy
 
-The Cua backend keeps the current public \`computer_*\` contracts. A Cua
-\`get_window_state\` response is mapped into the existing Windows semantic
-observation shape, and its opaque \`element_token\` is carried inside the
-existing \`target.ax.label\` field.
+The Cua backend keeps the current public `computer_*` contracts. A Cua
+`get_window_state` response is mapped into the existing Windows semantic
+observation shape, and its opaque `element_token` is carried inside the
+existing `target.ax.label` field.
 
 Actions use this policy:
 
 1. semantic element action when an element token is available;
-2. Cua \`delivery_mode:"background"\` first;
-3. retry the same action with \`delivery_mode:"foreground"\` only when Cua
-   explicitly reports \`background_unavailable\`;
+2. Cua `delivery_mode:"background"` first;
+3. retry the same action with `delivery_mode:"foreground"` only when Cua
+   explicitly reports `background_unavailable`;
 4. otherwise fail without silently switching execution systems.
 
-The old \`win-native\` / \`win-uia\` implementation stays intact for instant
+The old `win-native` / `win-uia` implementation stays intact for instant
 rollback.
 
 ## Run the deterministic A/B benchmark
 
 Run this from an **interactive Windows desktop**, not a headless CI runner:
 
-\`\`\`powershell
+```powershell
 npm run benchmark:computer-use -- --iterations 20
-\`\`\`
+```
 
 The runner opens a small WinForms fixture and uses exactly the same task for
 both backends:
@@ -69,7 +69,7 @@ It also opens Notepad as a foreground decoy. Before both the type and click
 actions it restores the decoy to the foreground, then records whether the
 backend preserved foreground focus.
 
-Outputs are written under \`.chatgpt2codex/benchmarks/\` as JSON plus a Markdown
+Outputs are written under `.chatgpt2codex/benchmarks/` as JSON plus a Markdown
 summary. The report includes:
 
 - task success rate;
@@ -86,20 +86,20 @@ statistics.
 
 ### Run only one backend
 
-\`\`\`powershell
+```powershell
 npm run benchmark:computer-use -- --backends legacy --iterations 20
 npm run benchmark:computer-use -- --backends cua --iterations 20
-\`\`\`
+```
 
 ### Custom output path
 
-\`\`\`powershell
+```powershell
 npm run benchmark:computer-use -- --output .\results\cu-ab.json
-\`\`\`
+```
 
 ## Scope of this branch
 
 This phase evaluates **Cua Driver itself**. It deliberately does not bundle the
-draft \`cua-perception\` extension from trycua/cua PR #3943 and does not enable
+draft `cua-perception` extension from trycua/cua PR #3943 and does not enable
 Jev. Those are separate variables and should be benchmarked only after the
 legacy-vs-Cua execution/observation baseline is established.

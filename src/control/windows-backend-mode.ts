@@ -7,7 +7,7 @@ export function windowsBackendMode(env: NodeJS.ProcessEnv = process.env): Window
   if (value === "legacy" || value === "cua") return value;
   throw new DomainError(
     ErrorCode.NOT_IMPLEMENTED,
-    \`Unsupported CHATGPT2CODEX_WINDOWS_BACKEND=\${value}; expected legacy or cua\`,
+    `Unsupported CHATGPT2CODEX_WINDOWS_BACKEND=${value}; expected legacy or cua`,
   );
 }
 

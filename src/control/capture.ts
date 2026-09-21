@@ -44,7 +44,7 @@ export async function captureControlAppScreenshot(
       await waitForComputerUseDelay(Math.min(input.waitMs, 30_000), cancelGeneration);
     }
     const dir = await screenshotDir(projectRoot);
-    const file = path.join(dir, \`\${Date.now()}-\${slug(input.label ?? input.appName)}.png\`);
+    const file = path.join(dir, `${Date.now()}-${slug(input.label ?? input.appName)}.png`);
 
     // Preserve the existing activity-overlay suppression around both backends.
     // Cua Driver gets an explicit output path and returns its UIA snapshot from

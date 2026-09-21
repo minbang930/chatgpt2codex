@@ -77,7 +77,7 @@ export interface CuaAppScreenshot {
 
 const DEFAULT_DPI = 96;
 const OBSERVATION_CACHE_MS = 10_000;
-const SESSION = \`chatgpt2codex-\${process.pid}\`;
+const SESSION = `chatgpt2codex-${process.pid}`;
 const CUAREF_PREFIX = "cuaref:";
 
 let connectionPromise: Promise<CuaConnection> | undefined;
@@ -123,7 +123,7 @@ async function connect(): Promise<CuaConnection> {
         await transport.close().catch(() => undefined);
         throw new DomainError(
           ErrorCode.NOT_IMPLEMENTED,
-          \`Cua Driver backend is unavailable. Install cua-driver or set CUA_DRIVER_BIN. \${error instanceof Error ? error.message : String(error)}\`,
+          `Cua Driver backend is unavailable. Install cua-driver or set CUA_DRIVER_BIN. ${error instanceof Error ? error.message : String(error)}`,
         );
       }
       return { client, transport };
@@ -140,7 +140,7 @@ async function connect(): Promise<CuaConnection> {
 
 function resultError(name: string, result: unknown, structured: Record<string, unknown> | undefined): Error {
   const payload = JSON.stringify(structured ?? result);
-  return new Error(\`\${name} failed: \${payload}\`);
+  return new Error(`${name} failed: ${payload}`);
 }
 
 async function callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -153,7 +153,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Re
     });
     const structured = result.structuredContent as Record<string, unknown> | undefined;
     if (result.isError) throw resultError(name, result, structured);
-    if (!structured) throw new Error(\`\${name} returned no structuredContent\`);
+    if (!structured) throw new Error(`${name} returned no structuredContent`);
     if (structured.status === "refused" || structured.refusal) {
       throw resultError(name, result, structured);
     }
@@ -255,7 +255,7 @@ async function resolveTargetWindow(appName: string): Promise<ResolvedWindow> {
   const key = appKey(appName);
   const matches = (await rawWindows()).filter((window) => appKey(window.appName) === key);
   const target = sortTargetWindows(matches)[0];
-  if (!target) throw new Error(\`Cua Driver could not resolve a window for app: \${appName}\`);
+  if (!target) throw new Error(`Cua Driver could not resolve a window for app: ${appName}`);
   return target;
 }
 
@@ -284,7 +284,7 @@ function decodeElementRef(target: { label?: string }): CuaElementRef {
     }
     return parsed;
   } catch (error) {
-    throw new Error(\`Invalid Cua semantic reference: \${error instanceof Error ? error.message : String(error)}\`);
+    throw new Error(`Invalid Cua semantic reference: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -349,7 +349,7 @@ function normalizeObservation(
     };
     const actions = elementActions(raw);
     elements.push({
-      elementId: \`cuael_\${index + 1}\`,
+      elementId: `cuael_${index + 1}`,
       role,
       ...(title ? { name: title } : {}),
       ...(typeof raw.automation_id === "string" && raw.automation_id ? { automationId: raw.automation_id } : {}),
@@ -368,7 +368,7 @@ function normalizeObservation(
   const total = finiteNumber(data.total_element_count);
   const returned = finiteNumber(data.returned_element_count);
   return {
-    observationId: \`cuaobs_\${snapshotId}\`,
+    observationId: `cuaobs_${snapshotId}`,
     appName,
     windowTitle: typeof data.window_title === "string" ? data.window_title : target.title,
     createdAt: now,
@@ -410,7 +410,7 @@ export async function listVisibleWindows(): Promise<VisibleAppWindow[]> {
     .sort((left, right) => (right.zIndex ?? 0) - (left.zIndex ?? 0))[0];
 
   return windows.slice(0, 200).map((window, index) => ({
-    windowId: \`cua-window-\${index + 1}\`,
+    windowId: `cua-window-${index + 1}`,
     processId: window.pid,
     processName: window.appName,
     appName: window.appName,
@@ -564,7 +564,7 @@ function cuaKeyNameFromLegacyKeyCode(keyCode: number): string | undefined {
 
 export async function pressKey(appName: string, keyCode: number): Promise<void> {
   const key = cuaKeyNameFromLegacyKeyCode(keyCode);
-  if (!key) throw new DomainError(ErrorCode.NOT_IMPLEMENTED, \`Legacy keyCode \${keyCode} is not mapped for Cua Driver yet\`);
+  if (!key) throw new DomainError(ErrorCode.NOT_IMPLEMENTED, `Legacy keyCode ${keyCode} is not mapped for Cua Driver yet`);
   const target = await resolveTargetWindow(appName);
   await callActionBackgroundFirst("press_key", {
     pid: target.pid,

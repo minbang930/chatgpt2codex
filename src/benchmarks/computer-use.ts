@@ -62,7 +62,7 @@ function parseArgs(argv: string[]): Arguments {
     output: path.resolve(
       ".chatgpt2codex",
       "benchmarks",
-      \`computer-use-\${new Date().toISOString().replace(/[:.]/g, "-")}.json\`,
+      `computer-use-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
     ),
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -73,7 +73,7 @@ function parseArgs(argv: string[]): Arguments {
       if (parsed.some((item) => item !== "legacy" && item !== "cua")) throw new Error("--backends accepts legacy,cua");
       args.backends = parsed as WindowsBackendMode[];
     } else if (value === "--output") args.output = path.resolve(argv[++index] ?? "");
-    else throw new Error(\`Unknown argument: \${value}\`);
+    else throw new Error(`Unknown argument: ${value}`);
   }
   if (!Number.isInteger(args.iterations) || args.iterations < 1 || args.iterations > 100) {
     throw new Error("--iterations must be an integer from 1 to 100");
@@ -98,7 +98,7 @@ async function waitForFile(file: string, timeoutMs: number): Promise<void> {
     if (await fs.stat(file).then((stat) => stat.isFile()).catch(() => false)) return;
     await wait(100);
   }
-  throw new Error(\`Timed out waiting for fixture state: \${file}\`);
+  throw new Error(`Timed out waiting for fixture state: ${file}`);
 }
 
 async function readState(file: string): Promise<{ submitted: string | null }> {
@@ -125,7 +125,7 @@ async function waitForTargetWindow(): Promise<{ appName: string; processId: numb
       const sameApp = windows.filter((window) => window.appName.toLowerCase() === match.appName.toLowerCase());
       if (sameApp.length > 1) {
         throw new Error(
-          \`Benchmark fixture app identity "\${match.appName}" is ambiguous (\${sameApp.length} windows). Close other windows from that executable and retry.\`,
+          `Benchmark fixture app identity "${match.appName}" is ambiguous (${sameApp.length} windows). Close other windows from that executable and retry.`,
         );
       }
       return { appName: match.appName, processId: match.processId };
@@ -144,10 +144,10 @@ async function launchFixture(statePath: string): Promise<ChildProcess> {
   );
   let stderr = "";
   child.stderr?.on("data", (chunk) => {
-    stderr = \`\${stderr}\${String(chunk)}\`.slice(-4000);
+    stderr = `${stderr}${String(chunk)}`.slice(-4000);
   });
   child.once("exit", (code) => {
-    if (code && code !== 0) process.stderr.write(\`benchmark fixture exited \${code}: \${stderr}\n\`);
+    if (code && code !== 0) process.stderr.write(`benchmark fixture exited ${code}: ${stderr}\n`);
   });
   await waitForFile(statePath, 15_000);
   return child;
@@ -219,7 +219,7 @@ async function runOne(
     const observationStarted = performance.now();
     await captureControlAppScreenshot(projectRoot, {
       appName: target.appName,
-      label: \`benchmark-\${backend}-\${iteration}\`,
+      label: `benchmark-${backend}-${iteration}`,
       waitMs: 0,
     });
     const observation = await desktop.snapshotSemanticElements(target.appName, {
@@ -242,7 +242,7 @@ async function runOne(
     if (!textbox) throw new Error("Benchmark textbox was not found in the semantic observation");
     if (!button) throw new Error("Benchmark Submit button was not found in the semantic observation");
 
-    const token = \`\${backend}-\${iteration}-\${Date.now()}\`;
+    const token = `${backend}-${iteration}-${Date.now()}`;
 
     const beforeType = await focusDecoy(decoyAppName);
     const typeStarted = performance.now();
@@ -307,10 +307,10 @@ function markdown(results: BackendResult[]): string {
   for (const result of results) {
     const s = result.summary;
     lines.push(
-      \`| \${result.backend} | \${result.status} | \${s ? \`\${s.successRate}%\` : "-"} | \${s ? \`\${s.medianTotalMs} ms\` : "-"} | \${s ? \`\${s.p95TotalMs} ms\` : "-"} | \${s ? \`\${s.medianObserveMs} ms\` : "-"} | \${s ? \`\${s.medianTypeMs} ms\` : "-"} | \${s ? \`\${s.medianClickMs} ms\` : "-"} | \${s?.typeForegroundPreservedRate ?? "-"}\${s?.typeForegroundPreservedRate !== null && s ? "%" : ""} | \${s?.clickForegroundPreservedRate ?? "-"}\${s?.clickForegroundPreservedRate !== null && s ? "%" : ""} | \${result.diagnostics?.foregroundEscalations ?? "-"} |\`,
+      `| ${result.backend} | ${result.status} | ${s ? `${s.successRate}%` : "-"} | ${s ? `${s.medianTotalMs} ms` : "-"} | ${s ? `${s.p95TotalMs} ms` : "-"} | ${s ? `${s.medianObserveMs} ms` : "-"} | ${s ? `${s.medianTypeMs} ms` : "-"} | ${s ? `${s.medianClickMs} ms` : "-"} | ${s?.typeForegroundPreservedRate ?? "-"}${s?.typeForegroundPreservedRate !== null && s ? "%" : ""} | ${s?.clickForegroundPreservedRate ?? "-"}${s?.clickForegroundPreservedRate !== null && s ? "%" : ""} | ${result.diagnostics?.foregroundEscalations ?? "-"} |`,
     );
   }
-  return \`\${lines.join("\n")}\n\`;
+  return `${lines.join("\n")}\n`;
 }
 
 async function main(args: Arguments): Promise<void> {
@@ -367,11 +367,11 @@ async function main(args: Arguments): Promise<void> {
       results,
     };
     await fs.mkdir(path.dirname(args.output), { recursive: true });
-    await fs.writeFile(args.output, \`\${JSON.stringify(report, null, 2)}\n\`, "utf8");
+    await fs.writeFile(args.output, `${JSON.stringify(report, null, 2)}\n`, "utf8");
     const mdPath = args.output.replace(/\.json$/i, ".md");
     await fs.writeFile(mdPath, markdown(results), "utf8");
     process.stdout.write(markdown(results));
-    process.stdout.write(\`JSON: \${args.output}\nMarkdown: \${mdPath}\n\`);
+    process.stdout.write(`JSON: ${args.output}\nMarkdown: ${mdPath}\n`);
   } finally {
     fixture.kill();
     decoy.child.kill();

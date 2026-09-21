@@ -28,7 +28,7 @@ export function supportsSemanticTargeting(): boolean {
 function unsupported(): never {
   throw new DomainError(
     ErrorCode.NOT_IMPLEMENTED,
-    \`Desktop control synthetic input is not supported on \${process.platform}\`,
+    `Desktop control synthetic input is not supported on ${process.platform}`,
   );
 }
 
@@ -117,7 +117,7 @@ export async function resolveAxElement(appName: string, target: SemanticTarget):
       ? cuaInput.resolveSemanticElement(appName, target)
       : winUia.resolveSemanticElement(appName, target);
   }
-  return { found: false, reason: \`Semantic targeting is not supported on \${process.platform}\` };
+  return { found: false, reason: `Semantic targeting is not supported on ${process.platform}` };
 }
 
 /** Execute the strongest semantic click available in the selected backend.
