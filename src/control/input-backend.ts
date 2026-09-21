@@ -32,6 +32,30 @@ function unsupported(): never {
   );
 }
 
+export interface DesktopLaunchAppResult {
+  pid?: number;
+  appName: string;
+  running: boolean;
+  active: boolean;
+  windowCount: number;
+}
+
+export async function launchApp(appName: string): Promise<DesktopLaunchAppResult> {
+  if (process.platform === "win32") {
+    if (!isCuaWindowsBackend()) {
+      throw new DomainError(
+        ErrorCode.NOT_IMPLEMENTED,
+        "Desktop app launch through Computer Use currently requires the Windows Cua backend",
+      );
+    }
+    return cuaInput.launchApp(appName);
+  }
+  throw new DomainError(
+    ErrorCode.NOT_IMPLEMENTED,
+    `Desktop app launch through Computer Use is not supported on ${process.platform}`,
+  );
+}
+
 export async function resolveFrontmostApp(): Promise<string | undefined> {
   if (process.platform === "darwin") return macInput.resolveFrontmostApp();
   if (process.platform === "win32") {
