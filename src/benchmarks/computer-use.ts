@@ -16,6 +16,7 @@ import {
   stopCuaDriver,
   type CuaDriverDiagnostics,
 } from "../control/cua-driver.js";
+import { resolveCuaDriverCommand } from "../control/cua-driver-command.js";
 import type { WindowsBackendMode } from "../control/windows-backend-mode.js";
 
 type CuaOverlayMode = "on" | "off" | "both";
@@ -720,7 +721,7 @@ async function main(args: Arguments): Promise<void> {
       cuaOverlay: args.cuaOverlay,
       cuaObserveProbe: args.cuaObserveProbe,
       fixture: args.fixture,
-      cuaDriverBin: process.env.CUA_DRIVER_BIN ?? "cua-driver",
+      cuaDriver: args.backends.includes("cua") ? resolveCuaDriverCommand() : null,
       results,
     };
     await fs.mkdir(path.dirname(args.output), { recursive: true });
