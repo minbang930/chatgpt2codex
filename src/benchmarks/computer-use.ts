@@ -19,12 +19,14 @@ import {
 import type { WindowsBackendMode } from "../control/windows-backend-mode.js";
 
 type CuaOverlayMode = "on" | "off" | "both";
+type FixtureKind = "winforms" | "wpf";
 
 interface Arguments {
   iterations: number;
   backends: WindowsBackendMode[];
   cuaOverlay: CuaOverlayMode;
   cuaObserveProbe: boolean;
+  fixture: FixtureKind;
   output: string;
 }
 
@@ -92,6 +94,7 @@ function parseArgs(argv: string[]): Arguments {
     backends: ["legacy", "cua"],
     cuaOverlay: "off",
     cuaObserveProbe: false,
+    fixture: "winforms",
     output: path.resolve(
       ".chatgpt2codex",
       "benchmarks",
@@ -112,7 +115,13 @@ function parseArgs(argv: string[]): Arguments {
       }
       args.cuaOverlay = mode;
     } else if (value === "--cua-observe-probe") args.cuaObserveProbe = true;
-    else if (value === "--output") args.output = path.resolve(argv[++index] ?? "");
+    else if (value === "--fixture") {
+      const fixture = (argv[++index] ?? "").trim();
+      if (fixture !== "winforms" && fixture !== "wpf") {
+        throw new Error("--fixture accepts winforms,wpf");
+      }
+      args.fixture = fixture;
+    } else if (value === "--output") args.output = path.resolve(argv[++index] ?? "");
     else throw new Error(`Unknown argument: ${value}`);
   }
   if (!Number.isInteger(args.iterations) || args.iterations < 1 || args.iterations > 100) {
@@ -204,10 +213,14 @@ async function waitForState(
   return false;
 }
 
-async function buildFixture(tempRoot: string): Promise<string> {
-  const output = path.join(tempRoot, `chatgpt2codex-cu-fixture-${process.pid}.exe`);
+async function buildFixture(tempRoot: string, fixture: FixtureKind): Promise<string> {
+  const output = path.join(tempRoot, `chatgpt2codex-cu-${fixture}-fixture-${process.pid}.exe`);
   const script = path.resolve("scripts", "fixtures", "computer-use-benchmark.ps1");
-  const source = path.resolve("scripts", "fixtures", "computer-use-benchmark.cs");
+  const source = path.resolve(
+    "scripts",
+    "fixtures",
+    fixture === "wpf" ? "computer-use-benchmark-wpf.cs" : "computer-use-benchmark.cs",
+  );
   await runProcess(
     powershellPath(),
     [
@@ -611,7 +624,7 @@ async function main(args: Arguments): Promise<void> {
   const projectRoot = path.join(tempRoot, "project");
   const statePath = path.join(tempRoot, "fixture-state.json");
   await fs.mkdir(projectRoot, { recursive: true });
-  const fixtureExe = await buildFixture(tempRoot);
+  const fixtureExe = await buildFixture(tempRoot, args.fixture);
   const fixture = await launchFixture(fixtureExe, statePath);
   if (!fixture.pid) throw new Error("Benchmark fixture process did not expose a pid");
   const decoy = await launchDecoy();
@@ -706,6 +719,7 @@ async function main(args: Arguments): Promise<void> {
       iterations: args.iterations,
       cuaOverlay: args.cuaOverlay,
       cuaObserveProbe: args.cuaObserveProbe,
+      fixture: args.fixture,
       cuaDriverBin: process.env.CUA_DRIVER_BIN ?? "cua-driver",
       results,
     };
