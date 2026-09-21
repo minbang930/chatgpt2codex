@@ -183,10 +183,16 @@ async function launchFixture(exePath: string, statePath: string): Promise<ChildP
   return child;
 }
 
-async function waitForTargetWindow(fixturePid: number): Promise<{ appName: string; processId: number }> {
+async function waitForTargetWindow(
+  fixturePid: number,
+  fixture?: ChildProcess,
+): Promise<{ appName: string; processId: number }> {
   const deadline = Date.now() + 30_000;
   let lastPidWindows: Array<{ appName: string; title: string; visible: boolean; minimized: boolean }> = [];
   while (Date.now() < deadline) {
+    if (fixture?.exitCode !== null && fixture?.exitCode !== undefined) {
+      throw new Error(`Benchmark fixture exited before its window appeared (pid ${fixturePid}, exit ${fixture.exitCode})`);
+    }
     const windows = await desktop.listVisibleWindows();
     lastPidWindows = windows
       .filter((window) => window.processId === fixturePid)
@@ -309,6 +315,7 @@ async function runOne(
   backend: WindowsBackendMode,
   iteration: number,
   fixturePid: number,
+  fixture: ChildProcess,
   projectRoot: string,
   statePath: string,
   decoyAppName: string | undefined,
@@ -316,7 +323,7 @@ async function runOne(
   process.env.CHATGPT2CODEX_WINDOWS_BACKEND = backend;
   const totalStarted = performance.now();
   try {
-    const target = await waitForTargetWindow(fixturePid);
+    const target = await waitForTargetWindow(fixturePid, fixture);
 
     const first = await observe(backend, iteration, "before-type", projectRoot, target.appName);
     const textbox = findTextbox(first.observation);
@@ -434,7 +441,7 @@ async function main(args: Arguments): Promise<void> {
       if (backend === "cua") resetCuaDriverDiagnostics();
 
       const runs: RunResult[] = [];
-      const warmup = await runOne(backend, 0, fixture.pid, projectRoot, statePath, decoy.appName);
+      const warmup = await runOne(backend, 0, fixture.pid, fixture, projectRoot, statePath, decoy.appName);
       if (warmup.error) {
         results.push({
           backend,
@@ -447,7 +454,7 @@ async function main(args: Arguments): Promise<void> {
       }
 
       for (let iteration = 1; iteration <= args.iterations; iteration += 1) {
-        runs.push(await runOne(backend, iteration, fixture.pid!, projectRoot, statePath, decoy.appName));
+        runs.push(await runOne(backend, iteration, fixture.pid!, fixture, projectRoot, statePath, decoy.appName));
       }
       results.push({
         backend,
