@@ -19,10 +19,11 @@ const CONTROL_ENV_FLAG = "CHATGPT2CODEX_CONTROL";
 const CONTROL_ALLOWLIST_ENV_FLAG = "CHATGPT2CODEX_CONTROL_ALLOWLIST";
 const CONTROL_CHATGPT_ENV_FLAG = "CHATGPT2CODEX_CONTROL_CHATGPT";
 
-/** Names of the 4 desktop-control MCP tools. Shared denylist used by:
+/** Names of the desktop-control MCP tools. Shared denylist used by:
  *  - src/server/tools.ts installChatGptToolListHandler (hide from ChatGPT tools/list)
  *  - src/server/actions.ts callRegisteredTool (block the generic call-tool/action bridge) */
 export const CONTROL_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "computer_launch_app",
   "computer_screenshot",
   "computer_request_action",
   "computer_action_status",
