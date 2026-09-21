@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "./mcp-server.js";
 import type { Lease, ToolContext } from "../types.js";
 import { enqueue } from "../control/queue.js";
+import * as desktopInput from "../control/input-backend.js";
 
 interface RegisteredToolLike {
   handler?: (input: Record<string, unknown>) => Promise<{
@@ -67,7 +68,7 @@ async function toolsListNames(ctx: ToolContext): Promise<string[]> {
   return listed?.tools.map((t) => t.name) ?? [];
 }
 
-const CONTROL_NAMES = ["computer_screenshot", "computer_request_action", "computer_action_status", "computer_kill_switch"];
+const CONTROL_NAMES = ["computer_launch_app", "computer_screenshot", "computer_request_action", "computer_action_status", "computer_kill_switch"];
 
 describe("desktop-control tool gating", () => {
   let stateDir: string;
@@ -87,7 +88,7 @@ describe("desktop-control tool gating", () => {
     await fs.rm(projectRoot, { recursive: true, force: true });
   });
 
-  it("registers all 4 control tools by default (no CHATGPT2CODEX_CONTROL set)", async () => {
+  it("registers all 5 control tools by default (no CHATGPT2CODEX_CONTROL set)", async () => {
     const { ctx } = makeCtx(stateDir, projectRoot);
     const tools = await registeredTools(ctx);
     for (const name of CONTROL_NAMES) {
@@ -95,7 +96,7 @@ describe("desktop-control tool gating", () => {
     }
   });
 
-  it("registers all 4 control tools when CHATGPT2CODEX_CONTROL=1", async () => {
+  it("registers all 5 control tools when CHATGPT2CODEX_CONTROL=1", async () => {
     process.env.CHATGPT2CODEX_CONTROL = "1";
     const { ctx } = makeCtx(stateDir, projectRoot);
     const tools = await registeredTools(ctx);
@@ -125,6 +126,63 @@ describe("desktop-control tool gating", () => {
     }
     // Sanity: the list handler still returns other tools.
     expect(names).toContain("workspace_list_projects");
+  });
+
+  it("launches an allowlisted app with a valid control lease", async () => {
+    process.env.CHATGPT2CODEX_CONTROL = "1";
+    process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST = "notepad.exe";
+    const { ctx, events } = makeCtx(stateDir, projectRoot);
+    await ctx.store.setSession({
+      activeProjectId: "proj",
+      mode: "read",
+      lease: { projectId: "proj", leaseId: "l1", projectRoot, preset: "control", issuedAt: Date.now(), expiresAt: Date.now() + 60_000 },
+    });
+    const launch = vi.spyOn(desktopInput, "launchApp").mockResolvedValue({
+      pid: 4242,
+      appName: "Notepad.exe",
+      running: true,
+      active: false,
+      windowCount: 1,
+    });
+    const tools = await registeredTools(ctx);
+    const result = await tools.computer_launch_app?.handler?.({ appName: "notepad.exe" });
+
+    expect(result?.isError).toBeFalsy();
+    expect(result?.structuredContent).toMatchObject({
+      appName: "Notepad.exe",
+      pid: 4242,
+      running: true,
+      active: false,
+      windowCount: 1,
+    });
+    expect(launch).toHaveBeenCalledWith("notepad.exe");
+    expect(events.some((event) => event.type === "control.app.launched" && event.pid === 4242)).toBe(true);
+    launch.mockRestore();
+  });
+
+  it("blocks computer_launch_app when the app is not allowlisted", async () => {
+    process.env.CHATGPT2CODEX_CONTROL = "1";
+    process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST = "calc.exe";
+    const { ctx } = makeCtx(stateDir, projectRoot);
+    await ctx.store.setSession({
+      activeProjectId: "proj",
+      mode: "read",
+      lease: { projectId: "proj", leaseId: "l1", projectRoot, preset: "control", issuedAt: Date.now(), expiresAt: Date.now() + 60_000 },
+    });
+    const launch = vi.spyOn(desktopInput, "launchApp").mockResolvedValue({
+      pid: 4242,
+      appName: "Notepad.exe",
+      running: true,
+      active: false,
+      windowCount: 1,
+    });
+    const tools = await registeredTools(ctx);
+    const result = await tools.computer_launch_app?.handler?.({ appName: "notepad.exe" });
+
+    expect(result?.isError).toBe(true);
+    expect(result?.structuredContent?.code).toBe("SENSITIVE_TARGET_BLOCKED");
+    expect(launch).not.toHaveBeenCalled();
+    launch.mockRestore();
   });
 
   it("denies computer_request_action without any lease (PROJECT_NOT_SELECTED)", async () => {
