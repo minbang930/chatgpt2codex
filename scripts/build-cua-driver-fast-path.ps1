@@ -20,6 +20,29 @@ $BinaryPath = Join-Path $RustRoot "target\release\cua-driver.exe"
 
 function Require-Command([string]$Name) {
   if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
+    if ($Name -eq "cargo") {
+      $cargoBin = Join-Path $HOME ".cargo\bin"
+      if (Test-Path (Join-Path $cargoBin "cargo.exe") -PathType Leaf) {
+        $env:PATH = "$cargoBin;$env:PATH"
+        return
+      }
+      throw @"
+Rust/Cargo is required to build the patched Cua Driver.
+
+Install Rust with rustup, then open a new PowerShell:
+  winget install -e --id Rustlang.Rustup
+
+Verify:
+  cargo --version
+  rustc --version
+
+If the build later reports that link.exe/MSVC is missing, install Visual Studio Build Tools with the Desktop C++ workload:
+  winget install -e --id Microsoft.VisualStudio.BuildTools --override "--passive --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+
+Then rerun:
+  npm run benchmark:cua-fast-path
+"@
+    }
     throw "Required command is not on PATH: $Name"
   }
 }
