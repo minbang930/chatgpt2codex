@@ -1,0 +1,27 @@
+name: Cua backend validation
+
+on:
+  push:
+    branches:
+      - feat/cua-driver-ab-benchmark
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx vitest run src/control/windows-backend-mode.test.ts src/control/win-native.test.ts src/control/win-uia.test.ts
+      - run: npm run build
