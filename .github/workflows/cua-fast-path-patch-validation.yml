@@ -1,0 +1,44 @@
+name: Cua exact-window fast-path validation
+
+on:
+  push:
+    branches:
+      - feat/cua-driver-ab-benchmark
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone pinned Cua Driver and apply patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $commit = "9bbfa7dd3e27ca7f1861ede70aaca390174493f9"
+          $source = Join-Path $env:RUNNER_TEMP "cua"
+          git clone --filter=blob:none --no-checkout https://github.com/trycua/cua.git $source
+          git -C $source fetch --depth 1 origin $commit
+          git -C $source checkout --detach $commit
+          $patch = Join-Path $env:GITHUB_WORKSPACE "patches\cua-driver\get-window-state-exact-window-fast-path.patch"
+          git -C $source apply --check $patch
+          git -C $source apply $patch
+
+      - name: Rust format check
+        shell: pwsh
+        working-directory: ${{ runner.temp }}\cua\libs\cua-driver\rust
+        run: cargo fmt --all -- --check
+
+      - name: Compile patched Windows platform
+        shell: pwsh
+        working-directory: ${{ runner.temp }}\cua\libs\cua-driver\rust
+        run: cargo check -p platform-windows
+
+      - name: Run exact-window focused tests
+        shell: pwsh
+        working-directory: ${{ runner.temp }}\cua\libs\cua-driver\rust
+        run: cargo test -p platform-windows exact_window_tests --lib
