@@ -79,11 +79,14 @@ describe("desktop-control tool gating", () => {
     projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "chatgpt2codex-control-project-"));
     delete process.env.CHATGPT2CODEX_CONTROL;
     delete process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST;
+    delete process.env.CHATGPT2CODEX_CONTROL_CHATGPT;
   });
 
   afterEach(async () => {
     delete process.env.CHATGPT2CODEX_CONTROL;
     delete process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST;
+    delete process.env.CHATGPT2CODEX_CONTROL_CHATGPT;
+    vi.restoreAllMocks();
     await fs.rm(stateDir, { recursive: true, force: true });
     await fs.rm(projectRoot, { recursive: true, force: true });
   });
