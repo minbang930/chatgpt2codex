@@ -30,10 +30,13 @@ jobs:
         shell: powershell
         run: |
           $path = Join-Path $env:RUNNER_TEMP "localized.json"
-          $json = '{"title":"메모장 - 프로필 1 - Microsoft Edge","ok":true}'
+          $memo = -join @([char]0xBA54, [char]0xBAA8, [char]0xC7A5)
+          $profile = -join @([char]0xD504, [char]0xB85C, [char]0xD544)
+          $title = "$memo - $profile 1 - Microsoft Edge"
+          $json = '{"title":"' + $title + '","ok":true}'
           [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding($false)))
           $text = [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8)
           $parsed = $text | ConvertFrom-Json
-          if ($parsed.title -ne "메모장 - 프로필 1 - Microsoft Edge" -or -not $parsed.ok) {
+          if ($parsed.title -ne $title -or -not $parsed.ok) {
             throw "UTF-8 JSON round-trip failed"
           }
