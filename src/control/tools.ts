@@ -107,6 +107,56 @@ async function requireControlLease(ctx: ToolContext): Promise<{ projectId: strin
   return { projectId: active.projectId, root: active.root };
 }
 
+export interface ComputerLaunchAppInput {
+  appName: string;
+}
+
+export async function handleComputerLaunchApp(
+  ctx: ToolContext,
+  input: ComputerLaunchAppInput,
+): Promise<CallToolResultLike> {
+  return withControlErrorMapping(ctx, "computer_launch_app", input, async () => {
+    const { projectId } = await requireControlLease(ctx);
+    assertComputerUseNotRecentlyCancelled();
+
+    if (await isKilled(ctx.stateDir)) {
+      throw new DomainError(ErrorCode.CONTROL_KILLED, "Control session is killed; grant a new control lease to resume");
+    }
+
+    assertAllowedTarget({
+      appName: input.appName,
+      allowlist: controlAllowlist(),
+    });
+
+    const result = await desktopInput.launchApp(input.appName);
+    await ctx.ledger.append({
+      type: "control.app.launched",
+      projectId,
+      appName: input.appName,
+      pid: result.pid,
+      running: result.running,
+      active: result.active,
+      windowCount: result.windowCount,
+    });
+
+    return {
+      structuredContent: {
+        appName: result.appName,
+        pid: result.pid ?? null,
+        running: result.running,
+        active: result.active,
+        windowCount: result.windowCount,
+      },
+      content: [
+        {
+          type: "text",
+          text: `Launched allowlisted app ${input.appName} through Computer Use (pid=${result.pid ?? "unknown"}, windows=${result.windowCount}).`,
+        },
+      ],
+    } satisfies CallToolResultLike;
+  });
+}
+
 export interface ComputerScreenshotInput {
   appName?: string;
   label?: string;
