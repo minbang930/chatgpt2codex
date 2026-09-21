@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -20,6 +20,20 @@ interface LaunchedApp {
   titleNeedle: string;
   child: ChildProcess;
   cleanup: () => Promise<void>;
+}
+
+interface CompatResult {
+  app: string;
+  status: "ok" | "failed" | "skipped";
+  reason?: string;
+  target?: unknown;
+  samples?: number;
+  medianMs?: number;
+  p95Ms?: number;
+  minElements?: number;
+  screenshotsOk?: boolean;
+  getWindowState?: unknown;
+  error?: string;
 }
 
 function parseArgs(argv: string[]): Arguments {
@@ -75,13 +89,7 @@ function resolveEdgePath(): string | undefined {
         ? path.join(root, "Microsoft", "Edge", "Application", "msedge.exe")
         : path.join(root, "Microsoft", "Edge", "Application", "msedge.exe"),
     );
-  return candidates.find((candidate) => {
-    try {
-      return require("node:fs").existsSync(candidate);
-    } catch {
-      return false;
-    }
-  });
+  return candidates.find((candidate) => existsSync(candidate));
 }
 
 async function launchNotepad(tempRoot: string, unique: string): Promise<LaunchedApp> {
@@ -137,7 +145,7 @@ async function main(args: Arguments): Promise<void> {
     await launchNotepad(tempRoot, unique),
     await launchEdge(tempRoot, unique),
   ];
-  const results: Array<Record<string, unknown>> = [];
+  const results: CompatResult[] = [];
 
   try {
     for (const launched of launches) {
