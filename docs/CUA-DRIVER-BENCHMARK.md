@@ -126,3 +126,21 @@ This phase evaluates **Cua Driver itself**. It deliberately does not bundle the
 draft `cua-perception` extension from trycua/cua PR #3943 and does not enable
 Jev. Those are separate variables and should be benchmarked only after the
 legacy-vs-Cua execution/observation baseline is established.
+
+### Isolating Cua cursor-overlay latency
+
+Cua Driver's Windows semantic `set_value` and element-click implementations
+wait for the synthetic agent cursor to finish `overlay_glide_to(...)` before
+actuating the UIA control. To measure that visual-animation cost independently,
+run both Cua modes in the same process:
+
+```powershell
+npm run benchmark:computer-use -- --iterations 5 --cua-overlay both
+```
+
+The report emits separate `cua-overlay-on` and `cua-overlay-off` rows.
+The OFF mode uses the official session-owned `set_agent_cursor_enabled` tool;
+it does not change semantic targeting, background delivery, or the external
+fixture-state verification. A large drop in Type/Click time with the overlay
+off therefore isolates cursor-glide waiting from UIA actuation itself.
+
