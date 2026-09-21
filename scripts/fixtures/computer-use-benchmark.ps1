@@ -8,13 +8,27 @@ if (Test-Path -LiteralPath $OutputPath) {
   Remove-Item -LiteralPath $OutputPath -Force
 }
 
-$source = [IO.File]::ReadAllText($SourcePath)
-Add-Type -TypeDefinition $source `
-  -Language CSharp `
-  -ReferencedAssemblies @('System.Windows.Forms.dll', 'System.Drawing.dll') `
-  -OutputAssembly $OutputPath `
-  -OutputType WindowsApplication
+$frameworkRoots = @(
+  (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'),
+  (Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe')
+)
+$csc = $frameworkRoots | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $csc) {
+  throw 'Could not find the .NET Framework C# compiler (csc.exe)'
+}
 
-if (-not (Test-Path -LiteralPath $OutputPath)) {
-  throw "benchmark fixture compiler did not create $OutputPath"
+$compilerArgs = @(
+  '/nologo',
+  '/target:winexe',
+  '/optimize+',
+  ('/out:' + $OutputPath),
+  '/reference:System.dll',
+  '/reference:System.Windows.Forms.dll',
+  '/reference:System.Drawing.dll',
+  $SourcePath
+)
+& $csc @compilerArgs
+
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $OutputPath)) {
+  throw "benchmark fixture compilation failed with exit code $LASTEXITCODE"
 }
