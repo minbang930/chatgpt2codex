@@ -689,3 +689,54 @@ usable in normal chatgpt2codex runs while preserving an immediate rollback path
 until the exact-window optimization is available in an official upstream Cua
 release.
 
+#### Persistent fast-path runtime smoke test
+
+After installing the validated binary with `npm run cua:install-fast-path` and
+selecting it through:
+
+```powershell
+$env:CHATGPT2CODEX_WINDOWS_BACKEND = "cua"
+$env:CHATGPT2CODEX_CUA_DRIVER_VARIANT = "fast-path"
+```
+
+the normal production benchmark path (without `CUA_DRIVER_BIN`) completed
+successfully:
+
+| Metric | Result |
+|---|---:|
+| Functional success | 100% |
+| Type applied | 100% |
+| Submit applied | 100% |
+| Semantic Type / Click | 100% / 100% |
+| Type / Click foreground preserved | 100% / 100% |
+| Median total | 423.01 ms |
+| P95 total | 443.22 ms |
+| Observe | 106.79 ms |
+| Reobserve | 111.39 ms |
+| Type | 8.53 ms |
+| Click | 7.93 ms |
+| get_window_state average | 65.25 ms |
+| set_value average | 5.95 ms |
+| click average | 5.74 ms |
+
+Cua adapter diagnostics remained clean for the optimized path:
+`list_windows=n/a`, `target-resolve=0`, target-cache 12/0 hits/misses, and
+12 semantic snapshot-cache hits. The Driver confidence contract is unchanged at
+0 confirmed / 12 unverifiable / 0 suspected-noop while the external fixture
+verified all effects.
+
+This validates the full runtime chain:
+
+```text
+chatgpt2codex
+  -> CHATGPT2CODEX_WINDOWS_BACKEND=cua
+  -> CHATGPT2CODEX_CUA_DRIVER_VARIANT=fast-path
+  -> persisted user-state cua-driver.exe
+  -> normal computer-use benchmark
+```
+
+At this point the benchmark/compatibility phase is complete for the tested
+scope. The remaining product work is exposing the backend/runtime choice in the
+Windows settings UI while keeping the system Driver and legacy backend as
+immediate rollback options.
+
