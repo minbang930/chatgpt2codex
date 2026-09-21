@@ -79,7 +79,7 @@ function parseArgs(argv: string[]): Arguments {
   const args: Arguments = {
     iterations: 10,
     backends: ["legacy", "cua"],
-    cuaOverlay: "on",
+    cuaOverlay: "off",
     output: path.resolve(
       ".chatgpt2codex",
       "benchmarks",
@@ -521,6 +521,28 @@ async function runOne(
   }
 }
 
+function cuaTimingSummary(diagnostics: CuaDriverDiagnostics): string {
+  const tool = (name: string): string => {
+    const timing = diagnostics.toolTimings[name];
+    if (!timing?.calls) return `${name}=n/a`;
+    const avg = Math.round((timing.totalMs / timing.calls) * 100) / 100;
+    return `${name}=${avg}ms avg (${timing.calls} calls, ${timing.minMs}-${timing.maxMs}ms)`;
+  };
+  const resolveAvg = diagnostics.targetResolutions
+    ? Math.round((diagnostics.targetResolveTotalMs / diagnostics.targetResolutions) * 100) / 100
+    : 0;
+  const normalizeAvg = diagnostics.observationNormalizations
+    ? Math.round((diagnostics.observationNormalizeTotalMs / diagnostics.observationNormalizations) * 100) / 100
+    : 0;
+  return [
+    tool("list_windows"),
+    tool("get_window_state"),
+    `target-resolve=${resolveAvg}ms avg (${diagnostics.targetResolutions})`,
+    `normalize=${normalizeAvg}ms avg (${diagnostics.observationNormalizations})`,
+    `snapshot-cache-hits=${diagnostics.observationCacheHits}`,
+  ].join(", ");
+}
+
 function markdown(results: BackendResult[]): string {
   const lines = [
     "# Computer Use A/B benchmark",
@@ -541,6 +563,9 @@ function markdown(results: BackendResult[]): string {
     }
     const failed = result.runs.filter((run) => run.error).slice(0, 3);
     for (const run of failed) lines.push("", `**${result.backend} run ${run.iteration}:** ${run.error}`);
+    if (result.diagnostics) {
+      lines.push("", `**${result.backend} Cua timing:** ${cuaTimingSummary(result.diagnostics)}`);
+    }
   }
   return `${lines.join("\n")}\n`;
 }
