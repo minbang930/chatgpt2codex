@@ -437,8 +437,7 @@ async function runOne(
   backend: WindowsBackendMode,
   label: string,
   iteration: number,
-  fixturePid: number,
-  fixture: ChildProcess,
+  targetAppName: string,
   projectRoot: string,
   statePath: string,
   decoyAppName: string | undefined,
@@ -446,15 +445,13 @@ async function runOne(
   process.env.CHATGPT2CODEX_WINDOWS_BACKEND = backend;
   const totalStarted = performance.now();
   try {
-    const target = await waitForTargetWindow(fixturePid, fixture);
-
-    const first = await observe(label, iteration, "before-type", projectRoot, target.appName);
+    const first = await observe(label, iteration, "before-type", projectRoot, targetAppName);
     const textbox = findTextbox(first.observation);
 
     const token = `${label}-${iteration}-${Date.now()}`;
     const beforeType = await focusDecoy(decoyAppName);
     const typeStarted = performance.now();
-    const typeRoute = await writeBenchmarkToken(target.appName, textbox, token);
+    const typeRoute = await writeBenchmarkToken(targetAppName, textbox, token);
     const typeMs = performance.now() - typeStarted;
     const afterType = await legacyWin.resolveFrontmostApp().catch(() => undefined);
     const typeForegroundPreserved =
@@ -466,12 +463,12 @@ async function runOne(
     // Cua element tokens are snapshot-scoped and the Driver guidance is one
     // action per observation. Reobserve before the second semantic action.
     // Apply the same loop to legacy so latency comparisons stay symmetric.
-    const second = await observe(label, iteration, "before-click", projectRoot, target.appName);
+    const second = await observe(label, iteration, "before-click", projectRoot, targetAppName);
     const button = findButton(second.observation);
 
     const beforeClick = await focusDecoy(decoyAppName);
     const clickStarted = performance.now();
-    const clickRoute = await submitBenchmark(target.appName, button);
+    const clickRoute = await submitBenchmark(targetAppName, button);
     const clickMs = performance.now() - clickStarted;
     const afterClick = await legacyWin.resolveFrontmostApp().catch(() => undefined);
     const clickForegroundPreserved =
@@ -538,6 +535,7 @@ function cuaTimingSummary(diagnostics: CuaDriverDiagnostics): string {
     tool("list_windows"),
     tool("get_window_state"),
     `target-resolve=${resolveAvg}ms avg (${diagnostics.targetResolutions})`,
+    `target-cache=${diagnostics.targetCacheHits} hits/${diagnostics.targetCacheMisses} misses`,
     `normalize=${normalizeAvg}ms avg (${diagnostics.observationNormalizations})`,
     `snapshot-cache-hits=${diagnostics.observationCacheHits}`,
   ].join(", ");
@@ -599,16 +597,21 @@ async function main(args: Arguments): Promise<void> {
         process.env.CHATGPT2CODEX_WINDOWS_BACKEND = backend;
         if (backend === "cua") {
           await setCuaCursorOverlayEnabled(variant.overlay ?? true);
-          resetCuaDriverDiagnostics();
         }
+
+        // Resolve the deterministic fixture once per backend variant. Product
+        // computer-use requests already carry an app identity; repeatedly
+        // rediscovering the same fixture inside every measured iteration was
+        // benchmark-harness overhead, not actuation/observation work.
+        const target = await waitForTargetWindow(fixture.pid, fixture);
+        if (backend === "cua") resetCuaDriverDiagnostics();
 
         const runs: RunResult[] = [];
         const warmup = await runOne(
           backend,
           variant.label,
           0,
-          fixture.pid,
-          fixture,
+          target.appName,
           projectRoot,
           statePath,
           decoy.appName,
@@ -633,8 +636,7 @@ async function main(args: Arguments): Promise<void> {
               backend,
               variant.label,
               iteration,
-              fixture.pid!,
-              fixture,
+              target.appName,
               projectRoot,
               statePath,
               decoy.appName,
