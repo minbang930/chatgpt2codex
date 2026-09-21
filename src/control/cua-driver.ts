@@ -428,22 +428,28 @@ export async function listVisibleWindows(): Promise<VisibleAppWindow[]> {
   }));
 }
 
-export async function captureAppWindow(appName: string, filePath: string): Promise<CuaAppScreenshot> {
+export async function captureAppWindow(
+  appName: string,
+  filePath: string,
+  options: { includeAccessibilityTree?: boolean } = {},
+): Promise<CuaAppScreenshot> {
   assertWindows();
   if (!path.isAbsolute(filePath) || path.extname(filePath).toLowerCase() !== ".png") {
     throw new Error("Cua Driver app capture requires an absolute .png output path");
   }
   const target = await resolveTargetWindow(appName);
+  const includeAccessibilityTree = options.includeAccessibilityTree !== false;
   const data = await callTool("get_window_state", {
     pid: target.pid,
     window_id: target.windowId,
     screenshot_out_file: filePath,
-    include_accessibility_tree: true,
+    include_accessibility_tree: includeAccessibilityTree,
     include_screenshot: true,
-    max_elements: 120,
-    max_depth: 8,
+    ...(includeAccessibilityTree ? { max_elements: 120, max_depth: 8 } : {}),
   });
-  cacheObservation(appName, target, data);
+  // A screenshot-only evidence capture must not replace the semantic snapshot
+  // that an already-approved element token is bound to.
+  if (includeAccessibilityTree) cacheObservation(appName, target, data);
   const width = positiveInt(data.screenshot_width) ?? target.bounds.width;
   const height = positiveInt(data.screenshot_height) ?? target.bounds.height;
   const scaleFactor = finiteNumber(data.screenshot_scale) ?? 1;
