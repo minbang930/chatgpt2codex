@@ -698,6 +698,10 @@ export async function setSemanticValue(appName: string, target: { label?: string
   recordActionResult("set_value", "semantic", result);
 }
 
+export async function setCuaCursorOverlayEnabled(enabled: boolean): Promise<void> {
+  await callTool("set_agent_cursor_enabled", { enabled });
+}
+
 export function getCuaDriverDiagnostics(): CuaDriverDiagnostics {
   return { ...diagnostics, recentActions: diagnostics.recentActions.map((row) => ({ ...row })) };
 }
