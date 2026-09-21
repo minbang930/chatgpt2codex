@@ -1,0 +1,36 @@
+name: WPF runtime fallback validation
+
+on:
+  push:
+    branches: [feat/cua-driver-ab-benchmark]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse fixture compiler
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $env:GITHUB_WORKSPACE "scripts/fixtures/computer-use-benchmark.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+      - name: Compile WPF using runtime/GAC only
+        shell: pwsh
+        env:
+          CHATGPT2CODEX_FORCE_WPF_RUNTIME_REFS: "1"
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/fixtures/computer-use-benchmark.ps1 -SourcePath scripts/fixtures/computer-use-benchmark-wpf.cs -OutputPath "$env:RUNNER_TEMP\cu-wpf-runtime.exe"
+          if (-not (Test-Path "$env:RUNNER_TEMP\cu-wpf-runtime.exe")) { throw "WPF runtime fallback did not produce an exe" }
