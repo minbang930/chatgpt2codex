@@ -32,7 +32,7 @@ async function screenshotDir(projectRoot: string): Promise<string> {
 
 export async function captureControlAppScreenshot(
   projectRoot: string,
-  input: { appName: string; label?: string; waitMs?: number },
+  input: { appName: string; label?: string; waitMs?: number; semantic?: boolean },
 ): Promise<ControlScreenshotResult> {
   if (process.platform !== "win32") {
     return captureE2eAppScreenshot(projectRoot, input);
@@ -50,7 +50,9 @@ export async function captureControlAppScreenshot(
     // Cua Driver gets an explicit output path and returns its UIA snapshot from
     // the same get_window_state call; snapshotSemanticElements can reuse it.
     const captured = isCuaWindowsBackend()
-      ? await withComputerUseIndicatorSuppressed(() => cuaDriver.captureAppWindow(input.appName, file))
+      ? await withComputerUseIndicatorSuppressed(() =>
+          cuaDriver.captureAppWindow(input.appName, file, { includeAccessibilityTree: input.semantic !== false }),
+        )
       : await withComputerUseIndicatorSuppressed(() => winNative.captureAppWindow(input.appName, file));
     const stat = await fs.stat(file).catch(() => null);
     if (!stat?.isFile() || stat.size <= 0) {
