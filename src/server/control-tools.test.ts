@@ -215,6 +215,80 @@ describe("desktop-control tool gating", () => {
     launch.mockRestore();
   });
 
+  it("full access auto-grants a separate Admin control lease for an active full-write project", async () => {
+    process.env.CHATGPT2CODEX_CONTROL = "1";
+    process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE = "full";
+    delete process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST;
+    const { ctx, events } = makeCtx(stateDir, projectRoot);
+    await ctx.store.setSession({
+      activeProjectId: "proj",
+      mode: "edit",
+      lease: { projectId: "proj", leaseId: "write1", projectRoot, preset: "full-write", issuedAt: Date.now(), expiresAt: Date.now() + 60_000 },
+    });
+    const launch = vi.spyOn(desktopInput, "launchApp").mockResolvedValue({
+      pid: 4242,
+      appName: "Notepad.exe",
+      running: true,
+      active: false,
+      windowCount: 1,
+    });
+    const tools = await registeredTools(ctx);
+
+    const first = await tools.computer_launch_app?.handler?.({ appName: "notepad.exe" });
+    expect(first?.isError).toBeFalsy();
+    const armed = (await ctx.store.getSession()) as {
+      lease?: Lease | null;
+      adminControlLease?: Lease | null;
+    };
+    expect(armed.lease?.preset).toBe("full-write");
+    expect(armed.adminControlLease?.preset).toBe("control");
+    expect(events.some((event) => event.type === "control.lease.admin_granted")).toBe(true);
+
+    delete process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE;
+    const second = await tools.computer_launch_app?.handler?.({ appName: "notepad.exe" });
+    expect(second?.isError).toBe(true);
+    expect(second?.structuredContent?.code).toBe("PERMISSION_DENIED");
+    expect(launch).toHaveBeenCalledTimes(1);
+    launch.mockRestore();
+  });
+
+  it("kill switch revokes the auto Admin lease and KILL prevents automatic reacquisition", async () => {
+    process.env.CHATGPT2CODEX_CONTROL = "1";
+    process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE = "full";
+    const { ctx } = makeCtx(stateDir, projectRoot);
+    await ctx.store.setSession({
+      activeProjectId: "proj",
+      mode: "edit",
+      lease: { projectId: "proj", leaseId: "write1", projectRoot, preset: "full-write", issuedAt: Date.now(), expiresAt: Date.now() + 60_000 },
+    });
+    const tools = await registeredTools(ctx);
+
+    const killed = await tools.computer_kill_switch?.handler?.({ reason: "admin revoke test" });
+    expect(killed?.isError).toBeFalsy();
+    expect(killed?.structuredContent?.killed).toBe(true);
+    const afterKill = (await ctx.store.getSession()) as { adminControlLease?: Lease | null };
+    expect(afterKill.adminControlLease ?? null).toBeNull();
+
+    const launch = vi.spyOn(desktopInput, "launchApp").mockResolvedValue({
+      pid: 4242,
+      appName: "Notepad.exe",
+      running: true,
+      active: false,
+      windowCount: 1,
+    });
+    const blocked = await tools.computer_launch_app?.handler?.({ appName: "notepad.exe" });
+    expect(blocked?.isError).toBe(true);
+    expect(blocked?.structuredContent?.code).toBe("CONTROL_KILLED");
+    const stillKilled = (await ctx.store.getSession()) as { adminControlLease?: Lease | null };
+    expect(stillKilled.adminControlLease ?? null).toBeNull();
+    expect(launch).not.toHaveBeenCalled();
+
+    const killedAgain = await tools.computer_kill_switch?.handler?.({ reason: "idempotent" });
+    expect(killedAgain?.isError).toBeFalsy();
+    expect(killedAgain?.structuredContent?.killed).toBe(true);
+    launch.mockRestore();
+  });
+
   it("lists all control tools to ChatGPT only when the owner exposure flag is on", async () => {
     process.env.CHATGPT2CODEX_CONTROL = "1";
     process.env.CHATGPT2CODEX_CONTROL_CHATGPT = "1";

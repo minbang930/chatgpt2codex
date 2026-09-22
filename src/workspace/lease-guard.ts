@@ -1,5 +1,6 @@
 import { DomainError, ErrorCode, type Lease, type LeasePreset, type ToolContext } from "../types.js";
-import { renewLease, requireLease } from "./project-select.js";
+import { isControlFullAccess } from "../control/policy.js";
+import { makeLease, renewLease, requireLease } from "./project-select.js";
 
 /**
  * Capability ceiling checked against the active project lease's preset.
@@ -26,6 +27,7 @@ interface SessionWithLease {
   lease?: Lease | null;
   activeLease?: Lease | null;
   controlLease?: Lease | null;
+  adminControlLease?: Lease | null;
   [key: string]: unknown;
 }
 
@@ -53,11 +55,23 @@ function controlLeaseForSession(session: unknown, projectId: string): Lease | un
   return candidate;
 }
 
-async function renewControlLease(
+function adminControlLeaseForSession(session: unknown, projectId: string): Lease | undefined {
+  if (!isControlFullAccess()) return undefined;
+  const state = sessionObject(session);
+  if (!state || state.activeProjectId !== projectId) return undefined;
+  const candidate = state.adminControlLease;
+  if (!candidate || candidate.projectId !== projectId || candidate.preset !== "control") return undefined;
+  return candidate;
+}
+
+type ControlLeaseLane = "controlLease" | "adminControlLease";
+
+async function renewPersistedControlLease(
   ctx: ToolContext,
   session: unknown,
   projectId: string,
   controlLease: Lease,
+  lane: ControlLeaseLane,
 ): Promise<Lease> {
   if (Date.now() <= controlLease.expiresAt) return controlLease;
 
@@ -65,15 +79,18 @@ async function renewControlLease(
   const state = sessionObject(session) ?? {};
   const active = state.lease;
   const activeIsSameControlLease =
-    active?.preset === "control" && active.projectId === projectId && active.leaseId === controlLease.leaseId;
+    lane === "controlLease" &&
+    active?.preset === "control" &&
+    active.projectId === projectId &&
+    active.leaseId === controlLease.leaseId;
 
   await ctx.store.setSession({
     ...state,
     ...(activeIsSameControlLease ? { lease: renewed } : {}),
-    controlLease: renewed,
+    [lane]: renewed,
   });
   await ctx.ledger.append({
-    type: "control.lease.renewed",
+    type: lane === "adminControlLease" ? "control.lease.admin_renewed" : "control.lease.renewed",
     projectId,
     leaseId: renewed.leaseId,
     issuedAt: renewed.issuedAt,
@@ -83,17 +100,71 @@ async function renewControlLease(
 }
 
 /**
+ * Mint Full/Admin control authority for the currently active project. This is
+ * intentionally separate from the explicit local `controlLease` lane: the
+ * returned lease is recognized only while Full/Admin mode remains enabled.
+ */
+export async function grantAdminControlLease(
+  ctx: ToolContext,
+  projectId: string,
+  projectRoot: string,
+): Promise<Lease> {
+  if (!isControlFullAccess()) {
+    throw new DomainError(ErrorCode.PERMISSION_DENIED, "Full Computer Use (Admin) is not enabled", { projectId });
+  }
+
+  const session = await ctx.store.getSession();
+  const state = sessionObject(session) ?? {};
+  if (state.activeProjectId !== projectId) {
+    throw new DomainError(ErrorCode.LEASE_REQUIRED, "Active project changed before Admin control authorization", { projectId });
+  }
+
+  const existing = adminControlLeaseForSession(session, projectId);
+  if (existing) {
+    return renewPersistedControlLease(ctx, session, projectId, existing, "adminControlLease");
+  }
+
+  const lease = makeLease(
+    { projectId, name: projectId, root: projectRoot, aliases: [] },
+    "control",
+  );
+  await ctx.store.setSession({ ...state, adminControlLease: lease });
+  await ctx.ledger.append({
+    type: "control.lease.admin_granted",
+    projectId,
+    leaseId: lease.leaseId,
+    issuedAt: lease.issuedAt,
+    expiresAt: lease.expiresAt,
+  });
+  return lease;
+}
+
+export async function revokeAdminControlLease(ctx: ToolContext, projectId?: string): Promise<void> {
+  const session = await ctx.store.getSession();
+  const state = sessionObject(session);
+  const existing = state?.adminControlLease;
+  if (!state || !existing || (projectId && existing.projectId !== projectId)) return;
+
+  await ctx.store.setSession({ ...state, adminControlLease: null });
+  await ctx.ledger.append({
+    type: "control.lease.admin_revoked",
+    projectId: existing.projectId,
+    leaseId: existing.leaseId,
+  });
+}
+
+/**
  * Require authority for `projectId` that permits `capability`.
  *
- * Normal project presets still expire normally. Locally armed desktop-control
+ * Normal project presets still expire normally. Explicit local desktop-control
  * authorization is persisted separately by the state store and rolls forward
- * transparently after expiry. This keeps Computer Use/worker orchestration
- * available even if the main project lease later switches to full-write or
- * another preset. Remote MCP callers still cannot mint control authority.
+ * transparently after expiry. Full/Admin mode has a second persisted lane, but
+ * that lane is considered only for the `control` capability and only while
+ * the locally configured Full/Admin mode is active.
  *
- * The desktop-control kill switch is intentionally independent: renewing a
- * control lease never clears a kill. A fresh local control grant is still
- * required to resume after a kill.
+ * This function never auto-mints Admin authority by itself; the Computer Use
+ * tool boundary does that only after it has resolved the active project and
+ * verified that the kill switch is not set.
  */
 export async function requireProjectLease(
   ctx: ToolContext,
@@ -116,7 +187,14 @@ export async function requireProjectLease(
 
   const localControlLease = controlLeaseForSession(session, projectId);
   if (localControlLease && capabilityAllowed(localControlLease, capability)) {
-    return renewControlLease(ctx, session, projectId, localControlLease);
+    return renewPersistedControlLease(ctx, session, projectId, localControlLease, "controlLease");
+  }
+
+  if (capability === "control") {
+    const adminControlLease = adminControlLeaseForSession(session, projectId);
+    if (adminControlLease) {
+      return renewPersistedControlLease(ctx, session, projectId, adminControlLease, "adminControlLease");
+    }
   }
 
   if (activeLease) {
