@@ -109,9 +109,10 @@ export function isSensitiveApp(appName: string | undefined): boolean {
   return SENSITIVE_APP_DENYLIST.some((entry) => norm.includes(entry));
 }
 
-/** Explicit allowlist of app names control may target, configured via env
- * (comma-separated). Empty by default: no app is reachable until the
- * operator opts an app in, on top of the two gates above. */
+/** Explicit allowlist of app names control may target in restricted mode,
+ * configured via env (comma-separated). Empty by default: no app is reachable
+ * in restricted mode until the operator opts an app in. Full/admin mode
+ * intentionally bypasses this target allowlist. */
 export function controlAllowlist(env: NodeJS.ProcessEnv = process.env): string[] {
   const raw = env[CONTROL_ALLOWLIST_ENV_FLAG];
   if (!raw) return [];
