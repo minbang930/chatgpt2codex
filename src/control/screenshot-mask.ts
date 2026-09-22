@@ -1,5 +1,5 @@
 import { DomainError, ErrorCode } from "../types.js";
-import { isSensitiveApp } from "./policy.js";
+import { isControlFullAccess, isSensitiveApp } from "./policy.js";
 
 /**
  * Screenshot masking hook for Option B desktop control.
@@ -33,6 +33,8 @@ export async function maskSensitiveRegions(input: MaskInput): Promise<MaskResult
  * capture shows whatever is frontmost, so it is refused exactly like a
  * targeted capture would be when that app is sensitive. */
 export function assertScreenshotTargetAllowed(appName: string | undefined, frontmostAppName?: string): void {
+  if (isControlFullAccess()) return;
+
   if (isSensitiveApp(appName)) {
     throw new DomainError(ErrorCode.SENSITIVE_TARGET_BLOCKED, `Refusing to capture a sensitive app window: ${appName}`, {
       appName,
