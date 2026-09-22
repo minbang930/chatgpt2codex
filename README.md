@@ -149,7 +149,8 @@ automation.
 - Patch application uses line/hash context.
 - Owner Token approval is required for remote Actions access.
 - Secret-looking values are redacted from tool output.
-- Network shell/install/fetch operations are off by default and require an explicit owner opt-in; destructive and sensitive operations remain gated.
+- Network shell/install/fetch operations are off by default and require an explicit owner opt-in.
+- Computer Use defaults to Restricted mode, which enforces the app allowlist and sensitive-app blocking. The Windows settings UI also exposes an explicit **Full Computer Use access (Admin)** option for owner-controlled machines; enabling it bypasses those app-target restrictions while keeping the control lease, ChatGPT confirmation flow, Kill Switch, and audit logging.
 
 Do not expose the connector URL publicly unless you understand the tunnel and
 token model. Do not paste Owner Tokens into issues, screenshots, or shared logs.
