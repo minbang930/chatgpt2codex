@@ -895,8 +895,8 @@ internal sealed class LauncherForm : Form
             {
                 if (!fullControlCheck.Checked || fullControlAccess) return;
                 var warning = korean
-                    ? "전체 권한을 켜면 Computer Use가 앱 allowlist와 민감 앱 차단을 우회할 수 있습니다.\r\n\r\nControl lease, ChatGPT 확인, Kill Switch, 감사 로그는 계속 유지됩니다.\r\n\r\n전체 권한을 켜시겠습니까?"
-                    : "Full access lets Computer Use bypass the app allowlist and sensitive-app blocking.\r\n\r\nThe control lease, ChatGPT confirmation, Kill Switch, and audit log remain active.\r\n\r\nEnable Full access?";
+                    ? "전체 권한을 켜면 Computer Use가 앱 allowlist와 민감 앱 차단을 우회할 수 있습니다.\r\n\r\n활성 프로젝트의 Control lease는 자동으로 획득·갱신되며, ChatGPT 확인, Kill Switch, 감사 로그는 계속 유지됩니다.\r\n\r\n전체 권한을 켜시겠습니까?"
+                    : "Full access lets Computer Use bypass the app allowlist and sensitive-app blocking.\r\n\r\nThe active project's control lease is acquired and renewed automatically; ChatGPT confirmation, Kill Switch, and audit logging remain active.\r\n\r\nEnable Full access?";
                 if (MessageBox.Show(form, warning, "ChatGPT To Codex", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
                 {
                     fullControlCheck.Checked = false;

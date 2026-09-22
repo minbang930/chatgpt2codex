@@ -852,7 +852,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
             ],
             desktopControlModel: [
               "Off by default; expose control tools to ChatGPT only when the owner opts in through CHATGPT2CODEX_CONTROL_CHATGPT.",
-              "Arm explicitly with project_select preset=control; keep kill switch available in the same owner-controlled surface.",
+              "Restricted mode requires an explicit local project_select preset=control grant; Full/Admin mode automatically acquires and renews a separate Admin control lease for the active project.",
               "When an allowlisted target app is closed, use computer_launch_app; do not route Windows app launch through e2e_open_target or shell.",
               "Capture evidence with app/window screenshots, not the user's active ChatGPT browser tab as the app under test.",
               "Block sensitive apps and re-check frontmost target immediately before synthetic input.",
@@ -3065,7 +3065,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
       {
         title: "Launch a desktop app (control)",
         description:
-          "Launch a desktop app through the Computer Use backend before screenshot/semantic actions. Requires an active control lease (project_select preset=control) and obeys the kill switch. In restricted mode the target must pass the sensitive-app denylist and CHATGPT2CODEX_CONTROL_ALLOWLIST; explicit full/admin mode bypasses those app-target restrictions. On Windows this currently requires the Cua backend and uses Cua launch_app directly, so no shell/e2e_open_target workaround is needed.",
+          "Launch a desktop app through the Computer Use backend before screenshot/semantic actions. Restricted mode requires an explicitly granted local control lease (project_select preset=control); Full/Admin mode automatically acquires and renews a separate Admin control lease for the active project. The kill switch remains independent. Restricted mode enforces the sensitive-app denylist and CHATGPT2CODEX_CONTROL_ALLOWLIST; explicit Full/Admin mode bypasses those app-target restrictions. On Windows this currently requires the Cua backend and uses Cua launch_app directly, so no shell/e2e_open_target workaround is needed.",
         annotations: CONTROL_ANNOTATIONS,
         _meta: chatGptToolMeta("Launching desktop app...", "Desktop app launched"),
         inputSchema: {
@@ -3080,7 +3080,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
       {
         title: "Capture a desktop screenshot (control)",
         description:
-          "Capture the full screen or a specific app window for human-in-the-loop desktop control. No synthetic input; requires an active control lease (project_select preset=control). When the owner has opted in via CHATGPT2CODEX_CONTROL_CHATGPT, this tool is visible to ChatGPT and its client-side Confirm/Deny prompt (from the non-read-only annotation below) is the approval gate before capture happens. Restricted mode enforces the app allowlist and sensitive-app blocking; explicit full/admin mode bypasses those app-target restrictions.",
+          "Capture the full screen or a specific app window for human-in-the-loop desktop control. Restricted mode requires an explicitly granted local control lease; Full/Admin mode automatically acquires and renews a separate Admin control lease for the active project. When the owner has opted in via CHATGPT2CODEX_CONTROL_CHATGPT, this tool is visible to ChatGPT and its client-side Confirm/Deny prompt (from the non-read-only annotation below) is the approval gate before capture happens. Restricted mode enforces the app allowlist and sensitive-app blocking; explicit Full/Admin mode bypasses those app-target restrictions.",
         annotations: CONTROL_ANNOTATIONS,
         _meta: chatGptToolMeta("Capturing desktop screenshot...", "Desktop screenshot captured"),
         inputSchema: {
@@ -3097,7 +3097,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
       {
         title: "Request a desktop click/type/key action (control)",
         description:
-          "Request a click/type/key action. Requires an active control lease (project_select preset=control). By default (CHATGPT2CODEX_CONTROL_CHATGPT off, or this tool called outside ChatGPT) it never executes anything itself: it always returns status=pending, and only a local human approving it lets src/control/executor.ts perform the real synthetic input. When the owner has opted in via CHATGPT2CODEX_CONTROL_CHATGPT, this tool is visible to ChatGPT and its client-side Confirm/Deny prompt on the owner's phone (from the non-read-only/destructive annotation below) is the approval gate instead: a confirmed call executes immediately through that same executor path (kill-switch re-check, darwin preflight, a second live-frontmost sensitive-app/allowlist check, before/after evidence, audit — tagged approvedVia=chatgpt). Sensitive apps are always refused, confirmed or not.",
+          "Request a click/type/key action. Restricted mode requires an explicitly granted local control lease (project_select preset=control); Full/Admin mode automatically acquires and renews a separate Admin control lease for the active project. By default (CHATGPT2CODEX_CONTROL_CHATGPT off, or this tool called outside ChatGPT) it never executes anything itself: it always returns status=pending, and only a local human approving it lets src/control/executor.ts perform the real synthetic input. When the owner has opted in via CHATGPT2CODEX_CONTROL_CHATGPT, this tool is visible to ChatGPT and its client-side Confirm/Deny prompt on the owner's phone (from the non-read-only/destructive annotation below) is the approval gate instead: a confirmed call executes immediately through that same executor path (kill-switch re-check, preflight, a second live-frontmost target check, before/after evidence, audit — tagged approvedVia=chatgpt). In Restricted mode sensitive apps remain refused; Full/Admin mode intentionally bypasses those app-target restrictions.",
         annotations: CONTROL_ANNOTATIONS,
         inputSchema: {
           appName: z.string().min(1),
@@ -3117,7 +3117,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
       {
         title: "Check desktop control action status (control)",
         description:
-          "Read-only status check for one queued action (by actionId) or the whole current-session queue: pending/approved/rejected/done, never a trigger to execute anything. Requires an active control lease.",
+          "Read-only status check for one queued action (by actionId) or the whole current-session queue: pending/approved/rejected/done, never a trigger to execute anything. Restricted mode requires an explicit local control lease; Full/Admin mode uses the automatically managed Admin control lease.",
         annotations: READ_ONLY_ANNOTATIONS,
         _meta: chatGptToolMeta("Checking desktop control status...", "Desktop control status loaded"),
         inputSchema: {
@@ -3135,7 +3135,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
       {
         title: "Kill the desktop control session (control)",
         description:
-          "Immediately disable desktop control for this session: rejects every pending action and blocks new requests until a fresh control lease (project_select preset=control) is granted. Idempotent. Requires an active control lease. Available to ChatGPT (as a normal Confirm/Deny action) whenever the desktop-control tools are exposed, so the owner can kill an in-progress session from the same phone that confirmed it.",
+          "Immediately disable desktop control for this session: rejects every pending action, revokes any automatically managed Admin control lease, and blocks Admin auto-acquisition while the kill flag is set. A fresh local project_select preset=control grant is required to clear that kill state. Idempotent. Available to ChatGPT whenever the desktop-control tools are exposed, so the owner can kill an in-progress session from the same phone that confirmed it.",
         annotations: CONTROL_ANNOTATIONS,
         _meta: chatGptToolMeta("Killing desktop control session...", "Desktop control session killed"),
         inputSchema: {
