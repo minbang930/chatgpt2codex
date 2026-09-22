@@ -2,7 +2,7 @@ import type { ToolContext } from "../types.js";
 import { resolveActiveProject } from "../workspace/active.js";
 import { redact } from "../policy/secrets.js";
 import { captureControlAppScreenshot } from "./capture.js";
-import { assertAllowedTarget, controlAllowlist, isSensitiveApp } from "./policy.js";
+import { assertAllowedTarget, controlAllowlist, isControlFullAccess, isSensitiveApp } from "./policy.js";
 import { maskSensitiveRegions } from "./screenshot-mask.js";
 import { autoDecision, recordAutoUse } from "./auto.js";
 import { approveAction, getAction, isKilled, listActions, markDone, toSummary, type ControlActionRecord } from "./queue.js";
@@ -48,7 +48,7 @@ async function captureActionEvidence(
   phase: "before" | "after",
 ): Promise<{ path: string; masked: boolean } | undefined> {
   if (process.platform !== "darwin" && process.platform !== "win32") return undefined;
-  if (isSensitiveApp(record.appName)) return undefined;
+  if (!isControlFullAccess() && isSensitiveApp(record.appName)) return undefined;
   try {
     const active = await resolveActiveProject(ctx);
     if (!active) return undefined;
