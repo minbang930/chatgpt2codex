@@ -80,12 +80,14 @@ describe("desktop-control tool gating", () => {
     delete process.env.CHATGPT2CODEX_CONTROL;
     delete process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST;
     delete process.env.CHATGPT2CODEX_CONTROL_CHATGPT;
+    delete process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE;
   });
 
   afterEach(async () => {
     delete process.env.CHATGPT2CODEX_CONTROL;
     delete process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST;
     delete process.env.CHATGPT2CODEX_CONTROL_CHATGPT;
+    delete process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE;
     vi.restoreAllMocks();
     await fs.rm(stateDir, { recursive: true, force: true });
     await fs.rm(projectRoot, { recursive: true, force: true });
@@ -185,6 +187,31 @@ describe("desktop-control tool gating", () => {
     expect(result?.isError).toBe(true);
     expect(result?.structuredContent?.code).toBe("SENSITIVE_TARGET_BLOCKED");
     expect(launch).not.toHaveBeenCalled();
+    launch.mockRestore();
+  });
+
+  it("full access launches an app even when it is not allowlisted", async () => {
+    process.env.CHATGPT2CODEX_CONTROL = "1";
+    process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE = "full";
+    delete process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST;
+    const { ctx } = makeCtx(stateDir, projectRoot);
+    await ctx.store.setSession({
+      activeProjectId: "proj",
+      mode: "read",
+      lease: { projectId: "proj", leaseId: "l1", projectRoot, preset: "control", issuedAt: Date.now(), expiresAt: Date.now() + 60_000 },
+    });
+    const launch = vi.spyOn(desktopInput, "launchApp").mockResolvedValue({
+      pid: 4242,
+      appName: "Notepad.exe",
+      running: true,
+      active: false,
+      windowCount: 1,
+    });
+    const tools = await registeredTools(ctx);
+    const result = await tools.computer_launch_app?.handler?.({ appName: "notepad.exe" });
+
+    expect(result?.isError).toBeFalsy();
+    expect(launch).toHaveBeenCalledWith("notepad.exe");
     launch.mockRestore();
   });
 
