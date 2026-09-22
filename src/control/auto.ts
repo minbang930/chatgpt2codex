@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { controlAllowlist, isAppAllowed, isSensitiveApp } from "./policy.js";
+import { controlAllowlist, isAppAllowed, isControlFullAccess, isSensitiveApp } from "./policy.js";
 
 /**
  * Local-only "auto-approve" scope flag, mirroring the KILL flag pattern in
@@ -117,7 +117,10 @@ export async function setAuto(stateDir: string, input: SetAutoInput): Promise<Au
     new Set(
       input.apps
         .map(normalizeApp)
-        .filter((app) => app.length > 0 && !isSensitiveApp(app) && isAppAllowed(app, allowlist)),
+        .filter((app) =>
+          app.length > 0 &&
+          (isControlFullAccess() || (!isSensitiveApp(app) && isAppAllowed(app, allowlist))),
+        ),
     ),
   );
   const now = Date.now();
@@ -182,9 +185,11 @@ export async function autoDecision(stateDir: string, input: AutoDecisionInput, n
     await clearAuto(stateDir);
     return { allowed: false };
   }
-  if (isSensitiveApp(input.appName)) return { allowed: false, scope };
   const norm = normalizeApp(input.appName);
-  if (!isAppAllowed(norm, controlAllowlist())) return { allowed: false, scope };
+  if (!isControlFullAccess()) {
+    if (isSensitiveApp(input.appName)) return { allowed: false, scope };
+    if (!isAppAllowed(norm, controlAllowlist())) return { allowed: false, scope };
+  }
   if (!scope.apps.includes(norm)) return { allowed: false, scope };
   if (scope.kinds && !scope.kinds.includes(input.kind)) return { allowed: false, scope };
   if (scope.maxCount !== undefined && scope.count >= scope.maxCount) return { allowed: false, scope };
