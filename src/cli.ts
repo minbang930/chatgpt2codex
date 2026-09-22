@@ -26,7 +26,7 @@ import { createHttpServer, defaultHttpServerConfig } from "./server/http.js";
 import { generateOwnerToken, hasOwnerToken, storeOwnerToken } from "./auth/owner-token.js";
 import { JsonOAuthStore } from "./auth/oauth-store.js";
 import { checkIntakeAvailability } from "./assets/image-intake.js";
-import { controlAllowlist, isAppAllowed, isControlEnabled, isSensitiveApp } from "./control/policy.js";
+import { controlAllowlist, isAppAllowed, isControlEnabled, isControlFullAccess, isSensitiveApp } from "./control/policy.js";
 import { startExecutor } from "./control/executor.js";
 import { approveAction, isKilled, listActions, rejectAction, setKill, toSummary } from "./control/queue.js";
 import { preflightPermissions } from "./control/mac-input.js";
@@ -377,7 +377,7 @@ async function cmdControl(positional: string[], flags: Record<string, string | b
       const pending = (await listActions(stateDir)).filter((a) => a.status === "pending");
       for (const action of pending) {
         if (await isKilled(stateDir)) break;
-        if (isSensitiveApp(action.appName) || !isAppAllowed(action.appName, allowlist)) {
+        if (!isControlFullAccess() && (isSensitiveApp(action.appName) || !isAppAllowed(action.appName, allowlist))) {
           skipped.push({ id: action.actionId, reason: "blocked-not-eligible" });
           continue;
         }
