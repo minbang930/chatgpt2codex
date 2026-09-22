@@ -3065,7 +3065,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
       {
         title: "Launch a desktop app (control)",
         description:
-          "Launch an explicitly allowlisted desktop app through the Computer Use backend before screenshot/semantic actions. Requires an active control lease (project_select preset=control), obeys the kill switch and sensitive-app denylist, and requires the app name to be present in CHATGPT2CODEX_CONTROL_ALLOWLIST. On Windows this currently requires the Cua backend and uses Cua launch_app directly, so no shell/e2e_open_target workaround is needed.",
+          "Launch a desktop app through the Computer Use backend before screenshot/semantic actions. Requires an active control lease (project_select preset=control) and obeys the kill switch. In restricted mode the target must pass the sensitive-app denylist and CHATGPT2CODEX_CONTROL_ALLOWLIST; explicit full/admin mode bypasses those app-target restrictions. On Windows this currently requires the Cua backend and uses Cua launch_app directly, so no shell/e2e_open_target workaround is needed.",
         annotations: CONTROL_ANNOTATIONS,
         _meta: chatGptToolMeta("Launching desktop app...", "Desktop app launched"),
         inputSchema: {
@@ -3080,7 +3080,7 @@ export function registerTools(server: unknown, ctx: ToolContext): void {
       {
         title: "Capture a desktop screenshot (control)",
         description:
-          "Capture the full screen or a specific app window for human-in-the-loop desktop control. No synthetic input; requires an active control lease (project_select preset=control). When the owner has opted in via CHATGPT2CODEX_CONTROL_CHATGPT, this tool is visible to ChatGPT and its client-side Confirm/Deny prompt (from the non-read-only annotation below) is the approval gate before capture happens. Refuses to capture sensitive apps (password managers, Keychain Access, System Settings, banking/2FA apps).",
+          "Capture the full screen or a specific app window for human-in-the-loop desktop control. No synthetic input; requires an active control lease (project_select preset=control). When the owner has opted in via CHATGPT2CODEX_CONTROL_CHATGPT, this tool is visible to ChatGPT and its client-side Confirm/Deny prompt (from the non-read-only annotation below) is the approval gate before capture happens. Restricted mode enforces the app allowlist and sensitive-app blocking; explicit full/admin mode bypasses those app-target restrictions.",
         annotations: CONTROL_ANNOTATIONS,
         _meta: chatGptToolMeta("Capturing desktop screenshot...", "Desktop screenshot captured"),
         inputSchema: {
