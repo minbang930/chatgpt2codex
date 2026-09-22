@@ -18,6 +18,20 @@ import { DomainError, ErrorCode } from "../types.js";
 const CONTROL_ENV_FLAG = "CHATGPT2CODEX_CONTROL";
 const CONTROL_ALLOWLIST_ENV_FLAG = "CHATGPT2CODEX_CONTROL_ALLOWLIST";
 const CONTROL_CHATGPT_ENV_FLAG = "CHATGPT2CODEX_CONTROL_CHATGPT";
+const CONTROL_ACCESS_MODE_ENV_FLAG = "CHATGPT2CODEX_CONTROL_ACCESS_MODE";
+
+export type ControlAccessMode = "restricted" | "full";
+
+export function controlAccessMode(env: NodeJS.ProcessEnv = process.env): ControlAccessMode {
+  const raw = env[CONTROL_ACCESS_MODE_ENV_FLAG]?.trim().toLowerCase();
+  if (!raw || raw === "restricted" || raw === "safe" || raw === "allowlist") return "restricted";
+  if (raw === "full" || raw === "admin" || raw === "full-control") return "full";
+  return "restricted";
+}
+
+export function isControlFullAccess(env: NodeJS.ProcessEnv = process.env): boolean {
+  return controlAccessMode(env) === "full";
+}
 
 /** Names of the desktop-control MCP tools. Shared denylist used by:
  *  - src/server/tools.ts installChatGptToolListHandler (hide from ChatGPT tools/list)
@@ -126,6 +140,8 @@ export interface AssertTargetInput {
  * live frontmost app (2nd gate) — see src/control/tools.ts / executor.ts.
  */
 export function assertAllowedTarget(input: AssertTargetInput): void {
+  if (isControlFullAccess()) return;
+
   if (isSensitiveApp(input.appName)) {
     throw new DomainError(ErrorCode.SENSITIVE_TARGET_BLOCKED, `Target app is blocked by the sensitive-app denylist: ${input.appName}`, {
       appName: input.appName,
