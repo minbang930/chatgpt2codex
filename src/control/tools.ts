@@ -3,7 +3,7 @@ import { DomainError, ErrorCode, makeResult, type ToolContext, type ToolResult }
 import { requireProjectLease } from "../workspace/lease-guard.js";
 import { resolveActiveProject } from "../workspace/active.js";
 import { redact } from "../policy/secrets.js";
-import { assertAllowedTarget, controlAllowlist, isAppAllowed, isControlChatGptExposed } from "./policy.js";
+import { assertAllowedTarget, controlAllowlist, isAppAllowed, isControlChatGptExposed, isControlFullAccess } from "./policy.js";
 import { assertScreenshotTargetAllowed, maskSensitiveRegions } from "./screenshot-mask.js";
 import { captureControlAppScreenshot, captureControlScreenScreenshot } from "./capture.js";
 import { executeApprovedAction } from "./executor.js";
@@ -25,7 +25,7 @@ import {
 } from "./queue.js";
 
 /**
- * Handlers for the 4 Option B desktop-control MCP tools. Registered
+ * Handlers for the Option B desktop-control MCP tools. Registered
  * conditionally by src/server/tools.ts (only when isControlEnabled()), and
  * kept intentionally free of any dependency on src/server/tools.ts /
  * src/server/actions.ts to avoid a module cycle — both of those import
@@ -150,7 +150,7 @@ export async function handleComputerLaunchApp(
       content: [
         {
           type: "text",
-          text: `Launched allowlisted app ${input.appName} through Computer Use (pid=${result.pid ?? "unknown"}, windows=${result.windowCount}).`,
+          text: `Launched ${isControlFullAccess() ? "app" : "allowlisted app"} ${input.appName} through Computer Use (pid=${result.pid ?? "unknown"}, windows=${result.windowCount}).`,
         },
       ],
     } satisfies CallToolResultLike;
@@ -183,13 +183,14 @@ export async function handleComputerScreenshot(ctx: ToolContext, input: Computer
     // opted in. Without this, any non-denylisted, non-allowlisted app could
     // be captured even though it could never be clicked/typed into.
     const allowlist = controlAllowlist();
-    if (input.appName !== undefined) {
+    const fullAccess = isControlFullAccess();
+    if (!fullAccess && input.appName !== undefined) {
       if (!isAppAllowed(input.appName, allowlist)) {
         throw new DomainError(ErrorCode.SENSITIVE_TARGET_BLOCKED, `App is not on the control allowlist: ${input.appName}`, {
           appName: input.appName,
         });
       }
-    } else if (isControlChatGptExposed()) {
+    } else if (!fullAccess && isControlChatGptExposed()) {
       // Full-screen capture can include background sensitive windows. The
       // remotely reachable mode therefore requires an explicit allowlisted
       // appName and captures only that selected window.
