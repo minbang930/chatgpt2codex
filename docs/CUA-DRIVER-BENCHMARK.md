@@ -2,8 +2,10 @@
 
 This branch adds an **optional** Cua Driver backend without deleting the existing
 Windows implementation. The chatgpt2codex control plane remains authoritative:
-control leases, app allowlists, sensitive-target checks, approval queues, the
-kill switch, masking, and the audit ledger are unchanged.
+control leases, approval/confirmation flow, the kill switch, and the audit
+ledger remain in place. Restricted mode continues to enforce the app allowlist
+and sensitive-target checks; the Windows settings UI now also offers an explicit
+Full/Admin mode that intentionally bypasses those app-target restrictions.
 
 ## Select a backend
 
@@ -739,4 +741,29 @@ At this point the benchmark/compatibility phase is complete for the tested
 scope. The remaining product work is exposing the backend/runtime choice in the
 Windows settings UI while keeping the system Driver and legacy backend as
 immediate rollback options.
+
+## Computer Use access modes
+
+Windows settings now exposes **Full Computer Use access (Admin)**.
+
+- **Restricted** (default): app launches, screenshots, and input actions must pass
+  `CHATGPT2CODEX_CONTROL_ALLOWLIST` and the sensitive-app denylist.
+- **Full/Admin**: bypasses those app-target restrictions across launch,
+  screenshot, request-time validation, executor-time validation, evidence
+  capture, and local auto-approval scopes.
+
+Full/Admin does **not** remove the rest of the control boundary. A control lease
+is still required, a remote MCP client still cannot self-grant that lease, the
+ChatGPT Confirm/Deny flow remains in place when control tools are exposed, the
+Kill Switch remains effective, and actions continue to be audited.
+
+The runtime setting is:
+
+```powershell
+$env:CHATGPT2CODEX_CONTROL_ACCESS_MODE = "full"
+```
+
+The Windows launcher persists the same choice in `settings.ini` and passes it
+to the MCP child process. Switching the checkbox while MCP is running causes the
+launcher to restart the managed server so the new mode takes effect.
 
