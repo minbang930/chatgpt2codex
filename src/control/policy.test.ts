@@ -1,8 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { DomainError, ErrorCode } from "../types.js";
-import { assertAllowedTarget, controlAllowlist, isControlChatGptExposed, isControlEnabled, isSensitiveApp } from "./policy.js";
+import {
+  assertAllowedTarget,
+  controlAccessMode,
+  controlAllowlist,
+  isControlChatGptExposed,
+  isControlEnabled,
+  isControlFullAccess,
+  isSensitiveApp,
+} from "./policy.js";
 
 describe("control/policy", () => {
+  afterEach(() => {
+    delete process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE;
+  });
+
   it("isControlEnabled defaults to true (no env var set) and requires an explicit opt-out value to disable", () => {
     expect(isControlEnabled({})).toBe(true);
     expect(isControlEnabled({ CHATGPT2CODEX_CONTROL: "1" })).toBe(true);
@@ -18,6 +30,27 @@ describe("control/policy", () => {
     expect(isControlEnabled({ CHATGPT2CODEX_CONTROL: "FALSE" })).toBe(false);
     expect(isControlEnabled({ CHATGPT2CODEX_CONTROL: "Off" })).toBe(false);
     expect(isControlEnabled({ CHATGPT2CODEX_CONTROL: " 0 " })).toBe(false);
+  });
+
+  it("defaults Computer Use access to restricted and accepts explicit full/admin aliases", () => {
+    expect(controlAccessMode({})).toBe("restricted");
+    expect(controlAccessMode({ CHATGPT2CODEX_CONTROL_ACCESS_MODE: "restricted" })).toBe("restricted");
+    expect(controlAccessMode({ CHATGPT2CODEX_CONTROL_ACCESS_MODE: "full" })).toBe("full");
+    expect(controlAccessMode({ CHATGPT2CODEX_CONTROL_ACCESS_MODE: "admin" })).toBe("full");
+    expect(controlAccessMode({ CHATGPT2CODEX_CONTROL_ACCESS_MODE: "full-control" })).toBe("full");
+    expect(controlAccessMode({ CHATGPT2CODEX_CONTROL_ACCESS_MODE: "unknown" })).toBe("restricted");
+    expect(isControlFullAccess({ CHATGPT2CODEX_CONTROL_ACCESS_MODE: "full" })).toBe(true);
+  });
+
+  it("full Computer Use access bypasses both the sensitive-app denylist and app allowlist gate", () => {
+    process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE = "full";
+    expect(() =>
+      assertAllowedTarget({
+        appName: "1Password 7",
+        frontmostAppName: "System Settings",
+        allowlist: [],
+      }),
+    ).not.toThrow();
   });
 
   it("flags sensitive apps case-insensitively", () => {
