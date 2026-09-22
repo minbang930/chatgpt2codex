@@ -4,8 +4,9 @@ import { isControlFullAccess, isSensitiveApp } from "./policy.js";
 /**
  * Screenshot masking hook for Option B desktop control.
  *
- * Capture of a sensitive app's window is refused outright by the caller
- * (see assertScreenshotTargetAllowed). For everything else this is
+ * In restricted mode, capture of a sensitive app's window is refused
+ * outright by the caller (see assertScreenshotTargetAllowed). Full/admin
+ * mode explicitly bypasses that target policy. For everything else this is
  * currently a no-op pass-through; it is the designated extension point for
  * future per-region masking (e.g. blacking out an accessibility-reported
  * password-field frame) so screenshot delivery always goes through one
@@ -25,8 +26,9 @@ export async function maskSensitiveRegions(input: MaskInput): Promise<MaskResult
   return { pngPath: input.pngPath, masked: false };
 }
 
-/** Throws SENSITIVE_TARGET_BLOCKED when the capture target app is on the
- * sensitive denylist; screenshots of such apps are refused, not masked.
+/** In restricted mode, throws SENSITIVE_TARGET_BLOCKED when the capture
+ * target app is on the sensitive denylist. Full/admin mode returns early
+ * and permits the capture.
  *
  * A full-screen capture (appName omitted) has no per-app target to check, so
  * the caller must also pass the *live* frontmost app name: a full-screen
