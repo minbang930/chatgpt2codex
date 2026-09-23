@@ -468,6 +468,51 @@ M6 makes browser-worker model/reasoning selection explicit, durable, and verifia
 - Mapped ChatGPT Project routing and worker capability/catalog isolation remain intact.
 - Ubuntu/macOS/Windows CI remains green.
 
+## M8 - Multi-backend Project Execution
+
+M8 expands the runtime from a single local execution path into a persistent ChatGPT Project that can route work between GitHub and machine-specific local workspaces while preserving existing Core/Worker/Computer Use boundaries.
+
+Detailed architecture: `docs/MULTI-BACKEND-EXECUTION-ARCHITECTURE.md`.
+
+The six concepts are deliberately separate:
+
+```text
+Project
+Backend
+Machine
+Workspace
+Agent
+State
+```
+
+Key requirements:
+
+- GitHub remains a first-class backend that works while local PCs are unavailable.
+- Local execution remains the path for real filesystem access, local tests, Computer Use, and workers.
+- One ChatGPT Project may bind different local roots on MAIN-PC, VMware, and future machines.
+- The same ChatGPT chat should automatically receive the current machine/backend context instead of requiring the user to restate it.
+- Backend and Agent are independent so local ChatGPT, Codex, Claude Code, and Worker can coexist.
+- Switching targets must surface dirty/unpushed state rather than pretending unpublished changes are visible elsewhere.
+- Preserve existing `Project.root`, lease, Worker capability/worktree, `/mcp/worker`, and Computer Use authorization semantics during migration.
+- Start with the execution data model/resolver and machine bindings. Investigate normal-Chat Project identity before considering any ChatGPT Windows app patch.
+- A Windows-app patch, if required, is limited to Project identity/routing/UI context; it must not duplicate the existing execution engine.
+
+Planned units:
+
+```text
+M8.0 documentation/invariants
+M8.1 execution model + versioned execution.json
+M8.2 machine identity + local Project bindings
+M8.3 execution state observation
+M8.4 Chat execution-context injection
+M8.5 GitHub backend integration
+M8.6 Codex / Claude Code / Worker agent integration
+M8.7 ChatGPT Windows Project-identity/UX integration
+M8.8 explicit handoff workflow
+```
+
+M8.0 is documentation-only. No M8 runtime implementation should begin before the new execution model is reviewed against the current `dev/custom-runtime` repository.
+
 ## Explicit non-goals for early milestones
 
 - Reimplementing Codex itself.
