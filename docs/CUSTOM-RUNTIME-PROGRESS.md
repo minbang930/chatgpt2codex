@@ -239,9 +239,33 @@ Design/live evidence: `docs/M7-WORKER-PLACEMENT.md`.
 - [x] Final cross-platform CI green: run `35175254790` on `1eaf8fa75c24bf814b37090e5f0b4a02bfabb7bd`.
 - [x] Live Windows validation confirmed fixed placement, fixed-over-standalone precedence, blank+standalone, and blank+specific-project placement.
 
+## M8 - Multi-backend Project Execution — design accepted, implementation not started
+
+Architecture source of truth: `docs/MULTI-BACKEND-EXECUTION-ARCHITECTURE.md`.
+
+M8 was defined after re-evaluating the original product goal: ChatGPT2Codex exists to keep real development moving when local Codex quota is exhausted, but GitHub-backed work and local-machine work each have capabilities the other cannot replace.
+
+Accepted design decisions:
+
+- [x] Treat GitHub and local execution as complementary first-class backends.
+- [x] Separate Project / Backend / Machine / Workspace / Agent / State.
+- [x] Support machine-specific local roots for the same logical ChatGPT Project.
+- [x] Keep GitHub usable when no local PC/runtime is online.
+- [x] Keep local Files/Shell/Computer Use/Worker capabilities when a mapped machine is online.
+- [x] Keep Codex and Claude Code as independent Agent choices rather than backend types.
+- [x] Automatically identify execution-machine/backend context for the chat, including explicit context-change events when switching machines.
+- [x] Distinguish conversation continuity from workspace continuity; dirty/unpushed local state is not assumed to exist elsewhere.
+- [x] Preserve existing Core project/lease, Worker worktree/capability, worker-MCP, and Computer Use authority boundaries.
+- [x] Prefer Desktop/local MCP for execution and use a thin ChatGPT Windows patch only if current ChatGPT Project identity cannot otherwise be obtained reliably.
+- [x] Start with a separate versioned execution layer instead of changing existing `Project.root` semantics.
+- [ ] M8.1 implementation: execution types/store/resolver foundation.
+- [ ] M8.2+ implementation and live validation.
+
+No production/runtime code was changed for M8.0; this is intentionally a documentation-first architecture checkpoint.
+
 ## Current queue
 
-- [ ] Select the next roadmap unit before implementation; M7 core placement behavior is complete.
+- [ ] Begin M8.1 only after verifying the live local branch is synchronized with the documented M8.0 architecture.
 - [ ] Naturally cross the original 30-minute local-control TTL during normal use and confirm no `LEASE_REQUIRED` regression; this remains non-blocking.
 - [ ] Keep Worker MCP/app/control isolation green while future work evolves.
 
