@@ -11,7 +11,7 @@ Operational handoff for continuing `chatgpt2codex` across ChatGPT sessions. Veri
 
 ## Current phase
 
-M0-M5, blocking post-M5 stabilization, **M6 - Worker Execution Configuration**, and **M7 - Worker Placement Policy are complete**.
+M0-M5, blocking post-M5 stabilization, **M6 - Worker Execution Configuration**, and **M7 - Worker Placement Policy are complete**. **M8 - Multi-backend Project Execution is the next roadmap phase; M8.0 documentation/invariants are complete and runtime implementation has not started.**
 
 Final M6 cross-platform CI: GitHub Actions run `35172617811` on post-validation HEAD `5dac24f96bd9ae162ad26a0b29bfeb96883526bd` passed Ubuntu, macOS, and Windows.
 
@@ -55,6 +55,43 @@ Live Windows evidence:
 - worker `wrk_caa6c047-cd2f-4ff7-bf6c-f750fdcd5f2e` requested a specific Project while the EXE field was blank, and the actual `browser.projectUrl` matched exactly before task submission.
 
 Detailed evidence: `docs/M7-WORKER-PLACEMENT.md`.
+
+## M8 accepted direction
+
+Source of truth: `docs/MULTI-BACKEND-EXECUTION-ARCHITECTURE.md`.
+
+The new product direction is not merely "give normal Chat local Computer Use." It is to use one ChatGPT Project/chat as a persistent development session that can move between execution targets:
+
+```text
+GitHub remote
+MAIN-PC local
+VMware local
+future local machines
+```
+
+and local agents:
+
+```text
+chatgpt-chat
+codex
+claude-code
+worker
+```
+
+Important M8 invariants:
+
+- Backend and Agent are separate concepts.
+- The same ChatGPT Project can have a different local folder on every machine.
+- GitHub remains a first-class backend and must continue working while local machines are off.
+- Local execution provides real files/tests/Computer Use/workers when the selected machine is online.
+- The runtime should automatically communicate the current machine/backend to normal Chat; the user should not need to say "I switched to PC 2."
+- Conversation continuity does not imply workspace-state continuity.
+- Dirty or unpushed state on one machine must never be represented as available on another machine/GitHub.
+- Do not replace the current `Project.root` model in the first M8 unit. Add a separate execution/profile layer and versioned state first.
+- Do not start by broadly patching the official ChatGPT Windows app. First test whether normal Chat + desktop/local MCP can obtain current ChatGPT Project identity. If not, a thin patch may supply only Project identity/routing/UI context.
+- Existing Worker isolation, `/mcp/worker`, leases, Computer Use policy/audit/kill switch, and local path safety remain authoritative.
+
+M8.1 should begin with only the foundational model/store/resolver and focused tests. Do not jump directly to Windows UI patching, auto-push, or cross-machine dirty-tree synchronization.
 
 ## How to work with the user
 
@@ -235,6 +272,7 @@ M6 is complete. Final authoritative CI evidence:
 
 ## Source-of-truth documents
 
+- `docs/MULTI-BACKEND-EXECUTION-ARCHITECTURE.md` — M8 multi-backend Project/Backend/Machine/Workspace/Agent/State architecture and implementation order.
 - `docs/WORKER-EXECUTION-CONFIG-DESIGN.md` — M6 design and implementation order.
 - `docs/M6-LIVE-VALIDATION.md` — detailed M6.5 live evidence and final CI.
 - `docs/M7-WORKER-PLACEMENT.md` — M7 placement policy, implementation, live validation, and final CI.
@@ -258,6 +296,7 @@ Keep detailed chronological evidence in `CUSTOM-RUNTIME-PROGRESS.md` and `M6-LIV
 3. Read `docs/CUSTOM-RUNTIME-PROGRESS.md` and the next roadmap unit before making changes.
 4. Read `docs/M6-LIVE-VALIDATION.md` only when execution-configuration/live Worker details are relevant.
 5. Read `docs/M7-WORKER-PLACEMENT.md` when Worker ChatGPT Project placement/routing is relevant.
-6. If docs and repo disagree, trust repo and correct the docs.
+6. Read `docs/MULTI-BACKEND-EXECUTION-ARCHITECTURE.md` before starting or changing M8 work.
+7. If docs and repo disagree, trust repo and correct the docs.
 
-M6 and M7 core contracts are complete. Revalidate only when future ChatGPT UI/account changes or placement-policy changes affect the established behavior.
+M6 and M7 core contracts are complete. M8.0 is documentation-only; M8.1 is the next implementation unit. Revalidate M6/M7 only when future ChatGPT UI/account changes or placement-policy changes affect the established behavior.
