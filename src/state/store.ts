@@ -52,10 +52,11 @@ const ControlLeaseSchema = LeaseSchema.extend({ preset: z.literal("control") });
 /**
  * Session document shape (active project, mode, lease) — PRD §6, §7.
  *
- * `controlLease` is the durable local-control authorization lane. Remote MCP
- * callers cannot mint it because preset=control is rejected before session
- * mutation. Keeping it separate from `lease` lets normal project presets
- * change without forcing the owner to re-arm Computer Use every time.
+ * `controlLease` is the durable explicit local-control authorization lane.
+ * `adminControlLease` is separate authority minted automatically only while
+ * the locally configured Full Computer Use (Admin) mode is active. Keeping the
+ * lanes separate means turning Admin mode off immediately makes its lease
+ * unusable without weakening an explicitly armed restricted-mode control lease.
  */
 const SessionSchema = z.object({
   version: z.number().int().nonnegative(),
@@ -64,6 +65,7 @@ const SessionSchema = z.object({
   mode: z.enum(["observe", "read", "edit", "verify", "danger"]),
   lease: LeaseSchema.nullable(),
   controlLease: ControlLeaseSchema.nullable().default(null),
+  adminControlLease: ControlLeaseSchema.nullable().default(null),
 });
 
 export type SessionDocument = z.infer<typeof SessionSchema>;
@@ -86,6 +88,7 @@ function emptySession(): SessionDocument {
     mode: "observe",
     lease: null,
     controlLease: null,
+    adminControlLease: null,
   };
 }
 
@@ -210,6 +213,9 @@ export class Store {
     const explicitControlLease = Object.prototype.hasOwnProperty.call(incoming, "controlLease")
       ? incoming.controlLease
       : undefined;
+    const explicitAdminControlLease = Object.prototype.hasOwnProperty.call(incoming, "adminControlLease")
+      ? incoming.adminControlLease
+      : undefined;
 
     let controlLease: unknown;
     if (explicitControlLease !== undefined) {
@@ -227,10 +233,23 @@ export class Store {
       controlLease = current.controlLease;
     }
 
+    let adminControlLease: unknown;
+    if (explicitAdminControlLease !== undefined) {
+      adminControlLease = explicitAdminControlLease;
+    } else if (incoming.activeProjectId === null && incomingLease === null) {
+      adminControlLease = null;
+    } else {
+      // Full/Admin control authority is a distinct lane. It may remain on
+      // disk across a runtime restart, but lease-guard only recognizes it
+      // while the local access mode is still Full/Admin.
+      adminControlLease = current.adminControlLease;
+    }
+
     const merged = {
       ...emptySession(),
       ...incoming,
       controlLease,
+      adminControlLease,
     };
     // updatedAt is always server-recomputed, never trusted from caller input.
     merged.updatedAt = Date.now();

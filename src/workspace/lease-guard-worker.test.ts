@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { Lease, ToolContext } from "../types.js";
 import { requireProjectLease } from "./lease-guard.js";
 
 const projectId = "project-worker-lease";
 const projectRoot = "/tmp/project-worker-lease";
+
+afterEach(() => {
+  delete process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE;
+});
 
 function baseConfig() {
   return {
@@ -126,6 +130,16 @@ function splitAuthorityCtx(): {
 }
 
 describe("worker orchestration lease capability", () => {
+  it("lets explicit Full/Admin mode satisfy every non-control project capability", async () => {
+    process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE = "full";
+
+    for (const capability of ["read", "verify", "write", "image", "remote", "worker"] as const) {
+      await expect(requireProjectLease(ctxFor("control"), projectId, capability), capability).resolves.toMatchObject({
+        preset: "control",
+      });
+    }
+  });
+
   it("allows control leases to orchestrate workers without granting direct write", async () => {
     const ctx = ctxFor("control");
 

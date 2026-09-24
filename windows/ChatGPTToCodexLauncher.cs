@@ -109,6 +109,7 @@ internal sealed class LauncherForm : Form
     private string workerProjectUrl;
     private bool publicTunnelEnabled;
     private bool networkChatGptEnabled;
+    private bool fullControlAccess;
     private bool launchAtStartup;
     private bool startMcpOnOpen;
     private bool autoCheckUpdates;
@@ -510,6 +511,7 @@ internal sealed class LauncherForm : Form
                 else if (key == "PublicHostname") configuredPublicHost = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
                 else if (key == "EnablePublicTunnel") publicTunnelEnabled = ParseBool(value);
                 else if (key == "AllowChatGptNetwork") networkChatGptEnabled = ParseBool(value);
+                else if (key == "ControlAccessMode") fullControlAccess = string.Equals(value, "full", StringComparison.OrdinalIgnoreCase);
                 else if (key == "LaunchAtStartup") launchAtStartup = ParseBool(value);
                 else if (key == "StartMcpOnOpen") startMcpOnOpen = ParseBool(value);
                 else if (key == "AutoCheckUpdates") autoCheckUpdates = ParseBool(value);
@@ -525,6 +527,14 @@ internal sealed class LauncherForm : Form
 
         var networkSetting = Environment.GetEnvironmentVariable("CHATGPT2CODEX_NETWORK_CHATGPT");
         if (!string.IsNullOrWhiteSpace(networkSetting)) networkChatGptEnabled = ParseBool(networkSetting);
+
+        var controlAccessSetting = Environment.GetEnvironmentVariable("CHATGPT2CODEX_CONTROL_ACCESS_MODE");
+        if (!string.IsNullOrWhiteSpace(controlAccessSetting))
+        {
+            fullControlAccess = string.Equals(controlAccessSetting.Trim(), "full", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(controlAccessSetting.Trim(), "admin", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(controlAccessSetting.Trim(), "full-control", StringComparison.OrdinalIgnoreCase);
+        }
 
         if (Environment.GetEnvironmentVariable("CHATGPT2CODEX_EXPOSE_WEB") == "1" ||
             !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PUBLIC_HOSTNAME")) ||
@@ -545,6 +555,7 @@ internal sealed class LauncherForm : Form
             "PublicHostname=" + EncodeSetting(configuredPublicHost ?? string.Empty),
             "EnablePublicTunnel=" + EncodeSetting(publicTunnelEnabled ? "true" : "false"),
             "AllowChatGptNetwork=" + EncodeSetting(networkChatGptEnabled ? "true" : "false"),
+            "ControlAccessMode=" + EncodeSetting(fullControlAccess ? "full" : "restricted"),
             "LaunchAtStartup=" + EncodeSetting(launchAtStartup ? "true" : "false"),
             "StartMcpOnOpen=" + EncodeSetting(startMcpOnOpen ? "true" : "false"),
             "AutoCheckUpdates=" + EncodeSetting(autoCheckUpdates ? "true" : "false"),
@@ -801,7 +812,7 @@ internal sealed class LauncherForm : Form
         {
             form.Text = L("settingsTitle");
             form.Width = 640;
-            form.Height = 750;
+            form.Height = 782;
             form.StartPosition = FormStartPosition.CenterParent;
             form.FormBorderStyle = FormBorderStyle.FixedDialog;
             form.MaximizeBox = false;
@@ -875,36 +886,53 @@ internal sealed class LauncherForm : Form
             networkCheck.SetBounds(180, 250, 390, 24);
             form.Controls.Add(networkCheck);
 
-            form.Controls.Add(NewLabel(L("publicHostname"), 24, 290, 150));
+            var korean = string.Equals(ResolveLanguageCode(preferredLanguage), "ko", StringComparison.OrdinalIgnoreCase);
+            var fullControlCheck = new CheckBox();
+            fullControlCheck.Text = korean ? "전체 권한 (Admin)" : "Full access (Admin)";
+            fullControlCheck.Checked = fullControlAccess;
+            fullControlCheck.SetBounds(180, 278, 390, 24);
+            fullControlCheck.CheckedChanged += delegate
+            {
+                if (!fullControlCheck.Checked || fullControlAccess) return;
+                var warning = korean
+                    ? "전체 권한을 켜면 활성 프로젝트에서 읽기/쓰기/검증/이미지/원격/worker 권한과 ChatGPT 네트워크 명령이 허용되고, Computer Use는 앱 allowlist와 민감 앱 차단을 우회할 수 있습니다.\r\n\r\n프로젝트 경계, secret 경로 보호, OS 파괴 명령 차단, Computer Use 확인, Kill Switch, 감사 로그는 계속 유지됩니다.\r\n\r\n전체 권한을 켜시겠습니까?"
+                    : "Full access grants read/write/verify/image/remote/worker authority for the active project, enables ChatGPT network commands, and lets Computer Use bypass the app allowlist and sensitive-app blocking.\r\n\r\nProject confinement, secret-path protection, OS-destructive command guards, Computer Use confirmation, Kill Switch, and audit logging remain active.\r\n\r\nEnable Full access?";
+                if (MessageBox.Show(form, warning, "ChatGPT To Codex", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+                {
+                    fullControlCheck.Checked = false;
+                }
+            };
+            form.Controls.Add(fullControlCheck);
+
+            form.Controls.Add(NewLabel(L("publicHostname"), 24, 322, 150));
             var hostBox = new TextBox();
             hostBox.Text = configuredPublicHost ?? string.Empty;
-            hostBox.SetBounds(180, 286, 342, 24);
+            hostBox.SetBounds(180, 318, 342, 24);
             form.Controls.Add(hostBox);
 
-            var hostHint = NewLabel(L("publicHostnameHint"), 180, 316, 342);
-            hostHint.SetBounds(180, 314, 342, 42);
+            var hostHint = NewLabel(L("publicHostnameHint"), 180, 348, 342);
+            hostHint.SetBounds(180, 346, 342, 42);
             hostHint.ForeColor = System.Drawing.SystemColors.GrayText;
             form.Controls.Add(hostHint);
 
-            form.Controls.Add(NewLabel(L("localPort"), 24, 370, 150));
+            form.Controls.Add(NewLabel(L("localPort"), 24, 402, 150));
             var portBox = new NumericUpDown();
             portBox.Minimum = 1;
             portBox.Maximum = 65535;
             portBox.Value = Math.Min(65535, Math.Max(1, port));
-            portBox.SetBounds(180, 366, 120, 24);
+            portBox.SetBounds(180, 398, 120, 24);
             form.Controls.Add(portBox);
 
-            form.Controls.Add(NewLabel(L("githubRepositoryURL"), 24, 410, 150));
+            form.Controls.Add(NewLabel(L("githubRepositoryURL"), 24, 442, 150));
             var repoBox = new TextBox();
             repoBox.Text = githubRepoUrl ?? string.Empty;
-            repoBox.SetBounds(180, 406, 342, 24);
+            repoBox.SetBounds(180, 438, 342, 24);
             form.Controls.Add(repoBox);
 
-            var korean = string.Equals(ResolveLanguageCode(preferredLanguage), "ko", StringComparison.OrdinalIgnoreCase);
-            form.Controls.Add(NewLabel(korean ? "Worker ChatGPT 프로젝트 URL" : "Worker ChatGPT Project URL", 24, 444, 150));
+            form.Controls.Add(NewLabel(korean ? "Worker ChatGPT 프로젝트 URL" : "Worker ChatGPT Project URL", 24, 476, 150));
             var workerProjectBox = new TextBox();
             workerProjectBox.Text = workerProjectUrl ?? string.Empty;
-            workerProjectBox.SetBounds(180, 440, 342, 24);
+            workerProjectBox.SetBounds(180, 472, 342, 24);
             form.Controls.Add(workerProjectBox);
 
             var workerProjectHint = NewLabel(
@@ -912,60 +940,60 @@ internal sealed class LauncherForm : Form
                     ? "비워두면 자동/유동 배치됩니다. URL을 넣으면 새 Worker가 항상 해당 ChatGPT Project에 생성됩니다."
                     : "Blank uses automatic/dynamic placement. Set a URL to force every new Worker into that ChatGPT Project.",
                 180,
-                470,
+                502,
                 342);
-            workerProjectHint.SetBounds(180, 468, 342, 42);
+            workerProjectHint.SetBounds(180, 500, 342, 42);
             workerProjectHint.ForeColor = System.Drawing.SystemColors.GrayText;
             form.Controls.Add(workerProjectHint);
 
-            var copyConnector = NewButton(L("copyConnector"), 24, 524, 156);
+            var copyConnector = NewButton(L("copyConnector"), 24, 556, 156);
             copyConnector.Click += delegate { CopyMcpUrl(); };
             form.Controls.Add(copyConnector);
 
-            var copyOwner = NewButton(L("copyOwnerToken"), 194, 524, 156);
+            var copyOwner = NewButton(L("copyOwnerToken"), 194, 556, 156);
             copyOwner.Enabled = !string.IsNullOrEmpty(ownerToken);
             copyOwner.Click += delegate { CopyOwnerToken(); };
             form.Controls.Add(copyOwner);
 
-            var generateOwner = NewButton(L("autoGenerateToken"), 364, 524, 158);
+            var generateOwner = NewButton(L("autoGenerateToken"), 364, 556, 158);
             generateOwner.Click += delegate { AutoGenerateOwnerToken(); };
             form.Controls.Add(generateOwner);
 
-            var localHealth = NewButton(L("openLocalHealth"), 24, 562, 156);
+            var localHealth = NewButton(L("openLocalHealth"), 24, 594, 156);
             localHealth.Click += delegate { OpenLocalHealth(); };
             form.Controls.Add(localHealth);
 
-            var publicHealth = NewButton(L("openPublicHealth"), 194, 562, 156);
+            var publicHealth = NewButton(L("openPublicHealth"), 194, 594, 156);
             publicHealth.Click += delegate { OpenPublicHealth(); };
             form.Controls.Add(publicHealth);
 
-            var logs = NewButton(L("showLogs"), 364, 562, 158);
+            var logs = NewButton(L("showLogs"), 364, 594, 158);
             logs.Click += delegate { ShowLogs(); };
             form.Controls.Add(logs);
 
-            var github = NewButton(L("openGithub"), 24, 600, 156);
+            var github = NewButton(L("openGithub"), 24, 632, 156);
             github.Click += delegate { OpenGithub(); };
             form.Controls.Add(github);
 
-            var checkUpdates = NewButton(L("checkUpdates"), 194, 600, 156);
+            var checkUpdates = NewButton(L("checkUpdates"), 194, 632, 156);
             checkUpdates.Click += delegate { CheckUpdates(true); };
             form.Controls.Add(checkUpdates);
 
-            var about = NewButton(L("about"), 364, 600, 158);
+            var about = NewButton(L("about"), 364, 632, 158);
             about.Click += delegate
             {
                 MessageBox.Show(form, "ChatGPT To Codex by ezBuilder\r\nCopyright 2026 ezBuilder. All rights reserved.", "ChatGPT To Codex", MessageBoxButtons.OK, MessageBoxIcon.Information);
             };
             form.Controls.Add(about);
 
-            var copyright = NewLabel("Copyright 2026 ezBuilder. All rights reserved.", 24, 658, 300);
+            var copyright = NewLabel("Copyright 2026 ezBuilder. All rights reserved.", 24, 690, 300);
             form.Controls.Add(copyright);
 
-            var cancel = NewButton(L("cancel"), 356, 652, 78);
+            var cancel = NewButton(L("cancel"), 356, 684, 78);
             cancel.DialogResult = DialogResult.Cancel;
             form.Controls.Add(cancel);
 
-            var save = NewButton(L("save"), 444, 652, 78);
+            var save = NewButton(L("save"), 444, 684, 78);
             save.DialogResult = DialogResult.OK;
             form.AcceptButton = save;
             form.CancelButton = cancel;
@@ -1001,6 +1029,7 @@ internal sealed class LauncherForm : Form
             autoCheckUpdates = updatesCheck.Checked;
             publicTunnelEnabled = tunnelCheck.Checked;
             networkChatGptEnabled = networkCheck.Checked;
+            fullControlAccess = fullControlCheck.Checked;
             configuredPublicHost = string.IsNullOrWhiteSpace(hostBox.Text) ? null : hostBox.Text.Trim();
             port = (int)portBox.Value;
             githubRepoUrl = string.IsNullOrWhiteSpace(repoBox.Text) ? "https://github.com/ezBuilder/chatgpt2codex" : repoBox.Text.Trim();
@@ -1378,6 +1407,7 @@ internal sealed class LauncherForm : Form
         };
         process.StartInfo.EnvironmentVariables["CHATGPT2CODEX_WORKER_PROJECT_URL"] = workerProjectUrl ?? string.Empty;
         process.StartInfo.EnvironmentVariables["CHATGPT2CODEX_NETWORK_CHATGPT"] = networkChatGptEnabled ? "1" : "0";
+        process.StartInfo.EnvironmentVariables["CHATGPT2CODEX_CONTROL_ACCESS_MODE"] = fullControlAccess ? "full" : "restricted";
         if (autoGenerateOwnerTokenOnNextStart)
         {
             process.StartInfo.EnvironmentVariables["CHATGPT2CODEX_ROTATE_OWNER_TOKEN"] = "1";

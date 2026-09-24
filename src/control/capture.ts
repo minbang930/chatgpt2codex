@@ -5,11 +5,13 @@ import { captureE2eAppScreenshot, captureE2eScreenshot, type E2eScreenshotResult
 import { withComputerUseActivity, withComputerUseIndicatorSuppressed } from "./activity-indicator.js";
 import { computerUseCancelGeneration, waitForComputerUseDelay } from "./cancel.js";
 import * as winNative from "./win-native.js";
+import * as cuaDriver from "./cua-driver.js";
+import { isCuaWindowsBackend } from "./windows-backend-mode.js";
 
 export interface ControlScreenshotResult extends E2eScreenshotResult {
   dpi?: number;
   scaleFactor?: number;
-  captureMethod?: "print-window" | "screen-region";
+  captureMethod?: "print-window" | "screen-region" | "cua-driver";
 }
 
 function slug(value: string): string {
@@ -30,7 +32,7 @@ async function screenshotDir(projectRoot: string): Promise<string> {
 
 export async function captureControlAppScreenshot(
   projectRoot: string,
-  input: { appName: string; label?: string; waitMs?: number },
+  input: { appName: string; label?: string; waitMs?: number; semantic?: boolean },
 ): Promise<ControlScreenshotResult> {
   if (process.platform !== "win32") {
     return captureE2eAppScreenshot(projectRoot, input);
@@ -44,12 +46,14 @@ export async function captureControlAppScreenshot(
     const dir = await screenshotDir(projectRoot);
     const file = path.join(dir, `${Date.now()}-${slug(input.label ?? input.appName)}.png`);
 
-    // WDA_EXCLUDEFROMCAPTURE is applied to the indicator windows themselves,
-    // but CopyFromScreen/driver behavior is not uniform across Windows builds
-    // and VMs. Hide the cosmetic overlay during the actual pixel read as a
-    // second line of defense, then restore it while the activity scope stays
-    // alive. This never changes control authorization.
-    const captured = await withComputerUseIndicatorSuppressed(() => winNative.captureAppWindow(input.appName, file));
+    // Preserve the existing activity-overlay suppression around both backends.
+    // Cua Driver gets an explicit output path and returns its UIA snapshot from
+    // the same get_window_state call; snapshotSemanticElements can reuse it.
+    const captured = isCuaWindowsBackend()
+      ? await withComputerUseIndicatorSuppressed(() =>
+          cuaDriver.captureAppWindow(input.appName, file, { includeAccessibilityTree: input.semantic !== false }),
+        )
+      : await withComputerUseIndicatorSuppressed(() => winNative.captureAppWindow(input.appName, file));
     const stat = await fs.stat(file).catch(() => null);
     if (!stat?.isFile() || stat.size <= 0) {
       await fs.unlink(file).catch(() => undefined);
@@ -75,10 +79,8 @@ export async function captureControlScreenScreenshot(
   projectRoot: string,
   input: { label?: string; waitMs?: number },
 ): Promise<ControlScreenshotResult> {
-  // M3 deliberately does not add unrestricted Windows full-screen capture.
-  // The remotely exposed path already rejects it for privacy, and local-only
-  // Windows full-screen observation can be added later if it gets a separate
-  // privacy model. Preserve the existing macOS implementation unchanged.
+  // Windows remains explicit-app-only in both backends. Do not widen the
+  // privacy surface just because Cua Driver can capture a desktop.
   if (process.platform === "win32") {
     throw new DomainError(
       ErrorCode.NOT_IMPLEMENTED,

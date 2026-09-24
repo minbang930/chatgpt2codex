@@ -362,10 +362,58 @@ function Stop-StaleRuntimeProcesses([int]$PortToStop) {
 Need-Command node
 Set-Location $Root
 
-if (-not (Test-Path (Join-Path $Root "dist\cli.js"))) {
+$distCli = Join-Path $Root "dist\cli.js"
+$sourceRoot = Join-Path $Root "src"
+$tsconfig = Join-Path $Root "tsconfig.json"
+$packageJson = Join-Path $Root "package.json"
+$sourceCheckout = (Test-Path -LiteralPath $sourceRoot -PathType Container) -and
+    (Test-Path -LiteralPath $tsconfig -PathType Leaf)
+
+$needsBuild = -not (Test-Path -LiteralPath $distCli -PathType Leaf)
+$buildReason = if ($needsBuild) { "dist/cli.js missing" } else { $null }
+
+if (-not $needsBuild -and $sourceCheckout) {
+    $distWriteTime = (Get-Item -LiteralPath $distCli).LastWriteTimeUtc
+    $newestSource = Get-ChildItem -LiteralPath $sourceRoot -Recurse -File -Filter "*.ts" |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1
+
+    $metadataFiles = @($tsconfig, $packageJson) |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+        ForEach-Object { Get-Item -LiteralPath $_ } |
+        Sort-Object LastWriteTimeUtc -Descending
+
+    $newestMetadata = $metadataFiles | Select-Object -First 1
+    $newestInputWriteTime = $distWriteTime
+    $newestInputLabel = $null
+
+    if ($newestSource -and $newestSource.LastWriteTimeUtc -gt $newestInputWriteTime) {
+        $newestInputWriteTime = $newestSource.LastWriteTimeUtc
+        $newestInputLabel = $newestSource.FullName
+    }
+    if ($newestMetadata -and $newestMetadata.LastWriteTimeUtc -gt $newestInputWriteTime) {
+        $newestInputWriteTime = $newestMetadata.LastWriteTimeUtc
+        $newestInputLabel = $newestMetadata.FullName
+    }
+
+    if ($newestInputWriteTime -gt $distWriteTime) {
+        $needsBuild = $true
+        $relativeInput = if ($newestInputLabel -and $newestInputLabel.StartsWith($Root, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $newestInputLabel.Substring($Root.Length).TrimStart('\', '/')
+        } else {
+            $newestInputLabel
+        }
+        $buildReason = "source newer than dist ($relativeInput)"
+    }
+}
+
+if ($needsBuild) {
     Need-Command npm
-    Write-Host "[chatgpt2codex] dist/cli.js missing; building..."
+    Write-Host "[chatgpt2codex] $buildReason; building..."
     npm run build
+    if ($LASTEXITCODE -ne 0) {
+        throw "chatgpt2codex TypeScript build failed."
+    }
 }
 
 Stop-StaleRuntimeProcesses $Port

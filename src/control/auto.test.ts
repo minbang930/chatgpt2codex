@@ -14,6 +14,7 @@ describe("control/auto", () => {
 
   afterEach(async () => {
     delete process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST;
+    delete process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE;
     await fs.rm(stateDir, { recursive: true, force: true });
   });
 
@@ -36,6 +37,16 @@ describe("control/auto", () => {
     const scope = await setAuto(stateDir, { apps: ["TextEdit", "1Password 7", "Slack"], minutes: 10 });
     // TextEdit is allowlisted; 1Password is sensitive; Slack isn't allowlisted at all.
     expect(scope.apps).toEqual(["textedit"]);
+  });
+
+  it("full access lets auto scope include apps outside the allowlist, including sensitive apps", async () => {
+    process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE = "full";
+    delete process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST;
+
+    const scope = await setAuto(stateDir, { apps: ["1Password 7", "Notepad.exe"], minutes: 5 });
+    expect(scope.apps).toEqual(["1password 7", "notepad.exe"]);
+    expect((await autoDecision(stateDir, { appName: "1Password 7", kind: "click" })).allowed).toBe(true);
+    expect((await autoDecision(stateDir, { appName: "Notepad.exe", kind: "type" })).allowed).toBe(true);
   });
 
   it("autoDecision is true for an in-scope, allowlisted, non-sensitive app within TTL", async () => {

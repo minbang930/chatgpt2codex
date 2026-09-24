@@ -95,6 +95,7 @@ describe("control/executor", () => {
 
   afterEach(async () => {
     delete process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST;
+    delete process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE;
     vi.clearAllMocks();
     await fs.rm(stateDir, { recursive: true, force: true });
   });
@@ -157,6 +158,27 @@ describe("control/executor", () => {
     expect(final?.status).toBe("done");
     expect(final?.result?.ok).toBe(false);
     expect(events.some((e) => e.type === "control.action.blocked")).toBe(true);
+  });
+
+  it("full access executes even when the target and frontmost apps are sensitive and not allowlisted", async () => {
+    process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE = "full";
+    delete process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST;
+    vi.mocked(macInput.resolveFrontmostApp).mockResolvedValue("1Password 7");
+    const record = await enqueue(stateDir, {
+      appName: "1Password 7",
+      kind: "key",
+      target: {},
+      keyCode: 36,
+      reason: "full access test",
+    });
+    await approveAction(stateDir, record.actionId);
+
+    await runExecutorOnce(ctx);
+
+    expect(macInput.pressKey).toHaveBeenCalledWith("1Password 7", 36);
+    const final = await getAction(stateDir, record.actionId);
+    expect(final?.status).toBe("done");
+    expect(final?.result?.ok).toBe(true);
   });
 
   it("clamps an out-of-range windowPoint xRel/yRel before resolving it (HTTP action bridge zod-bypass defense in depth)", async () => {

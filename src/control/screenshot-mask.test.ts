@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { DomainError, ErrorCode } from "../types.js";
 import { assertScreenshotTargetAllowed } from "./screenshot-mask.js";
 
 describe("control/screenshot-mask assertScreenshotTargetAllowed", () => {
+  afterEach(() => {
+    delete process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE;
+  });
+
   it("allows an app-targeted capture when the app is not sensitive", () => {
     expect(() => assertScreenshotTargetAllowed("TextEdit")).not.toThrow();
   });
@@ -20,6 +24,12 @@ describe("control/screenshot-mask assertScreenshotTargetAllowed", () => {
   it("allows a full-screen capture (no appName) when nothing sensitive is frontmost", () => {
     expect(() => assertScreenshotTargetAllowed(undefined, "TextEdit")).not.toThrow();
     expect(() => assertScreenshotTargetAllowed(undefined, undefined)).not.toThrow();
+  });
+
+  it("full access allows sensitive targeted and full-screen capture gates", () => {
+    process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE = "full";
+    expect(() => assertScreenshotTargetAllowed("1Password 7")).not.toThrow();
+    expect(() => assertScreenshotTargetAllowed(undefined, "System Settings")).not.toThrow();
   });
 
   it("blocks a full-screen capture (no appName) when a sensitive app is frontmost", () => {

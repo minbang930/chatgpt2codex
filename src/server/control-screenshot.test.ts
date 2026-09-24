@@ -93,6 +93,7 @@ describe("computer_screenshot full-screen sensitive-app gate", () => {
     delete process.env.CHATGPT2CODEX_CONTROL;
     delete process.env.CHATGPT2CODEX_CONTROL_CHATGPT;
     delete process.env.CHATGPT2CODEX_CONTROL_ALLOWLIST;
+    delete process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE;
     vi.clearAllMocks();
     await fs.rm(stateDir, { recursive: true, force: true });
     await fs.rm(projectRoot, { recursive: true, force: true });
@@ -139,6 +140,19 @@ describe("computer_screenshot full-screen sensitive-app gate", () => {
     expect(result?.structuredContent?.code).toBe("SENSITIVE_TARGET_BLOCKED");
     expect(localE2e.captureE2eScreenshot).not.toHaveBeenCalled();
     delete process.env.CHATGPT2CODEX_CONTROL_CHATGPT;
+  });
+
+  it("full access allows full-screen capture while exposed, even with a sensitive frontmost app", async () => {
+    process.env.CHATGPT2CODEX_CONTROL_CHATGPT = "1";
+    process.env.CHATGPT2CODEX_CONTROL_ACCESS_MODE = "full";
+    vi.mocked(macInput.resolveFrontmostApp).mockResolvedValue("1Password 7");
+    const ctx = makeCtx(stateDir, projectRoot);
+    const tools = await registeredTools(ctx);
+
+    const result = await tools.computer_screenshot?.handler?.({});
+
+    expect(result?.isError).toBeFalsy();
+    expect(localE2e.captureE2eScreenshot).toHaveBeenCalledTimes(1);
   });
 
   it("still allows an app-targeted capture when exposed to ChatGPT and the app is allowlisted", async () => {

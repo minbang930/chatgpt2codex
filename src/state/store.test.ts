@@ -96,6 +96,7 @@ describe("Store", () => {
     expect(session.activeProjectId).toBeNull();
     expect(session.lease).toBeNull();
     expect(session.controlLease).toBeNull();
+    expect(session.adminControlLease).toBeNull();
   });
 
   it("round-trips a session with an active lease", async () => {
@@ -116,6 +117,7 @@ describe("Store", () => {
     expect(session.mode).toBe("edit");
     expect(session.lease?.leaseId).toBe("lease-1");
     expect(session.controlLease).toBeNull();
+    expect(session.adminControlLease).toBeNull();
   });
 
   it("promotes a locally granted control lease into durable control authorization", async () => {
@@ -170,6 +172,34 @@ describe("Store", () => {
     expect(session.controlLease?.leaseId).toBe("lease-control");
   });
 
+  it("round-trips Admin control authorization in a lane separate from the normal and explicit control leases", async () => {
+    await store.setSession({
+      activeProjectId: "alpha-app",
+      mode: "edit",
+      lease: {
+        projectId: "alpha-app",
+        leaseId: "lease-write",
+        projectRoot: "/workspace/alpha-app",
+        preset: "full-write",
+        issuedAt: 1000,
+        expiresAt: 4000,
+      },
+      adminControlLease: {
+        projectId: "alpha-app",
+        leaseId: "lease-admin-control",
+        projectRoot: "/workspace/alpha-app",
+        preset: "control",
+        issuedAt: 1000,
+        expiresAt: 4000,
+      },
+    });
+
+    const session = await store.getSession();
+    expect(session.lease?.preset).toBe("full-write");
+    expect(session.controlLease).toBeNull();
+    expect(session.adminControlLease?.leaseId).toBe("lease-admin-control");
+  });
+
   it("clears durable control authorization on an explicit empty-session reset", async () => {
     await store.setSession({
       activeProjectId: "alpha-app",
@@ -190,6 +220,7 @@ describe("Store", () => {
     expect(session.activeProjectId).toBeNull();
     expect(session.lease).toBeNull();
     expect(session.controlLease).toBeNull();
+    expect(session.adminControlLease).toBeNull();
   });
 
   it("migrates an older active control lease into the durable control lane when reading", async () => {

@@ -1,9 +1,9 @@
 import { promises as fs } from "node:fs";
 import { DomainError, ErrorCode, makeResult, type ToolContext, type ToolResult } from "../types.js";
-import { requireProjectLease } from "../workspace/lease-guard.js";
+import { grantAdminControlLease, requireProjectLease, revokeAdminControlLease } from "../workspace/lease-guard.js";
 import { resolveActiveProject } from "../workspace/active.js";
 import { redact } from "../policy/secrets.js";
-import { assertAllowedTarget, controlAllowlist, isAppAllowed, isControlChatGptExposed } from "./policy.js";
+import { assertAllowedTarget, controlAllowlist, isAppAllowed, isControlChatGptExposed, isControlFullAccess } from "./policy.js";
 import { assertScreenshotTargetAllowed, maskSensitiveRegions } from "./screenshot-mask.js";
 import { captureControlAppScreenshot, captureControlScreenScreenshot } from "./capture.js";
 import { executeApprovedAction } from "./executor.js";
@@ -25,7 +25,7 @@ import {
 } from "./queue.js";
 
 /**
- * Handlers for the 4 Option B desktop-control MCP tools. Registered
+ * Handlers for the Option B desktop-control MCP tools. Registered
  * conditionally by src/server/tools.ts (only when isControlEnabled()), and
  * kept intentionally free of any dependency on src/server/tools.ts /
  * src/server/actions.ts to avoid a module cycle — both of those import
@@ -97,14 +97,95 @@ async function withControlErrorMapping<T extends Record<string, unknown>>(
   }
 }
 
-/** Both gates: an active project must hold a `control`-capable lease. */
+/**
+ * Resolve desktop-control authority for the active project.
+ *
+ * Restricted mode still requires an explicitly armed local control lease.
+ * Full/Admin mode treats the local owner setting itself as authorization:
+ * if no usable control lease exists, mint a separate Admin lease for the
+ * active project and transparently renew it on later calls. A set kill switch
+ * blocks this auto-grant path, so kill cannot be undone remotely.
+ */
 async function requireControlLease(ctx: ToolContext): Promise<{ projectId: string; root: string }> {
   const active = await resolveActiveProject(ctx);
   if (!active) {
-    throw new DomainError(ErrorCode.PROJECT_NOT_SELECTED, "Select a project with project_select preset=control first");
+    throw new DomainError(
+      ErrorCode.PROJECT_NOT_SELECTED,
+      isControlFullAccess()
+        ? "Select an active project before using Full Computer Use (Admin)"
+        : "Select a project with project_select preset=control first",
+    );
   }
-  await requireProjectLease(ctx, active.projectId, "control");
+
+  try {
+    await requireProjectLease(ctx, active.projectId, "control");
+  } catch (error) {
+    const canAutoGrant =
+      isControlFullAccess() &&
+      error instanceof DomainError &&
+      (error.code === ErrorCode.PERMISSION_DENIED || error.code === ErrorCode.LEASE_REQUIRED);
+    if (!canAutoGrant) throw error;
+
+    if (await isKilled(ctx.stateDir)) {
+      throw new DomainError(
+        ErrorCode.CONTROL_KILLED,
+        "Control session is killed; toggle Full Computer Use (Admin) off/on locally or grant a fresh local control lease to resume",
+      );
+    }
+    await grantAdminControlLease(ctx, active.projectId, active.root);
+  }
+
   return { projectId: active.projectId, root: active.root };
+}
+
+export interface ComputerLaunchAppInput {
+  appName: string;
+}
+
+export async function handleComputerLaunchApp(
+  ctx: ToolContext,
+  input: ComputerLaunchAppInput,
+): Promise<CallToolResultLike> {
+  return withControlErrorMapping(ctx, "computer_launch_app", input, async () => {
+    const { projectId } = await requireControlLease(ctx);
+    assertComputerUseNotRecentlyCancelled();
+
+    if (await isKilled(ctx.stateDir)) {
+      throw new DomainError(ErrorCode.CONTROL_KILLED, "Control session is killed; grant a new control lease to resume");
+    }
+
+    assertAllowedTarget({
+      appName: input.appName,
+      allowlist: controlAllowlist(),
+    });
+
+    const result = await desktopInput.launchApp(input.appName);
+    await ctx.ledger.append({
+      type: "control.app.launched",
+      projectId,
+      appName: input.appName,
+      pid: result.pid,
+      running: result.running,
+      active: result.active,
+      windowCount: result.windowCount,
+    });
+
+    return {
+      structuredContent: {
+        appName: result.appName,
+        pid: result.pid ?? null,
+        running: result.running,
+        active: result.active,
+        windowCount: result.windowCount,
+      },
+      content: [
+        {
+          type: "text",
+          text: `Launched ${isControlFullAccess() ? "app" : "allowlisted app"} ${input.appName} through Computer Use (pid=${result.pid ?? "unknown"}, windows=${result.windowCount}).`,
+        },
+      ],
+    } satisfies CallToolResultLike;
+  });
 }
 
 export interface ComputerScreenshotInput {
@@ -133,13 +214,14 @@ export async function handleComputerScreenshot(ctx: ToolContext, input: Computer
     // opted in. Without this, any non-denylisted, non-allowlisted app could
     // be captured even though it could never be clicked/typed into.
     const allowlist = controlAllowlist();
-    if (input.appName !== undefined) {
+    const fullAccess = isControlFullAccess();
+    if (!fullAccess && input.appName !== undefined) {
       if (!isAppAllowed(input.appName, allowlist)) {
         throw new DomainError(ErrorCode.SENSITIVE_TARGET_BLOCKED, `App is not on the control allowlist: ${input.appName}`, {
           appName: input.appName,
         });
       }
-    } else if (isControlChatGptExposed()) {
+    } else if (!fullAccess && isControlChatGptExposed()) {
       // Full-screen capture can include background sensitive windows. The
       // remotely reachable mode therefore requires an explicit allowlisted
       // appName and captures only that selected window.
@@ -384,13 +466,27 @@ export interface ComputerKillSwitchInput {
 
 export async function handleComputerKillSwitch(ctx: ToolContext, input: ComputerKillSwitchInput): Promise<CallToolResultLike> {
   return withControlErrorMapping(ctx, "computer_kill_switch", input, async () => {
+    // Keep kill idempotent in Full/Admin mode even after the first call has
+    // revoked the automatically minted Admin lease.
+    if (await isKilled(ctx.stateDir)) {
+      if (!isControlFullAccess()) {
+        await requireControlLease(ctx);
+      }
+      await forceHideComputerUseActivity();
+      return {
+        structuredContent: { killed: true },
+        content: [{ type: "text", text: "Control session is already killed." }],
+      } satisfies CallToolResultLike;
+    }
+
     const { projectId } = await requireControlLease(ctx);
     await setKill(ctx.stateDir);
+    await revokeAdminControlLease(ctx, projectId);
     await forceHideComputerUseActivity();
     await ctx.ledger.append({ type: "control.kill", projectId, reason: input.reason });
     return {
       structuredContent: { killed: true },
-      content: [{ type: "text", text: "Control session killed. All pending actions were rejected." }],
+      content: [{ type: "text", text: "Control session killed. All pending actions were rejected and Admin control authorization was revoked." }],
     } satisfies CallToolResultLike;
   });
 }

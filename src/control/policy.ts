@@ -3,8 +3,8 @@ import { DomainError, ErrorCode } from "../types.js";
 /**
  * Option B (human-confirmed desktop control) policy primitives.
  *
- * Two independent gates must both be satisfied before any of the 4 control
- * tools can be reached at all:
+ * Two independent gates must both be satisfied before any desktop-control
+ * tool can be reached at all:
  *  1. Feature flag `CHATGPT2CODEX_CONTROL` (isControlEnabled) — enabled by
  *     default; set it to "0"/"false"/"off" (case-insensitive) to opt out.
  *  2. A `control` lease preset explicitly granted via project_select
@@ -18,11 +18,26 @@ import { DomainError, ErrorCode } from "../types.js";
 const CONTROL_ENV_FLAG = "CHATGPT2CODEX_CONTROL";
 const CONTROL_ALLOWLIST_ENV_FLAG = "CHATGPT2CODEX_CONTROL_ALLOWLIST";
 const CONTROL_CHATGPT_ENV_FLAG = "CHATGPT2CODEX_CONTROL_CHATGPT";
+const CONTROL_ACCESS_MODE_ENV_FLAG = "CHATGPT2CODEX_CONTROL_ACCESS_MODE";
 
-/** Names of the 4 desktop-control MCP tools. Shared denylist used by:
+export type ControlAccessMode = "restricted" | "full";
+
+export function controlAccessMode(env: NodeJS.ProcessEnv = process.env): ControlAccessMode {
+  const raw = env[CONTROL_ACCESS_MODE_ENV_FLAG]?.trim().toLowerCase();
+  if (!raw || raw === "restricted" || raw === "safe" || raw === "allowlist") return "restricted";
+  if (raw === "full" || raw === "admin" || raw === "full-control") return "full";
+  return "restricted";
+}
+
+export function isControlFullAccess(env: NodeJS.ProcessEnv = process.env): boolean {
+  return controlAccessMode(env) === "full";
+}
+
+/** Names of the desktop-control MCP tools. Shared denylist used by:
  *  - src/server/tools.ts installChatGptToolListHandler (hide from ChatGPT tools/list)
  *  - src/server/actions.ts callRegisteredTool (block the generic call-tool/action bridge) */
 export const CONTROL_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "computer_launch_app",
   "computer_screenshot",
   "computer_request_action",
   "computer_action_status",
@@ -94,9 +109,10 @@ export function isSensitiveApp(appName: string | undefined): boolean {
   return SENSITIVE_APP_DENYLIST.some((entry) => norm.includes(entry));
 }
 
-/** Explicit allowlist of app names control may target, configured via env
- * (comma-separated). Empty by default: no app is reachable until the
- * operator opts an app in, on top of the two gates above. */
+/** Explicit allowlist of app names control may target in restricted mode,
+ * configured via env (comma-separated). Empty by default: no app is reachable
+ * in restricted mode until the operator opts an app in. Full/admin mode
+ * intentionally bypasses this target allowlist. */
 export function controlAllowlist(env: NodeJS.ProcessEnv = process.env): string[] {
   const raw = env[CONTROL_ALLOWLIST_ENV_FLAG];
   if (!raw) return [];
@@ -125,6 +141,8 @@ export interface AssertTargetInput {
  * live frontmost app (2nd gate) — see src/control/tools.ts / executor.ts.
  */
 export function assertAllowedTarget(input: AssertTargetInput): void {
+  if (isControlFullAccess()) return;
+
   if (isSensitiveApp(input.appName)) {
     throw new DomainError(ErrorCode.SENSITIVE_TARGET_BLOCKED, `Target app is blocked by the sensitive-app denylist: ${input.appName}`, {
       appName: input.appName,
