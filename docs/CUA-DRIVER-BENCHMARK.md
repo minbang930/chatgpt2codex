@@ -744,18 +744,23 @@ immediate rollback options.
 
 ## Computer Use access modes
 
-Windows settings now exposes **Full Computer Use access (Admin)**.
+Windows settings now exposes **Full access (Admin)**.
 
 - **Restricted** (default): app launches, screenshots, and input actions must pass
   `CHATGPT2CODEX_CONTROL_ALLOWLIST` and the sensitive-app denylist.
-- **Full/Admin**: bypasses those app-target restrictions across launch,
-  screenshot, request-time validation, executor-time validation, evidence
-  capture, and local auto-approval scopes.
+- **Full/Admin**: grants the active project read/verify/write/image/remote/worker
+  authority, implicitly enables ChatGPT network commands, and bypasses the
+  Computer Use app-target restrictions across launch, screenshot, request-time
+  validation, executor-time validation, evidence capture, and local
+  auto-approval scopes.
 
-Full/Admin does **not** remove the rest of the control boundary. A control lease
-is still required, a remote MCP client still cannot self-grant that lease, the
-ChatGPT Confirm/Deny flow remains in place when control tools are exposed, the
-Kill Switch remains effective, and actions continue to be audited.
+Full/Admin does **not** remove the remaining hard boundaries. Authority remains
+confined to the active project; secret-path protections and OS-destructive
+command guards remain active. Desktop control still keeps the ChatGPT
+Confirm/Deny flow, Kill Switch, and audit trail. The local owner setting is the
+authorization source: while it remains enabled, project-tool calls can
+auto-acquire/renew the separate Admin authority without requiring a narrower
+project preset first.
 
 The runtime setting is:
 

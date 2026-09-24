@@ -158,13 +158,17 @@ export async function revokeAdminControlLease(ctx: ToolContext, projectId?: stri
  *
  * Normal project presets still expire normally. Explicit local desktop-control
  * authorization is persisted separately by the state store and rolls forward
- * transparently after expiry. Full/Admin mode has a second persisted lane, but
- * that lane is considered only for the `control` capability and only while
- * the locally configured Full/Admin mode is active.
+ * transparently after expiry. Full/Admin mode has a second persisted lane.
+ * While the locally configured Full/Admin mode is active, that owner-authorized
+ * lane can satisfy every project capability for the active project. Desktop
+ * `control` remains a special case: it is still auto-minted only by the
+ * Computer Use boundary so the Kill Switch cannot be bypassed by a generic
+ * project-tool call.
  *
- * This function never auto-mints Admin authority by itself; the Computer Use
- * tool boundary does that only after it has resolved the active project and
- * verified that the kill switch is not set.
+ * For non-control capabilities this function may auto-mint Admin authority
+ * from the active project's persisted lease metadata. The Computer Use tool
+ * boundary remains responsible for auto-minting `control` authority after it
+ * has verified that the Kill Switch is not set.
  */
 export async function requireProjectLease(
   ctx: ToolContext,
@@ -190,10 +194,17 @@ export async function requireProjectLease(
     return renewPersistedControlLease(ctx, session, projectId, localControlLease, "controlLease");
   }
 
-  if (capability === "control") {
-    const adminControlLease = adminControlLeaseForSession(session, projectId);
-    if (adminControlLease) {
-      return renewPersistedControlLease(ctx, session, projectId, adminControlLease, "adminControlLease");
+  const adminControlLease = adminControlLeaseForSession(session, projectId);
+  if (adminControlLease) {
+    return renewPersistedControlLease(ctx, session, projectId, adminControlLease, "adminControlLease");
+  }
+
+  if (capability !== "control" && isControlFullAccess()) {
+    const state = sessionObject(session);
+    const projectRoot = [state?.lease, state?.activeLease, state?.controlLease]
+      .find((candidate) => candidate?.projectId === projectId)?.projectRoot;
+    if (projectRoot) {
+      return grantAdminControlLease(ctx, projectId, projectRoot);
     }
   }
 
